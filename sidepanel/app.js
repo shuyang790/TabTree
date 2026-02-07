@@ -143,8 +143,90 @@ const THEME_PRESETS = {
     shadow: "0 10px 24px rgba(0, 0, 0, 0.34)",
     focusRing: "color-mix(in srgb, var(--accent), black 20%)",
     accent: "#83a598"
+  },
+  "tokyonight-day": {
+    mode: "light",
+    bg: "#e1e2e7",
+    bgElev: "#d6d8e0",
+    text: "#3760bf",
+    textMuted: "#6172b0",
+    border: "#b7c1e3",
+    rowHover: "#c4c8da",
+    rowActive: "#b4b8d0",
+    shadow: "0 8px 20px rgba(80, 96, 144, 0.18)",
+    focusRing: "color-mix(in srgb, var(--accent), white 28%)",
+    accent: "#2e7de9"
+  },
+  "tokyonight-night": {
+    mode: "dark",
+    bg: "#1a1b26",
+    bgElev: "#16161e",
+    text: "#c0caf5",
+    textMuted: "#9aa5ce",
+    border: "#2a2f4a",
+    rowHover: "#20253b",
+    rowActive: "#2a3152",
+    shadow: "0 10px 24px rgba(0, 0, 0, 0.36)",
+    focusRing: "color-mix(in srgb, var(--accent), black 22%)",
+    accent: "#7aa2f7"
+  },
+  "kanagawa-lotus": {
+    mode: "light",
+    bg: "#f2ecbc",
+    bgElev: "#e8ddb4",
+    text: "#545464",
+    textMuted: "#717c7c",
+    border: "#c9cbd1",
+    rowHover: "#e4d9b8",
+    rowActive: "#d8ccb0",
+    shadow: "0 8px 20px rgba(84, 84, 100, 0.18)",
+    focusRing: "color-mix(in srgb, var(--accent), white 28%)",
+    accent: "#4d699b"
+  },
+  "kanagawa-wave": {
+    mode: "dark",
+    bg: "#1f1f28",
+    bgElev: "#181820",
+    text: "#dcd7ba",
+    textMuted: "#a6a69c",
+    border: "#2a2a37",
+    rowHover: "#252536",
+    rowActive: "#2d3040",
+    shadow: "0 10px 24px rgba(0, 0, 0, 0.34)",
+    focusRing: "color-mix(in srgb, var(--accent), black 22%)",
+    accent: "#7e9cd8"
+  },
+  "one-light": {
+    mode: "light",
+    bg: "#fafafa",
+    bgElev: "#ffffff",
+    text: "#383a42",
+    textMuted: "#696c77",
+    border: "#d9dce3",
+    rowHover: "#eef1f7",
+    rowActive: "#dde3ee",
+    shadow: "0 8px 20px rgba(56, 58, 66, 0.13)",
+    focusRing: "color-mix(in srgb, var(--accent), white 30%)",
+    accent: "#4078f2"
+  },
+  "one-dark": {
+    mode: "dark",
+    bg: "#282c34",
+    bgElev: "#21252b",
+    text: "#abb2bf",
+    textMuted: "#8a909e",
+    border: "#3a404b",
+    rowHover: "#313741",
+    rowActive: "#3a4250",
+    shadow: "0 10px 24px rgba(0, 0, 0, 0.35)",
+    focusRing: "color-mix(in srgb, var(--accent), black 20%)",
+    accent: "#61afef"
   }
 };
+
+const BASE_LIGHT_PRESET = "base-light";
+const BASE_DARK_PRESET = "base-dark";
+const DEFAULT_ACCENT = "#0b57d0";
 
 const DENSITY_PRESETS = {
   compact: {
@@ -286,19 +368,37 @@ function pruneSelection(tree) {
   state.selectionAnchorTabId = anchor;
 }
 
-function getResolvedMode(settings) {
-  if (settings.themeMode === "auto") {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  }
-  return settings.themeMode === "dark" ? "dark" : "light";
+function getSystemColorMode() {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-function resolveThemeTokens(settings) {
-  const preset = THEME_PRESETS[settings.themePreset];
+function resolvePresetTokens(presetKey, fallbackMode) {
+  if (presetKey === BASE_LIGHT_PRESET) {
+    return BASE_THEME_TOKENS.light;
+  }
+
+  if (presetKey === BASE_DARK_PRESET) {
+    return BASE_THEME_TOKENS.dark;
+  }
+
+  const preset = THEME_PRESETS[presetKey];
   if (preset) {
     return preset;
   }
-  return BASE_THEME_TOKENS[getResolvedMode(settings)];
+
+  return BASE_THEME_TOKENS[fallbackMode] || BASE_THEME_TOKENS.light;
+}
+
+function resolveThemeTokens(settings) {
+  const mode = getSystemColorMode();
+  const presetKey = mode === "dark"
+    ? settings.themePresetDark
+    : settings.themePresetLight;
+
+  return {
+    mode,
+    tokens: resolvePresetTokens(presetKey, mode)
+  };
 }
 
 function applyThemeFromSettings() {
@@ -308,7 +408,7 @@ function applyThemeFromSettings() {
 
   const root = document.documentElement;
   const density = DENSITY_PRESETS[state.settings.density] || DENSITY_PRESETS.comfortable;
-  const themeTokens = resolveThemeTokens(state.settings);
+  const { mode, tokens: themeTokens } = resolveThemeTokens(state.settings);
 
   const cssTokenMap = {
     "--bg": themeTokens.bg,
@@ -326,9 +426,9 @@ function applyThemeFromSettings() {
     root.style.setProperty(key, value);
   }
 
-  const accentColor = state.settings.accentColor || themeTokens.accent || "#0b57d0";
+  const accentColor = state.settings.accentColor || themeTokens.accent || DEFAULT_ACCENT;
 
-  root.dataset.theme = themeTokens.mode || getResolvedMode(state.settings);
+  root.dataset.theme = mode;
   root.style.setProperty("--accent", accentColor);
   root.style.setProperty("--font-scale", String(state.settings.fontScale));
   root.style.setProperty("--indent", `${state.settings.indentPx}px`);
@@ -1251,10 +1351,11 @@ function bindEvents() {
 
     const patch = { [target.name]: value };
 
-    if (target.name === "themePreset") {
-      const preset = THEME_PRESETS[value];
-      if (preset?.accent) {
-        patch.accentColor = preset.accent;
+    if (target.name === "themePresetLight" || target.name === "themePresetDark") {
+      const fallbackMode = target.name === "themePresetDark" ? "dark" : "light";
+      const themeTokens = resolvePresetTokens(value, fallbackMode);
+      if (themeTokens?.accent) {
+        patch.accentColor = themeTokens.accent;
       }
     }
 
@@ -1289,7 +1390,7 @@ function bindEvents() {
   });
 
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    if (state.settings?.themeMode === "auto" || state.settings?.themePreset === "auto") {
+    if (state.settings) {
       applyThemeFromSettings();
     }
   });

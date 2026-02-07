@@ -7,8 +7,8 @@ export const SYNC_MAX_NODES_PER_WINDOW = 80;
 export const SYNC_MAX_URL_LENGTH = 220;
 
 export const DEFAULT_SETTINGS = {
-  themeMode: "auto",
-  themePreset: "auto",
+  themePresetLight: "base-light",
+  themePresetDark: "base-dark",
   accentColor: "#0b57d0",
   density: "comfortable",
   fontScale: 1,

@@ -41,32 +41,67 @@
 
       <form id="settings-form" class="settings-form">
         <label>
-          Theme Mode
-          <select name="themeMode">
-            <option value="auto">Auto</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
+          Light Appearance
+          <select name="themePresetLight">
+            <option value="base-light">Base Light</option>
+            <optgroup label="Catppuccin">
+              <option value="catppuccin-latte">Catppuccin — Latte</option>
+              <option value="catppuccin-frappe">Catppuccin — Frappe</option>
+              <option value="catppuccin-macchiato">Catppuccin — Macchiato</option>
+              <option value="catppuccin-mocha">Catppuccin — Mocha</option>
+            </optgroup>
+            <optgroup label="Everforest">
+              <option value="everforest-light">Everforest — Light</option>
+              <option value="everforest-dark">Everforest — Dark</option>
+            </optgroup>
+            <optgroup label="Gruvbox">
+              <option value="gruvbox-light">Gruvbox — Light</option>
+              <option value="gruvbox-dark">Gruvbox — Dark</option>
+            </optgroup>
+            <optgroup label="Tokyo Night">
+              <option value="tokyonight-day">Tokyo Night — Day</option>
+              <option value="tokyonight-night">Tokyo Night — Night</option>
+            </optgroup>
+            <optgroup label="Kanagawa">
+              <option value="kanagawa-lotus">Kanagawa — Lotus</option>
+              <option value="kanagawa-wave">Kanagawa — Wave</option>
+            </optgroup>
+            <optgroup label="One">
+              <option value="one-light">One — Light</option>
+              <option value="one-dark">One — Dark</option>
+            </optgroup>
           </select>
         </label>
 
         <label>
-          Theme Preset
-          <select name="themePreset">
-            <option value="auto">Auto (Browser)</option>
-            <option value="custom">Custom (Current)</option>
+          Dark Appearance
+          <select name="themePresetDark">
+            <option value="base-dark">Base Dark</option>
             <optgroup label="Catppuccin">
-              <option value="catppuccin-latte">Latte</option>
-              <option value="catppuccin-frappe">Frappe</option>
-              <option value="catppuccin-macchiato">Macchiato</option>
-              <option value="catppuccin-mocha">Mocha</option>
+              <option value="catppuccin-latte">Catppuccin — Latte</option>
+              <option value="catppuccin-frappe">Catppuccin — Frappe</option>
+              <option value="catppuccin-macchiato">Catppuccin — Macchiato</option>
+              <option value="catppuccin-mocha">Catppuccin — Mocha</option>
             </optgroup>
             <optgroup label="Everforest">
-              <option value="everforest-light">Light</option>
-              <option value="everforest-dark">Dark</option>
+              <option value="everforest-light">Everforest — Light</option>
+              <option value="everforest-dark">Everforest — Dark</option>
             </optgroup>
             <optgroup label="Gruvbox">
-              <option value="gruvbox-light">Light</option>
-              <option value="gruvbox-dark">Dark</option>
+              <option value="gruvbox-light">Gruvbox — Light</option>
+              <option value="gruvbox-dark">Gruvbox — Dark</option>
+            </optgroup>
+            <optgroup label="Tokyo Night">
+              <option value="tokyonight-day">Tokyo Night — Day</option>
+              <option value="tokyonight-night">Tokyo Night — Night</option>
+            </optgroup>
+            <optgroup label="Kanagawa">
+              <option value="kanagawa-lotus">Kanagawa — Lotus</option>
+              <option value="kanagawa-wave">Kanagawa — Wave</option>
+            </optgroup>
+            <optgroup label="One">
+              <option value="one-light">One — Light</option>
+              <option value="one-dark">One — Dark</option>
             </optgroup>
           </select>
         </label>

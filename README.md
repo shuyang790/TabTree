@@ -14,9 +14,10 @@ Tree-style vertical tabs in Chrome's side panel with sync-backed appearance/sett
 - Tab group subtrees with group name and color
 - Parent-close behavior: promotes children
 - Commands including add-child tab (user-configurable)
-- Theme auto mode via browser light/dark preference
-- Preset themes: Catppuccin (4), Everforest (2), Gruvbox (2)
-- Appearance customization (editable preset overrides, accent, multiple density presets, font scale, indent, radius)
+- Appearance always follows browser/OS light-dark preference
+- Preset themes: Catppuccin (4), Everforest (2), Gruvbox (2), Tokyo Night (2), Kanagawa (2), One (2)
+- Separate Light and Dark appearance presets with shared accent color
+- Appearance customization (multiple density presets, font scale, indent, radius)
 - Close-tree confirmation dialog (2+ tabs) with sync-persisted skip option
 - Settings persisted to `chrome.storage.sync`
 - Window tree state persisted to `chrome.storage.local`
