@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TabTree</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-dot"></span>
+          <span class="brand-text">TabTree</span>
+        </div>
+        <div class="topbar-actions">
+          <button id="add-child-global" class="btn" title="Add child tab to active tab">Add Child</button>
+          <button id="open-settings" class="btn btn-ghost" title="Open settings">Settings</button>
+        </div>
+      </header>
+
+      <div id="search-wrap" class="search-wrap" data-drop-active="false">
+        <input id="search" type="search" placeholder="Search tabs by title or URL" />
+        <div id="search-drop-hint" class="search-drop-hint" hidden>Drop here to move to top-level</div>
+      </div>
+
+      <div id="batch-bar" class="batch-bar" hidden>
+        <span id="batch-count" class="batch-count"></span>
+        <div class="batch-actions">
+          <button id="batch-close" class="btn btn-danger">Close Selected</button>
+          <button id="batch-root" class="btn">Move to Root</button>
+          <button id="batch-clear" class="btn btn-ghost">Clear</button>
+        </div>
+      </div>
+
+      <section id="tree-root" class="tree-root" aria-label="Tab tree" role="tree"></section>
+
+      <footer class="hint-bar" id="hint-bar"></footer>
+    </div>
+
+    <aside id="settings-panel" class="settings-panel" hidden>
+      <div class="settings-head">
+        <h2>Appearance & Behavior</h2>
+        <button id="close-settings" class="btn btn-ghost">Close</button>
+      </div>
+
+      <form id="settings-form" class="settings-form">
+        <label>
+          Theme Mode
+          <select name="themeMode">
+            <option value="auto">Auto</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+
+        <label>
+          Theme Preset
+          <select name="themePreset">
+            <option value="auto">Auto (Browser)</option>
+            <option value="custom">Custom (Current)</option>
+            <optgroup label="Catppuccin">
+              <option value="catppuccin-latte">Latte</option>
+              <option value="catppuccin-frappe">Frappe</option>
+              <option value="catppuccin-macchiato">Macchiato</option>
+              <option value="catppuccin-mocha">Mocha</option>
+            </optgroup>
+            <optgroup label="Everforest">
+              <option value="everforest-light">Light</option>
+              <option value="everforest-dark">Dark</option>
+            </optgroup>
+            <optgroup label="Gruvbox">
+              <option value="gruvbox-light">Light</option>
+              <option value="gruvbox-dark">Dark</option>
+            </optgroup>
+          </select>
+        </label>
+
+        <label>
+          Accent Color
+          <input type="color" name="accentColor" />
+        </label>
+
+        <label>
+          Density
+          <select name="density">
+            <option value="compact">Compact</option>
+            <option value="comfortable">Comfortable</option>
+            <option value="cozy">Cozy</option>
+            <option value="spacious">Spacious</option>
+          </select>
+        </label>
+
+        <label>
+          Font Scale
+          <input type="range" name="fontScale" min="0.9" max="1.2" step="0.05" />
+        </label>
+
+        <label>
+          Indent Width
+          <input type="range" name="indentPx" min="10" max="28" step="1" />
+        </label>
+
+        <label>
+          Corner Radius
+          <input type="range" name="radiusPx" min="2" max="16" step="1" />
+        </label>
+
+        <label class="checkbox">
+          <input type="checkbox" name="showFavicons" />
+          Show favicons
+        </label>
+
+        <label class="checkbox">
+          <input type="checkbox" name="showCloseButton" />
+          Show close buttons
+        </label>
+
+        <label class="checkbox">
+          <input type="checkbox" name="showGroupHeaders" />
+          Show group subtrees
+        </label>
+
+        <label class="checkbox">
+          <input type="checkbox" name="shortcutHintsEnabled" />
+          Show shortcut hints
+        </label>
+
+        <label class="checkbox">
+          <input type="checkbox" name="confirmCloseSubtree" />
+          Confirm before closing tree (2+ tabs)
+        </label>
+      </form>
+    </aside>
+
+    <div id="confirm-overlay" class="confirm-overlay" hidden>
+      <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h3 id="confirm-title">Close tabs?</h3>
+        <p id="confirm-message" class="confirm-message"></p>
+        <label class="checkbox confirm-check">
+          <input id="confirm-skip" type="checkbox" />
+          Don't ask again
+        </label>
+        <div class="confirm-actions">
+          <button id="confirm-cancel" class="btn btn-ghost">Cancel</button>
+          <button id="confirm-ok" class="btn btn-danger">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

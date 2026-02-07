@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "TabTree",
+  "description": "Tree-style vertical tabs in Chrome side panel.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "140",
+  "permissions": ["tabs", "storage", "sidePanel", "tabGroups", "sessions"],
+  "background": {
+    "service_worker": "background/service_worker.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "action": {
+    "default_title": "TabTree"
+  },
+  "commands": {
+    "add-child-tab": {
+      "description": "Add a child tab under the active tab"
+    },
+    "focus-side-panel": {
+      "description": "Focus TabTree side panel",
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      }
+    },
+    "promote-tab-level": {
+      "description": "Promote active tab one tree level"
+    },
+    "toggle-collapse-node": {
+      "description": "Toggle collapse for active tab node"
+    },
+    "move-tab-under-previous-sibling": {
+      "description": "Reparent active tab under previous root sibling"
+    }
+  }
+}

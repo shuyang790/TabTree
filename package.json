@@ -1,0 +1,15 @@
+{
+  "name": "tabtree-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "npm run test:unit",
+    "test:unit": "node --test",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "PW_HEADLESS=0 playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0"
+  }
+}

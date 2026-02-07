@@ -1,0 +1,750 @@
+import { MESSAGE_TYPES, TREE_ACTIONS } from "../shared/constants.js";
+import {
+  buildTreeFromTabs,
+  createEmptyWindowTree,
+  getDescendantNodeIds,
+  inferTreeFromSyncSnapshot,
+  moveNode,
+  nodeIdFromTabId,
+  removeNodePromoteChildren,
+  removeSubtree,
+  setActiveTab,
+  sortTreeByIndex,
+  toggleNodeCollapsed,
+  upsertTabNode
+} from "../shared/treeModel.js";
+import {
+  createDebouncedPersister,
+  loadSettings,
+  loadSyncSnapshot,
+  loadWindowTree,
+  removeWindowTree,
+  saveSettings,
+  saveSyncSnapshot,
+  saveWindowTree
+} from "../shared/treeStore.js";
+
+const state = {
+  settings: null,
+  windows: {},
+  initialized: false,
+  syncSnapshot: null
+};
+
+const schedulePersist = createDebouncedPersister(async () => {
+  await Promise.all(Object.values(state.windows).map((tree) => saveWindowTree(tree)));
+  await saveSyncSnapshot(state.windows);
+});
+
+function getStatePayload(targetWindowId = null) {
+  return {
+    settings: state.settings,
+    windows: state.windows,
+    focusedWindowId: targetWindowId
+  };
+}
+
+function broadcastState(windowId = null) {
+  chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.STATE_UPDATED,
+    payload: getStatePayload(windowId)
+  }).catch(() => {
+    // No active side panel listener.
+  });
+}
+
+function windowTree(windowId) {
+  if (!state.windows[windowId]) {
+    state.windows[windowId] = createEmptyWindowTree(windowId);
+  }
+  return state.windows[windowId];
+}
+
+function setWindowTree(nextTree) {
+  state.windows[nextTree.windowId] = nextTree;
+  schedulePersist();
+  broadcastState(nextTree.windowId);
+}
+
+async function getTab(tabId) {
+  try {
+    return await chrome.tabs.get(tabId);
+  } catch {
+    return null;
+  }
+}
+
+async function getActiveTab() {
+  const queryAttempts = [
+    { active: true, lastFocusedWindow: true },
+    { active: true, currentWindow: true },
+    { active: true }
+  ];
+
+  for (const queryInfo of queryAttempts) {
+    try {
+      const tabs = await chrome.tabs.query(queryInfo);
+      if (tabs[0]) {
+        return tabs[0];
+      }
+    } catch {
+      // Continue to fallback attempts.
+    }
+  }
+
+  try {
+    const lastFocused = await chrome.windows.getLastFocused({ populate: true });
+    const activeFromWindow = (lastFocused.tabs || []).find((tab) => tab.active);
+    if (activeFromWindow) {
+      return activeFromWindow;
+    }
+  } catch {
+    // Continue to state fallback.
+  }
+
+  const trees = Object.values(state.windows);
+  for (const tree of trees) {
+    if (!tree?.selectedTabId) {
+      continue;
+    }
+    const fallbackTab = await getTab(tree.selectedTabId);
+    if (fallbackTab) {
+      return fallbackTab;
+    }
+  }
+
+  return null;
+}
+
+async function refreshGroupMetadata(windowId) {
+  const current = windowTree(windowId);
+  let groups = [];
+  try {
+    groups = await chrome.tabGroups.query({ windowId });
+  } catch {
+    groups = [];
+  }
+
+  const groupMap = {};
+  for (const group of groups) {
+    groupMap[group.id] = {
+      id: group.id,
+      title: group.title || "Unnamed group",
+      color: group.color,
+      collapsed: !!group.collapsed
+    };
+  }
+
+  setWindowTree({
+    ...current,
+    groups: groupMap,
+    updatedAt: Date.now()
+  });
+}
+
+function childInsertIndex(tree, parentNodeId, fallbackIndex) {
+  const parentNode = tree.nodes[parentNodeId];
+  if (!parentNode) {
+    return fallbackIndex;
+  }
+  let maxIndex = typeof parentNode.index === "number" ? parentNode.index : fallbackIndex;
+  const descendants = getDescendantNodeIds(tree, parentNodeId);
+  for (const descId of descendants) {
+    const node = tree.nodes[descId];
+    if (node && typeof node.index === "number") {
+      maxIndex = Math.max(maxIndex, node.index);
+    }
+  }
+  return maxIndex + 1;
+}
+
+function canReparent(tree, movingNodeId, parentNodeId) {
+  const moving = tree.nodes[movingNodeId];
+  if (!moving) {
+    return false;
+  }
+  if (!parentNodeId) {
+    return true;
+  }
+  const parent = tree.nodes[parentNodeId];
+  if (!parent) {
+    return false;
+  }
+  // Keep pinned tabs in the pinned zone.
+  if (!!moving.pinned !== !!parent.pinned) {
+    return false;
+  }
+  return true;
+}
+
+function dedupeRootNodeIds(tree, nodeIds) {
+  const picked = new Set(nodeIds);
+  return nodeIds.filter((id) => {
+    let current = tree.nodes[id]?.parentNodeId || null;
+    while (current) {
+      if (picked.has(current)) {
+        return false;
+      }
+      current = tree.nodes[current]?.parentNodeId || null;
+    }
+    return true;
+  });
+}
+
+function sortNodeIdsByTabIndex(tree, nodeIds) {
+  return [...nodeIds].sort((a, b) => (tree.nodes[a]?.index ?? 0) - (tree.nodes[b]?.index ?? 0));
+}
+
+async function groupLiveTabIdsByWindow(tabIds) {
+  const grouped = new Map();
+  const tabs = await Promise.all(tabIds.map((tabId) => getTab(tabId)));
+  for (const tab of tabs) {
+    if (!tab) {
+      continue;
+    }
+    if (!grouped.has(tab.windowId)) {
+      grouped.set(tab.windowId, []);
+    }
+    grouped.get(tab.windowId).push(tab.id);
+  }
+  return grouped;
+}
+
+async function ensureInitialized() {
+  if (state.initialized) {
+    return;
+  }
+  state.settings = await loadSettings();
+  state.syncSnapshot = await loadSyncSnapshot();
+  await hydrateAllWindows();
+  state.initialized = true;
+
+  try {
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  } catch {
+    // Best effort.
+  }
+}
+
+async function hydrateAllWindows() {
+  const windows = await chrome.windows.getAll({ populate: true });
+  for (const win of windows) {
+    await hydrateWindow(win.id, win.tabs || []);
+  }
+}
+
+async function hydrateWindow(windowId, tabs) {
+  const previous = await loadWindowTree(windowId);
+  let tree;
+
+  if (tabs.length) {
+    if (previous) {
+      tree = buildTreeFromTabs(tabs, previous);
+    } else {
+      tree = inferTreeFromSyncSnapshot(windowId, tabs, state.syncSnapshot) || buildTreeFromTabs(tabs);
+    }
+  } else {
+    tree = createEmptyWindowTree(windowId);
+  }
+
+  let groups = [];
+  try {
+    groups = await chrome.tabGroups.query({ windowId });
+  } catch {
+    groups = [];
+  }
+  tree.groups = {};
+  for (const group of groups) {
+    tree.groups[group.id] = {
+      id: group.id,
+      title: group.title || "Unnamed group",
+      color: group.color,
+      collapsed: !!group.collapsed
+    };
+  }
+
+  state.windows[windowId] = tree;
+  await saveWindowTree(tree);
+}
+
+async function addChildTab(parentTabId) {
+  const parentTab = await getTab(parentTabId);
+  if (!parentTab) {
+    return;
+  }
+
+  let tree = windowTree(parentTab.windowId);
+  const parentNodeId = nodeIdFromTabId(parentTabId);
+  // Keep tree and browser model aligned even if parent was missing from tree cache.
+  if (!tree.nodes[parentNodeId]) {
+    tree = upsertTabNode(tree, parentTab);
+    setWindowTree(tree);
+  }
+  const insertIndex = childInsertIndex(tree, parentNodeId, parentTab.index + 1);
+
+  const created = await chrome.tabs.create({
+    windowId: parentTab.windowId,
+    index: insertIndex,
+    active: true,
+    openerTabId: parentTabId
+  });
+
+  if (Number.isInteger(parentTab.groupId) && parentTab.groupId >= 0) {
+    try {
+      await chrome.tabs.group({ groupId: parentTab.groupId, tabIds: [created.id] });
+    } catch {
+      // Grouping is best effort.
+    }
+  }
+
+  const next = upsertTabNode(windowTree(parentTab.windowId), created, {
+    parentNodeId
+  });
+  setWindowTree(next);
+}
+
+async function closeSubtree(windowId, tabId) {
+  const tree = windowTree(windowId);
+  const nodeId = nodeIdFromTabId(tabId);
+  const { tree: next, removedTabIds } = removeSubtree(tree, nodeId);
+  if (!removedTabIds.length) {
+    return;
+  }
+  setWindowTree(next);
+  await chrome.tabs.remove(removedTabIds);
+}
+
+async function activateTab(tabId) {
+  const tab = await getTab(tabId);
+  if (!tab) {
+    return;
+  }
+  await chrome.tabs.update(tabId, { active: true });
+  if (tab.windowId) {
+    await chrome.windows.update(tab.windowId, { focused: true });
+  }
+}
+
+async function batchCloseSubtrees(tabIds) {
+  const grouped = await groupLiveTabIdsByWindow(tabIds);
+  for (const [windowId, ids] of grouped.entries()) {
+    const tree = windowTree(windowId);
+    const nodeIds = ids.map((id) => nodeIdFromTabId(id)).filter((id) => !!tree.nodes[id]);
+    const roots = dedupeRootNodeIds(tree, Array.from(new Set(nodeIds)));
+    if (!roots.length) {
+      continue;
+    }
+
+    let next = tree;
+    const removeTabIds = [];
+    for (const rootNodeId of roots) {
+      const removed = removeSubtree(next, rootNodeId);
+      next = removed.tree;
+      removeTabIds.push(...removed.removedTabIds);
+    }
+
+    const uniqueRemoveIds = Array.from(new Set(removeTabIds));
+    setWindowTree(next);
+    if (uniqueRemoveIds.length) {
+      await chrome.tabs.remove(uniqueRemoveIds);
+    }
+  }
+}
+
+async function batchMoveToRoot(tabIds) {
+  const grouped = await groupLiveTabIdsByWindow(tabIds);
+  for (const [windowId, ids] of grouped.entries()) {
+    const tree = windowTree(windowId);
+    const nodeIds = ids.map((id) => nodeIdFromTabId(id)).filter((id) => !!tree.nodes[id]);
+    const orderedNodeIds = sortNodeIdsByTabIndex(tree, Array.from(new Set(nodeIds)));
+    if (!orderedNodeIds.length) {
+      continue;
+    }
+
+    let next = tree;
+    for (const id of orderedNodeIds) {
+      next = moveNode(next, id, null, null);
+    }
+    next = sortTreeByIndex(next);
+    setWindowTree(next);
+
+    const orderedTabIds = orderedNodeIds.map((id) => next.nodes[id]?.tabId).filter((id) => Number.isFinite(id));
+    if (orderedTabIds.length) {
+      try {
+        await chrome.tabs.move(orderedTabIds, { index: -1 });
+      } catch {
+        // Best effort in mixed pin/group states.
+      }
+    }
+  }
+}
+
+async function batchReparent(tabIds, newParentTabId) {
+  const parentTab = await getTab(newParentTabId);
+  if (!parentTab) {
+    return;
+  }
+
+  const tree = windowTree(parentTab.windowId);
+  const parentNodeId = nodeIdFromTabId(newParentTabId);
+  if (!tree.nodes[parentNodeId]) {
+    return;
+  }
+
+  const tabs = await Promise.all(tabIds.map((tabId) => getTab(tabId)));
+  const sameWindowTabIds = tabs
+    .filter((tab) => tab && tab.windowId === parentTab.windowId && tab.id !== newParentTabId)
+    .map((tab) => tab.id);
+
+  const sourceNodeIds = sameWindowTabIds
+    .map((id) => nodeIdFromTabId(id))
+    .filter((id) => !!tree.nodes[id]);
+
+  const orderedNodeIds = sortNodeIdsByTabIndex(tree, Array.from(new Set(sourceNodeIds)));
+  if (!orderedNodeIds.length) {
+    return;
+  }
+
+  let next = tree;
+  for (const sourceNodeId of orderedNodeIds) {
+    if (!canReparent(next, sourceNodeId, parentNodeId)) {
+      continue;
+    }
+    next = moveNode(next, sourceNodeId, parentNodeId, null);
+  }
+
+  next = sortTreeByIndex(next);
+  setWindowTree(next);
+
+  const moveTabIds = orderedNodeIds.map((id) => next.nodes[id]?.tabId).filter((id) => Number.isFinite(id));
+  if (moveTabIds.length) {
+    try {
+      const insertIndex = childInsertIndex(next, parentNodeId, parentTab.index + 1);
+      await chrome.tabs.move(moveTabIds, { index: insertIndex });
+    } catch {
+      // Best effort.
+    }
+  }
+
+  if (Number.isInteger(parentTab.groupId) && parentTab.groupId >= 0 && moveTabIds.length) {
+    try {
+      await chrome.tabs.group({ groupId: parentTab.groupId, tabIds: moveTabIds });
+    } catch {
+      // Best effort.
+    }
+  }
+}
+
+async function handleTreeAction(payload) {
+  const { type } = payload;
+  if (type === TREE_ACTIONS.ADD_CHILD_TAB) {
+    return addChildTab(payload.parentTabId);
+  }
+
+  if (type === TREE_ACTIONS.ACTIVATE_TAB) {
+    return activateTab(payload.tabId);
+  }
+
+  if (type === TREE_ACTIONS.BATCH_CLOSE_SUBTREES) {
+    return batchCloseSubtrees(payload.tabIds || []);
+  }
+
+  if (type === TREE_ACTIONS.BATCH_MOVE_TO_ROOT) {
+    return batchMoveToRoot(payload.tabIds || []);
+  }
+
+  if (type === TREE_ACTIONS.BATCH_REPARENT) {
+    return batchReparent(payload.tabIds || [], payload.newParentTabId);
+  }
+
+  const tab = await getTab(payload.tabId);
+  if (!tab) {
+    return;
+  }
+  const tree = windowTree(tab.windowId);
+  const nodeId = nodeIdFromTabId(payload.tabId);
+
+  if (type === TREE_ACTIONS.TOGGLE_COLLAPSE) {
+    setWindowTree(toggleNodeCollapsed(tree, nodeId));
+    return;
+  }
+
+  if (type === TREE_ACTIONS.REPARENT_TAB) {
+    const parentNodeId = payload.newParentTabId ? nodeIdFromTabId(payload.newParentTabId) : null;
+    if (!canReparent(tree, nodeId, parentNodeId)) {
+      return;
+    }
+    if (!parentNodeId && payload.targetTabId) {
+      const targetNode = tree.nodes[nodeIdFromTabId(payload.targetTabId)];
+      const sourceNode = tree.nodes[nodeId];
+      if (targetNode && sourceNode && !!targetNode.pinned !== !!sourceNode.pinned) {
+        return;
+      }
+    }
+
+    let next = moveNode(tree, nodeId, parentNodeId, payload.newIndex ?? null);
+    next = sortTreeByIndex(next);
+    setWindowTree(next);
+
+    if (typeof payload.browserIndex === "number") {
+      try {
+        await chrome.tabs.move(payload.tabId, { index: payload.browserIndex });
+      } catch {
+        // Best effort.
+      }
+    }
+
+    if (parentNodeId) {
+      const parentTabId = tree.nodes[parentNodeId]?.tabId;
+      const parentTab = parentTabId ? await getTab(parentTabId) : null;
+      if (parentTab && Number.isInteger(parentTab.groupId) && parentTab.groupId >= 0) {
+        try {
+          await chrome.tabs.group({ groupId: parentTab.groupId, tabIds: [payload.tabId] });
+        } catch {
+          // Best effort.
+        }
+      }
+    }
+    return;
+  }
+
+  if (type === TREE_ACTIONS.MOVE_TO_ROOT) {
+    let next = moveNode(tree, nodeId, null, payload.index ?? null);
+    next = sortTreeByIndex(next);
+    setWindowTree(next);
+
+    if (typeof payload.browserIndex === "number") {
+      try {
+        await chrome.tabs.move(payload.tabId, { index: payload.browserIndex });
+      } catch {
+        // Best effort.
+      }
+    }
+    return;
+  }
+
+  if (type === TREE_ACTIONS.CLOSE_SUBTREE) {
+    await closeSubtree(tab.windowId, payload.tabId);
+  }
+}
+
+async function promoteActiveTab() {
+  const active = await getActiveTab();
+  if (!active) {
+    return;
+  }
+  const tree = windowTree(active.windowId);
+  const node = tree.nodes[nodeIdFromTabId(active.id)];
+  if (!node || !node.parentNodeId) {
+    return;
+  }
+  const parent = tree.nodes[node.parentNodeId];
+  const grandParentId = parent?.parentNodeId || null;
+  setWindowTree(moveNode(tree, node.nodeId, grandParentId));
+}
+
+async function moveActiveUnderPreviousRootSibling() {
+  const active = await getActiveTab();
+  if (!active) {
+    return;
+  }
+  const tree = windowTree(active.windowId);
+  const nodeId = nodeIdFromTabId(active.id);
+  const node = tree.nodes[nodeId];
+  if (!node || node.parentNodeId) {
+    return;
+  }
+  const rootIndex = tree.rootNodeIds.indexOf(nodeId);
+  if (rootIndex <= 0) {
+    return;
+  }
+  const previousRoot = tree.rootNodeIds[rootIndex - 1];
+  setWindowTree(moveNode(tree, nodeId, previousRoot));
+}
+
+async function toggleActiveNodeCollapse() {
+  const active = await getActiveTab();
+  if (!active) {
+    return;
+  }
+  const tree = windowTree(active.windowId);
+  setWindowTree(toggleNodeCollapsed(tree, nodeIdFromTabId(active.id)));
+}
+
+async function focusSidePanel() {
+  const active = await getActiveTab();
+  const windowId = active?.windowId;
+  if (!windowId) {
+    return;
+  }
+  try {
+    await chrome.sidePanel.open({ windowId });
+  } catch {
+    // Best effort.
+  }
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  await ensureInitialized();
+});
+
+chrome.runtime.onStartup.addListener(async () => {
+  await ensureInitialized();
+});
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  (async () => {
+    await ensureInitialized();
+
+    if (message?.type === MESSAGE_TYPES.GET_STATE) {
+      const active = await getActiveTab();
+      sendResponse({ ok: true, payload: getStatePayload(active?.windowId || null) });
+      return;
+    }
+
+    if (message?.type === MESSAGE_TYPES.PATCH_SETTINGS) {
+      state.settings = await saveSettings({ ...state.settings, ...message.payload.settingsPatch });
+      broadcastState();
+      sendResponse({ ok: true, payload: state.settings });
+      return;
+    }
+
+    if (message?.type === MESSAGE_TYPES.TREE_ACTION) {
+      await handleTreeAction(message.payload);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    sendResponse({ ok: false, error: "Unknown message type" });
+  })().catch((err) => {
+    sendResponse({ ok: false, error: String(err) });
+  });
+
+  return true;
+});
+
+chrome.tabs.onCreated.addListener(async (tab) => {
+  await ensureInitialized();
+  const tree = windowTree(tab.windowId);
+  // Do not infer parent from opener for regular browser new-tab flows.
+  // Child relationships are only created through explicit tree actions.
+  setWindowTree(upsertTabNode(tree, tab));
+});
+
+chrome.tabs.onUpdated.addListener(async (tabId, _changeInfo, tab) => {
+  await ensureInitialized();
+  const tree = windowTree(tab.windowId);
+  setWindowTree(upsertTabNode(tree, tab));
+
+  if (tab.active) {
+    setWindowTree(setActiveTab(windowTree(tab.windowId), tabId));
+  }
+});
+
+chrome.tabs.onMoved.addListener(async (tabId) => {
+  await ensureInitialized();
+  const tab = await getTab(tabId);
+  if (!tab) {
+    return;
+  }
+  const tree = windowTree(tab.windowId);
+  const next = sortTreeByIndex(upsertTabNode(tree, tab));
+  setWindowTree(next);
+});
+
+chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+  await ensureInitialized();
+  const tree = windowTree(windowId);
+  setWindowTree(setActiveTab(tree, tabId));
+});
+
+chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
+  await ensureInitialized();
+  const tree = windowTree(removeInfo.windowId);
+  const nodeId = nodeIdFromTabId(tabId);
+  if (!tree.nodes[nodeId]) {
+    return;
+  }
+  setWindowTree(removeNodePromoteChildren(tree, nodeId));
+});
+
+chrome.tabs.onAttached.addListener(async (tabId, attachInfo) => {
+  await ensureInitialized();
+  const tab = await getTab(tabId);
+  if (!tab) {
+    return;
+  }
+  const tree = windowTree(attachInfo.newWindowId);
+  setWindowTree(upsertTabNode(tree, tab));
+});
+
+chrome.tabs.onDetached.addListener(async (tabId, detachInfo) => {
+  await ensureInitialized();
+  const tree = windowTree(detachInfo.oldWindowId);
+  const nodeId = nodeIdFromTabId(tabId);
+  if (!tree.nodes[nodeId]) {
+    return;
+  }
+  setWindowTree(removeNodePromoteChildren(tree, nodeId));
+});
+
+chrome.windows.onRemoved.addListener(async (windowId) => {
+  await ensureInitialized();
+  delete state.windows[windowId];
+  await removeWindowTree(windowId);
+  schedulePersist();
+  broadcastState();
+});
+
+chrome.tabGroups.onCreated.addListener(async (group) => {
+  await ensureInitialized();
+  await refreshGroupMetadata(group.windowId);
+});
+
+chrome.tabGroups.onUpdated.addListener(async (group) => {
+  await ensureInitialized();
+  await refreshGroupMetadata(group.windowId);
+});
+
+chrome.tabGroups.onMoved.addListener(async (group) => {
+  await ensureInitialized();
+  await refreshGroupMetadata(group.windowId);
+});
+
+chrome.tabGroups.onRemoved.addListener(async (group) => {
+  await ensureInitialized();
+  await refreshGroupMetadata(group.windowId);
+});
+
+chrome.commands.onCommand.addListener(async (command) => {
+  await ensureInitialized();
+
+  if (command === "add-child-tab") {
+    const active = await getActiveTab();
+    if (active) {
+      await addChildTab(active.id);
+    }
+    return;
+  }
+
+  if (command === "focus-side-panel") {
+    await focusSidePanel();
+    return;
+  }
+
+  if (command === "promote-tab-level") {
+    await promoteActiveTab();
+    return;
+  }
+
+  if (command === "toggle-collapse-node") {
+    await toggleActiveNodeCollapse();
+    return;
+  }
+
+  if (command === "move-tab-under-previous-sibling") {
+    await moveActiveUnderPreviousRootSibling();
+  }
+});
+
+void ensureInitialized();
