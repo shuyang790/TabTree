@@ -621,7 +621,8 @@ async function executeCloseAction(action) {
   if (action.kind === "single") {
     await send(MESSAGE_TYPES.TREE_ACTION, {
       type: TREE_ACTIONS.CLOSE_SUBTREE,
-      tabId: action.tabId
+      tabId: action.tabId,
+      includeDescendants: action.includeDescendants ?? true
     });
     return;
   }
@@ -919,17 +920,33 @@ function createNodeRow(tree, node, options = {}) {
   actions.appendChild(addChild);
 
   if (state.settings?.showCloseButton) {
+    const closesSubtree = node.childNodeIds.length > 0 && !!node.collapsed;
     const close = document.createElement("button");
     close.className = "icon-btn";
     close.textContent = "×";
-    close.title = "Close subtree";
+    close.title = closesSubtree ? "Close subtree" : "Close tab";
     close.addEventListener("click", async (event) => {
       event.stopPropagation();
+
+      if (!closesSubtree) {
+        await requestClose({
+          kind: "single",
+          tabId: node.tabId,
+          includeDescendants: false
+        }, 1, false);
+        return;
+      }
+
       const plan = buildClosePlan(tree, [node.tabId]);
       if (!plan.rootTabIds.length) {
         return;
       }
-      await requestClose({ kind: "single", tabId: plan.rootTabIds[0] }, plan.totalTabs, false);
+
+      await requestClose({
+        kind: "single",
+        tabId: plan.rootTabIds[0],
+        includeDescendants: true
+      }, plan.totalTabs, false);
     });
     actions.appendChild(close);
   }

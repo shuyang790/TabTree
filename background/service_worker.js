@@ -320,7 +320,16 @@ async function addChildTab(parentTabId) {
   setWindowTree(next);
 }
 
-async function closeSubtree(windowId, tabId) {
+async function closeSubtree(windowId, tabId, includeDescendants = true) {
+  if (!includeDescendants) {
+    try {
+      await chrome.tabs.remove(tabId);
+    } catch {
+      // Tab may already be closed.
+    }
+    return;
+  }
+
   const tree = windowTree(windowId);
   const nodeId = nodeIdFromTabId(tabId);
   const { tree: next, removedTabIds } = removeSubtree(tree, nodeId);
@@ -572,7 +581,7 @@ async function handleTreeAction(payload) {
   }
 
   if (type === TREE_ACTIONS.CLOSE_SUBTREE) {
-    await closeSubtree(tab.windowId, payload.tabId);
+    await closeSubtree(tab.windowId, payload.tabId, payload.includeDescendants ?? true);
   }
 }
 
