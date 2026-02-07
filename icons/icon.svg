@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <filter id="nodeShadow" x="0" y="0" width="128" height="128" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#0b1220" flood-opacity="0.28"/>
+    </filter>
+    <linearGradient id="link" x1="18" y1="64" x2="74" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#cbd5e1" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#94a3b8" stop-opacity="0.85"/>
+    </linearGradient>
+  </defs>
+
+  <!-- transparent background by design -->
+  <g filter="url(#nodeShadow)">
+    <path d="M20 64H46" stroke="url(#link)" stroke-width="8" stroke-linecap="round"/>
+    <path d="M20 36H46" stroke="url(#link)" stroke-width="8" stroke-linecap="round"/>
+    <path d="M20 92H46" stroke="url(#link)" stroke-width="8" stroke-linecap="round"/>
+    <path d="M20 36V92" stroke="url(#link)" stroke-width="8" stroke-linecap="round"/>
+
+    <circle cx="80" cy="36" r="27" fill="#2563eb"/>
+    <circle cx="80" cy="64" r="30" fill="#0ea5e9"/>
+    <circle cx="80" cy="92" r="27" fill="#14b8a6"/>
+
+    <circle cx="80" cy="36" r="27" stroke="white" stroke-opacity="0.45" stroke-width="2"/>
+    <circle cx="80" cy="64" r="30" stroke="white" stroke-opacity="0.45" stroke-width="2"/>
+    <circle cx="80" cy="92" r="27" stroke="white" stroke-opacity="0.45" stroke-width="2"/>
+
+    <circle cx="73" cy="28" r="6" fill="white" fill-opacity="0.3"/>
+    <circle cx="73" cy="56" r="6" fill="white" fill-opacity="0.3"/>
+    <circle cx="73" cy="84" r="6" fill="white" fill-opacity="0.3"/>
+  </g>
+</svg>
