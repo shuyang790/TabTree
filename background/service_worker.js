@@ -31,6 +31,8 @@ const state = {
   syncSnapshot: null
 };
 
+const TAB_GROUP_COLORS = new Set(["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"]);
+
 const schedulePersist = createDebouncedPersister(async () => {
   await Promise.all(Object.values(state.windows).map((tree) => saveWindowTree(tree)));
   await saveSyncSnapshot(state.windows);
@@ -377,6 +379,45 @@ async function batchCloseSubtrees(tabIds) {
   }
 }
 
+async function batchCloseTabs(tabIds) {
+  const grouped = await groupLiveTabIdsByWindow(tabIds);
+  for (const [, ids] of grouped.entries()) {
+    const uniqueTabIds = Array.from(new Set(ids));
+    if (!uniqueTabIds.length) {
+      continue;
+    }
+    try {
+      await chrome.tabs.remove(uniqueTabIds);
+    } catch {
+      // Best effort.
+    }
+  }
+}
+
+async function batchGroupNew(tabIds) {
+  const grouped = await groupLiveTabIdsByWindow(tabIds);
+  for (const [windowId, ids] of grouped.entries()) {
+    const tabs = await Promise.all(ids.map((id) => getTab(id)));
+    const groupableTabIds = tabs
+      .filter((tab) => tab && tab.windowId === windowId && !tab.pinned)
+      .sort((a, b) => a.index - b.index)
+      .map((tab) => tab.id);
+
+    const uniqueTabIds = Array.from(new Set(groupableTabIds));
+    if (!uniqueTabIds.length) {
+      continue;
+    }
+
+    try {
+      await chrome.tabs.group({ tabIds: uniqueTabIds });
+    } catch {
+      // Best effort.
+    }
+
+    await refreshGroupMetadata(windowId);
+  }
+}
+
 async function batchMoveToRoot(tabIds) {
   const grouped = await groupLiveTabIdsByWindow(tabIds);
   for (const [windowId, ids] of grouped.entries()) {
@@ -461,6 +502,62 @@ async function batchReparent(tabIds, newParentTabId) {
   }
 }
 
+async function resolveGroupWindowId(groupId, windowIdHint = null) {
+  if (Number.isInteger(windowIdHint)) {
+    return windowIdHint;
+  }
+
+  const matchedWindow = Object.values(state.windows).find((win) =>
+    Object.prototype.hasOwnProperty.call(win.groups || {}, groupId)
+  );
+  if (Number.isInteger(matchedWindow?.windowId)) {
+    return matchedWindow.windowId;
+  }
+
+  try {
+    const group = await chrome.tabGroups.get(groupId);
+    if (Number.isInteger(group?.windowId)) {
+      return group.windowId;
+    }
+  } catch {
+    // Best effort.
+  }
+
+  return null;
+}
+
+async function renameGroup(groupId, title, windowIdHint = null) {
+  if (!Number.isInteger(groupId) || typeof title !== "string") {
+    return;
+  }
+  try {
+    await chrome.tabGroups.update(groupId, { title: title.trim() });
+  } catch {
+    // Best effort.
+  }
+
+  const windowId = await resolveGroupWindowId(groupId, windowIdHint);
+  if (Number.isInteger(windowId)) {
+    await refreshGroupMetadata(windowId);
+  }
+}
+
+async function setGroupColor(groupId, color, windowIdHint = null) {
+  if (!Number.isInteger(groupId) || !TAB_GROUP_COLORS.has(color)) {
+    return;
+  }
+  try {
+    await chrome.tabGroups.update(groupId, { color });
+  } catch {
+    // Best effort.
+  }
+
+  const windowId = await resolveGroupWindowId(groupId, windowIdHint);
+  if (Number.isInteger(windowId)) {
+    await refreshGroupMetadata(windowId);
+  }
+}
+
 async function handleTreeAction(payload) {
   const { type } = payload;
   if (type === TREE_ACTIONS.ADD_CHILD_TAB) {
@@ -469,6 +566,14 @@ async function handleTreeAction(payload) {
 
   if (type === TREE_ACTIONS.ACTIVATE_TAB) {
     return activateTab(payload.tabId);
+  }
+
+  if (type === TREE_ACTIONS.BATCH_CLOSE_TABS) {
+    return batchCloseTabs(payload.tabIds || []);
+  }
+
+  if (type === TREE_ACTIONS.BATCH_GROUP_NEW) {
+    return batchGroupNew(payload.tabIds || []);
   }
 
   if (type === TREE_ACTIONS.BATCH_CLOSE_SUBTREES) {
@@ -483,19 +588,21 @@ async function handleTreeAction(payload) {
     return batchReparent(payload.tabIds || [], payload.newParentTabId);
   }
 
+  if (type === TREE_ACTIONS.RENAME_GROUP) {
+    return renameGroup(payload.groupId, payload.title || "", payload.windowId ?? null);
+  }
+
+  if (type === TREE_ACTIONS.SET_GROUP_COLOR) {
+    return setGroupColor(payload.groupId, payload.color, payload.windowId ?? null);
+  }
+
   if (type === TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE) {
     const groupId = payload.groupId;
     if (!Number.isInteger(groupId)) {
       return;
     }
 
-    let windowId = payload.windowId;
-    if (!Number.isInteger(windowId)) {
-      const matchedWindow = Object.values(state.windows).find((win) =>
-        Object.prototype.hasOwnProperty.call(win.groups || {}, groupId)
-      );
-      windowId = matchedWindow?.windowId;
-    }
+    const windowId = await resolveGroupWindowId(groupId, payload.windowId);
     if (!Number.isInteger(windowId)) {
       return;
     }

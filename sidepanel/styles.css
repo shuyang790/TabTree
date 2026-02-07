@@ -555,6 +555,160 @@ button:focus-visible {
   gap: 8px;
 }
 
+.context-menu {
+  position: fixed;
+  min-width: 220px;
+  max-width: 280px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  padding: 4px;
+  display: grid;
+  gap: 2px;
+  z-index: 30;
+}
+
+.context-menu.context-menu-group {
+  min-width: 132px;
+  max-width: 156px;
+}
+
+.context-menu[hidden] {
+  display: none;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 30px;
+  border: 0;
+  border-radius: calc(var(--radius) - 3px);
+  background: transparent;
+  color: var(--text);
+  font-size: 0.86rem;
+  text-align: left;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.context-menu-item:hover,
+.context-menu-item:focus-visible {
+  background: var(--row-hover);
+  outline: none;
+}
+
+.context-menu-item[disabled] {
+  color: var(--text-muted);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.context-menu-item[disabled]:hover {
+  background: transparent;
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 4px;
+}
+
+.context-submenu {
+  position: relative;
+}
+
+.context-submenu-trigger::after {
+  content: "›";
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.context-submenu-panel {
+  position: absolute;
+  left: calc(100% + 4px);
+  top: -4px;
+  min-width: 150px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  padding: 4px;
+  display: none;
+  gap: 2px;
+  max-height: min(50vh, 260px);
+  overflow-y: auto;
+}
+
+.context-submenu-left .context-submenu-panel {
+  left: auto;
+  right: calc(100% + 4px);
+}
+
+.context-submenu-up .context-submenu-panel {
+  top: auto;
+  bottom: -4px;
+}
+
+.context-menu.context-menu-group .context-submenu-panel {
+  min-width: 120px;
+}
+
+.context-submenu:hover .context-submenu-panel,
+.context-submenu:focus-within .context-submenu-panel,
+.context-submenu.open .context-submenu-panel {
+  display: grid;
+}
+
+.context-color-item {
+  gap: 8px;
+}
+
+.context-color-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--group-color);
+}
+
+.context-color-item.active::after {
+  content: "✓";
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.context-rename-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  padding: 2px;
+}
+
+.context-rename-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.context-rename-apply {
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--bg-elev);
+  color: var(--text);
+  min-height: 30px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.context-rename-apply:hover {
+  background: var(--row-hover);
+}
+
 @media (max-width: 720px) {
   .settings-panel {
     position: absolute;

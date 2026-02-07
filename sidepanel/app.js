@@ -12,6 +12,18 @@ const GROUP_COLOR_MAP = {
   orange: "#dc7d2d"
 };
 
+const GROUP_COLOR_OPTIONS = [
+  { value: "grey", label: "Grey" },
+  { value: "blue", label: "Blue" },
+  { value: "red", label: "Red" },
+  { value: "yellow", label: "Yellow" },
+  { value: "green", label: "Green" },
+  { value: "pink", label: "Pink" },
+  { value: "purple", label: "Purple" },
+  { value: "cyan", label: "Cyan" },
+  { value: "orange", label: "Orange" }
+];
+
 const BASE_THEME_TOKENS = {
   light: {
     bg: "#f7f9fc",
@@ -267,7 +279,18 @@ const state = {
   draggingTabIds: [],
   selectedTabIds: new Set(),
   selectionAnchorTabId: null,
-  pendingCloseAction: null
+  pendingCloseAction: null,
+  contextMenu: {
+    open: false,
+    kind: null,
+    x: 0,
+    y: 0,
+    primaryTabId: null,
+    scopeTabIds: [],
+    groupId: null,
+    windowId: null,
+    renameOpen: false
+  }
 };
 
 const dom = {
@@ -287,8 +310,13 @@ const dom = {
   confirmMessage: document.getElementById("confirm-message"),
   confirmSkip: document.getElementById("confirm-skip"),
   confirmCancel: document.getElementById("confirm-cancel"),
-  confirmOk: document.getElementById("confirm-ok")
+  confirmOk: document.getElementById("confirm-ok"),
+  contextMenu: document.getElementById("context-menu")
 };
+
+if (dom.contextMenu) {
+  dom.contextMenu.tabIndex = -1;
+}
 
 function nodeId(tabId) {
   return `tab:${tabId}`;
@@ -309,6 +337,20 @@ function currentActiveTabId() {
 
 function selectedTabIdsArray() {
   return Array.from(state.selectedTabIds);
+}
+
+function resetContextMenuState() {
+  state.contextMenu = {
+    open: false,
+    kind: null,
+    x: 0,
+    y: 0,
+    primaryTabId: null,
+    scopeTabIds: [],
+    groupId: null,
+    windowId: null,
+    renameOpen: false
+  };
 }
 
 function visibleTabIdsInOrder() {
@@ -461,7 +503,7 @@ function updateShortcutHint() {
     dom.hintBar.textContent = "";
     return;
   }
-  dom.hintBar.textContent = "Shift+Click selects range. Drag search bar to move to top-level.";
+  dom.hintBar.textContent = "Shift+Click selects range. Right-click for actions. Drag search bar to move to top-level.";
 }
 
 function updateBatchBar() {
@@ -473,6 +515,500 @@ function updateBatchBar() {
   }
   dom.batchBar.hidden = false;
   dom.batchCount.textContent = `${count} selected`;
+}
+
+function resolveContextScopeTabIds(primaryTabId) {
+  const tree = currentWindowTree();
+  if (Number.isFinite(primaryTabId) && tree?.nodes[nodeId(primaryTabId)]) {
+    const selected = selectedTabIdsArray()
+      .filter((id) => Number.isFinite(id))
+      .filter((id) => !!tree?.nodes[nodeId(id)]);
+
+    if (selected.includes(primaryTabId)) {
+      return Array.from(new Set(selected));
+    }
+    return [primaryTabId];
+  }
+  return [];
+}
+
+function contextMenuFocusables() {
+  return Array.from(dom.contextMenu.querySelectorAll(".context-menu-item:not([disabled])"))
+    .filter((el) => el.getClientRects().length > 0);
+}
+
+function focusFirstContextMenuItem() {
+  const first = contextMenuFocusables()[0];
+  if (first) {
+    first.focus();
+  } else {
+    dom.contextMenu.focus();
+  }
+}
+
+function positionContextMenu() {
+  const menu = dom.contextMenu;
+  if (!state.contextMenu.open) {
+    return;
+  }
+
+  const margin = 8;
+  const maxX = Math.max(margin, window.innerWidth - menu.offsetWidth - margin);
+  const maxY = Math.max(margin, window.innerHeight - menu.offsetHeight - margin);
+  const left = Math.min(Math.max(state.contextMenu.x, margin), maxX);
+  const top = Math.min(Math.max(state.contextMenu.y, margin), maxY);
+
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function updateContextSubmenuDirection() {
+  const submenus = Array.from(dom.contextMenu.querySelectorAll(".context-submenu"));
+  for (const submenu of submenus) {
+    submenu.classList.remove("context-submenu-left", "context-submenu-up");
+    const panel = submenu.querySelector(".context-submenu-panel");
+    if (!panel) {
+      continue;
+    }
+
+    const submenuRect = submenu.getBoundingClientRect();
+    const panelMinWidth = Number.parseFloat(getComputedStyle(panel).minWidth) || 120;
+    const rightSpace = window.innerWidth - submenuRect.right - 8;
+    const leftSpace = submenuRect.left - 8;
+    const estimatedPanelWidth = Math.max(panelMinWidth, 120);
+
+    if (rightSpace < estimatedPanelWidth && leftSpace >= rightSpace) {
+      submenu.classList.add("context-submenu-left");
+    }
+
+    const estimatedItemHeight = 30;
+    const estimatedPanelHeight = Math.max(120, panel.childElementCount * estimatedItemHeight + 10);
+    const bottomSpace = window.innerHeight - submenuRect.top - 8;
+    if (bottomSpace < estimatedPanelHeight) {
+      submenu.classList.add("context-submenu-up");
+    }
+  }
+}
+
+function closeContextMenu() {
+  if (!state.contextMenu.open) {
+    return;
+  }
+  dom.contextMenu.hidden = true;
+  dom.contextMenu.innerHTML = "";
+  resetContextMenuState();
+}
+
+function openTabContextMenu(event, tabId) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  state.contextMenu = {
+    open: true,
+    kind: "tab",
+    x: event.clientX,
+    y: event.clientY,
+    primaryTabId: tabId,
+    scopeTabIds: resolveContextScopeTabIds(tabId),
+    groupId: null,
+    windowId: currentWindowTree()?.windowId || null,
+    renameOpen: false
+  };
+  renderContextMenu();
+}
+
+function openGroupContextMenu(event, groupId, windowId) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  state.contextMenu = {
+    open: true,
+    kind: "group",
+    x: event.clientX,
+    y: event.clientY,
+    primaryTabId: null,
+    scopeTabIds: [],
+    groupId,
+    windowId,
+    renameOpen: false
+  };
+  renderContextMenu();
+}
+
+async function copyTextToClipboard(text) {
+  if (!text) {
+    return;
+  }
+
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fallback below.
+    }
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "absolute";
+  textArea.style.left = "-9999px";
+  document.body.appendChild(textArea);
+  textArea.select();
+  try {
+    document.execCommand("copy");
+  } catch {
+    // Best effort fallback.
+  }
+  textArea.remove();
+}
+
+function scopedUrls(tree, tabIds) {
+  return tabIds
+    .map((tabId) => tree.nodes[nodeId(tabId)]?.lastKnownUrl || "")
+    .filter((url) => typeof url === "string" && url.trim().length > 0);
+}
+
+async function executeContextMenuAction(action) {
+  const tree = currentWindowTree();
+  if (!tree) {
+    return;
+  }
+
+  if (action === "rename-group") {
+    state.contextMenu.renameOpen = true;
+    renderContextMenu();
+    return;
+  }
+
+  if (action === "close-selected-tabs") {
+    const tabIds = state.contextMenu.scopeTabIds;
+    closeContextMenu();
+    if (!tabIds.length) {
+      return;
+    }
+    await requestClose(
+      {
+        kind: "batch-tabs",
+        tabIds
+      },
+      tabIds.length,
+      true
+    );
+    return;
+  }
+
+  if (action === "group-selected-new") {
+    const tabIds = state.contextMenu.scopeTabIds;
+    const hasGroupedTabs = tabIds.some((tabId) => tree.nodes[nodeId(tabId)]?.groupId !== null);
+    closeContextMenu();
+    if (!tabIds.length || hasGroupedTabs) {
+      return;
+    }
+    await send(MESSAGE_TYPES.TREE_ACTION, {
+      type: TREE_ACTIONS.BATCH_GROUP_NEW,
+      tabIds
+    });
+    return;
+  }
+
+  if (action === "add-child") {
+    const tabId = state.contextMenu.primaryTabId;
+    closeContextMenu();
+    if (!Number.isFinite(tabId)) {
+      return;
+    }
+    await send(MESSAGE_TYPES.TREE_ACTION, {
+      type: TREE_ACTIONS.ADD_CHILD_TAB,
+      parentTabId: tabId
+    });
+    return;
+  }
+
+  if (action === "move-selected-root") {
+    const tabIds = state.contextMenu.scopeTabIds;
+    closeContextMenu();
+    if (!tabIds.length) {
+      return;
+    }
+    await send(MESSAGE_TYPES.TREE_ACTION, {
+      type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
+      tabIds
+    });
+    return;
+  }
+
+  if (action === "toggle-collapse") {
+    const tabId = state.contextMenu.primaryTabId;
+    closeContextMenu();
+    if (!Number.isFinite(tabId)) {
+      return;
+    }
+    await send(MESSAGE_TYPES.TREE_ACTION, {
+      type: TREE_ACTIONS.TOGGLE_COLLAPSE,
+      tabId
+    });
+    return;
+  }
+
+  if (action === "copy-urls") {
+    const urls = scopedUrls(tree, state.contextMenu.scopeTabIds);
+    closeContextMenu();
+    if (!urls.length) {
+      return;
+    }
+    await copyTextToClipboard(urls.join("\n"));
+    return;
+  }
+}
+
+async function submitGroupRename(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const input = form.querySelector("input[name='group-title']");
+  if (!input) {
+    closeContextMenu();
+    return;
+  }
+
+  const groupId = state.contextMenu.groupId;
+  const windowId = state.contextMenu.windowId;
+  const title = input.value;
+  closeContextMenu();
+
+  await send(MESSAGE_TYPES.TREE_ACTION, {
+    type: TREE_ACTIONS.RENAME_GROUP,
+    groupId,
+    windowId,
+    title
+  });
+}
+
+async function setGroupColor(color) {
+  const groupId = state.contextMenu.groupId;
+  const windowId = state.contextMenu.windowId;
+  closeContextMenu();
+  await send(MESSAGE_TYPES.TREE_ACTION, {
+    type: TREE_ACTIONS.SET_GROUP_COLOR,
+    groupId,
+    windowId,
+    color
+  });
+}
+
+function createContextMenuButton(label, action, disabled = false) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "context-menu-item";
+  button.textContent = label;
+  button.disabled = disabled;
+  button.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    await executeContextMenuAction(action);
+  });
+  return button;
+}
+
+function createContextMenuSeparator() {
+  const separator = document.createElement("div");
+  separator.className = "context-menu-separator";
+  separator.setAttribute("role", "separator");
+  return separator;
+}
+
+function buildTabContextMenu(tree) {
+  const fragment = document.createDocumentFragment();
+  const primaryNode = tree.nodes[nodeId(state.contextMenu.primaryTabId)];
+  const scopeTabIds = state.contextMenu.scopeTabIds;
+  const closeCount = scopeTabIds.length;
+  const hasGroupedTabs = scopeTabIds.some((tabId) => tree.nodes[nodeId(tabId)]?.groupId !== null);
+  const closeLabel = closeCount === 0
+    ? "Close selected tab(s)"
+    : closeCount === 1
+      ? "Close selected tab"
+      : `Close ${closeCount} selected tabs`;
+  const copyUrls = scopedUrls(tree, scopeTabIds);
+
+  fragment.appendChild(
+    createContextMenuButton(closeLabel, "close-selected-tabs", closeCount === 0)
+  );
+  fragment.appendChild(
+    createContextMenuButton("Add selected to new tab group", "group-selected-new", closeCount === 0 || hasGroupedTabs)
+  );
+  fragment.appendChild(createContextMenuSeparator());
+  fragment.appendChild(
+    createContextMenuButton("Add child tab", "add-child", !primaryNode)
+  );
+  fragment.appendChild(
+    createContextMenuButton("Move selected to top-level", "move-selected-root", closeCount === 0)
+  );
+  fragment.appendChild(
+    createContextMenuButton("Toggle collapse", "toggle-collapse", !primaryNode?.childNodeIds?.length)
+  );
+  fragment.appendChild(
+    createContextMenuButton("Copy URL(s)", "copy-urls", !copyUrls.length)
+  );
+
+  return fragment;
+}
+
+function buildGroupContextMenu(tree) {
+  const fragment = document.createDocumentFragment();
+  const groupId = state.contextMenu.groupId;
+  const group = tree.groups?.[groupId];
+  const groupExists = !!group;
+
+  if (!state.contextMenu.renameOpen) {
+    fragment.appendChild(createContextMenuButton("Rename group...", "rename-group", !groupExists));
+  } else {
+    const form = document.createElement("form");
+    form.className = "context-rename-form";
+    form.addEventListener("submit", submitGroupRename);
+
+    const input = document.createElement("input");
+    input.className = "context-rename-input";
+    input.name = "group-title";
+    input.value = group?.title || "";
+    input.placeholder = "Group name";
+    input.autocomplete = "off";
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeContextMenu();
+      }
+    });
+
+    const apply = document.createElement("button");
+    apply.type = "submit";
+    apply.className = "context-rename-apply";
+    apply.textContent = "Save";
+
+    form.append(input, apply);
+    fragment.appendChild(form);
+  }
+
+  const submenu = document.createElement("div");
+  submenu.className = "context-submenu";
+
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "context-menu-item context-submenu-trigger";
+  trigger.textContent = "Color";
+  trigger.disabled = !groupExists;
+  trigger.setAttribute("aria-haspopup", "menu");
+  trigger.setAttribute("aria-expanded", "false");
+
+  const panel = document.createElement("div");
+  panel.className = "context-submenu-panel";
+  panel.setAttribute("role", "menu");
+
+  for (const option of GROUP_COLOR_OPTIONS) {
+    const colorBtn = document.createElement("button");
+    colorBtn.type = "button";
+    colorBtn.className = "context-menu-item context-color-item";
+    colorBtn.dataset.color = option.value;
+    if (group?.color === option.value) {
+      colorBtn.classList.add("active");
+    }
+    colorBtn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await setGroupColor(option.value);
+    });
+
+    const dot = document.createElement("span");
+    dot.className = "context-color-dot";
+    dot.style.setProperty("--group-color", GROUP_COLOR_MAP[option.value]);
+
+    const label = document.createElement("span");
+    label.textContent = option.label;
+
+    colorBtn.append(dot, label);
+    panel.appendChild(colorBtn);
+  }
+
+  trigger.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const willOpen = !submenu.classList.contains("open");
+    submenu.classList.toggle("open", willOpen);
+    trigger.setAttribute("aria-expanded", String(willOpen));
+    if (willOpen) {
+      const first = panel.querySelector(".context-menu-item:not([disabled])");
+      if (first) {
+        first.focus();
+      }
+    }
+  });
+
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowRight") {
+      return;
+    }
+    event.preventDefault();
+    submenu.classList.add("open");
+    trigger.setAttribute("aria-expanded", "true");
+    const first = panel.querySelector(".context-menu-item:not([disabled])");
+    if (first) {
+      first.focus();
+    }
+  });
+
+  submenu.append(trigger, panel);
+  fragment.appendChild(submenu);
+
+  return fragment;
+}
+
+function renderContextMenu() {
+  if (!state.contextMenu.open) {
+    dom.contextMenu.hidden = true;
+    dom.contextMenu.innerHTML = "";
+    return;
+  }
+
+  const tree = currentWindowTree();
+  if (!tree) {
+    closeContextMenu();
+    return;
+  }
+
+  if (state.contextMenu.kind === "tab") {
+    const validScope = state.contextMenu.scopeTabIds.filter((id) => !!tree.nodes[nodeId(id)]);
+    state.contextMenu.scopeTabIds = validScope;
+    if (!tree.nodes[nodeId(state.contextMenu.primaryTabId)]) {
+      closeContextMenu();
+      return;
+    }
+  }
+
+  if (state.contextMenu.kind === "group" && !tree.groups?.[state.contextMenu.groupId]) {
+    closeContextMenu();
+    return;
+  }
+
+  dom.contextMenu.innerHTML = "";
+  dom.contextMenu.hidden = false;
+  dom.contextMenu.classList.toggle("context-menu-group", state.contextMenu.kind === "group");
+
+  if (state.contextMenu.kind === "tab") {
+    dom.contextMenu.appendChild(buildTabContextMenu(tree));
+  } else if (state.contextMenu.kind === "group") {
+    dom.contextMenu.appendChild(buildGroupContextMenu(tree));
+  }
+
+  positionContextMenu();
+  updateContextSubmenuDirection();
+
+  if (state.contextMenu.renameOpen) {
+    const input = dom.contextMenu.querySelector(".context-rename-input");
+    if (input) {
+      input.focus();
+      input.select();
+    }
+  } else {
+    focusFirstContextMenuItem();
+  }
 }
 
 async function send(type, payload = {}) {
@@ -624,6 +1160,15 @@ async function executeCloseAction(action) {
       tabId: action.tabId,
       includeDescendants: action.includeDescendants ?? true
     });
+    return;
+  }
+
+  if (action.kind === "batch-tabs") {
+    await send(MESSAGE_TYPES.TREE_ACTION, {
+      type: TREE_ACTIONS.BATCH_CLOSE_TABS,
+      tabIds: action.tabIds
+    });
+    replaceSelection([], null);
     return;
   }
 
@@ -954,6 +1499,9 @@ function createNodeRow(tree, node, options = {}) {
   row.addEventListener("click", async (event) => {
     await onRowClicked(event, node.tabId);
   });
+  row.addEventListener("contextmenu", (event) => {
+    openTabContextMenu(event, node.tabId);
+  });
 
   row.addEventListener("dragstart", (event) => {
     const selection = state.selectedTabIds.has(node.tabId) && state.selectedTabIds.size > 1
@@ -1116,6 +1664,7 @@ function createGroupSection(tree, groupId, rootNodeIds, query) {
 
   const header = document.createElement("div");
   header.className = "group-header";
+  header.dataset.groupId = String(groupId);
   header.setAttribute("role", "button");
   header.setAttribute("tabindex", "0");
   header.setAttribute("aria-expanded", String(!group.collapsed));
@@ -1150,6 +1699,9 @@ function createGroupSection(tree, groupId, rootNodeIds, query) {
     }
     event.preventDefault();
     await toggleGroupCollapsed();
+  });
+  header.addEventListener("contextmenu", (event) => {
+    openGroupContextMenu(event, groupId, tree.windowId);
   });
 
   header.append(colorDot, name, count);
@@ -1264,6 +1816,7 @@ function render() {
   updateShortcutHint();
   updateBatchBar();
   renderTree();
+  renderContextMenu();
 }
 
 async function bootstrap() {
@@ -1281,9 +1834,14 @@ async function bootstrap() {
 }
 
 function bindEvents() {
+  dom.contextMenu.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+  });
+
   dom.search.addEventListener("input", () => {
     state.search = dom.search.value;
     renderTree();
+    renderContextMenu();
   });
 
   dom.searchWrap.addEventListener("dragover", (event) => {
@@ -1322,6 +1880,7 @@ function bindEvents() {
 
   dom.openSettings.addEventListener("click", () => {
     dom.settingsPanel.hidden = false;
+    closeContextMenu();
   });
 
   dom.closeSettings.addEventListener("click", () => {
@@ -1349,6 +1908,80 @@ function bindEvents() {
 
     closeConfirmDialog();
     await executeCloseAction(pending.action);
+  });
+
+  dom.treeRoot.addEventListener("scroll", () => {
+    closeContextMenu();
+  }, { passive: true });
+
+  document.addEventListener("pointerdown", (event) => {
+    if (!state.contextMenu.open) {
+      return;
+    }
+    if (dom.contextMenu.contains(event.target)) {
+      return;
+    }
+    closeContextMenu();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (!state.contextMenu.open) {
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeContextMenu();
+      return;
+    }
+
+    if (event.target instanceof HTMLInputElement) {
+      return;
+    }
+
+    const items = contextMenuFocusables();
+    if (!items.length) {
+      return;
+    }
+
+    const currentIndex = items.indexOf(document.activeElement);
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % items.length : 0;
+      items[nextIndex].focus();
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      const nextIndex = currentIndex >= 0 ? (currentIndex - 1 + items.length) % items.length : items.length - 1;
+      items[nextIndex].focus();
+      return;
+    }
+
+    if (event.key === "ArrowLeft") {
+      const activeInSubmenu = document.activeElement?.closest?.(".context-submenu-panel");
+      if (!activeInSubmenu) {
+        return;
+      }
+      event.preventDefault();
+      const submenu = activeInSubmenu.closest(".context-submenu");
+      const trigger = submenu?.querySelector(".context-submenu-trigger");
+      if (trigger) {
+        trigger.focus();
+      }
+      return;
+    }
+
+    if (event.key === "Enter" && document.activeElement?.classList?.contains("context-menu-item")) {
+      event.preventDefault();
+      document.activeElement.click();
+    }
+  });
+
+  window.addEventListener("blur", () => {
+    closeContextMenu();
   });
 
   dom.settingsForm.addEventListener("input", async (event) => {
