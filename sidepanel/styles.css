@@ -413,6 +413,12 @@ button:focus-visible {
   gap: 8px;
   padding: 6px 8px;
   border-bottom: 1px solid color-mix(in srgb, var(--group-color), transparent 78%);
+  cursor: pointer;
+}
+
+.group-header:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .group-color-dot {

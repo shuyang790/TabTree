@@ -457,6 +457,37 @@ async function handleTreeAction(payload) {
     return batchReparent(payload.tabIds || [], payload.newParentTabId);
   }
 
+  if (type === TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE) {
+    const groupId = payload.groupId;
+    if (!Number.isInteger(groupId)) {
+      return;
+    }
+
+    let windowId = payload.windowId;
+    if (!Number.isInteger(windowId)) {
+      const matchedWindow = Object.values(state.windows).find((win) =>
+        Object.prototype.hasOwnProperty.call(win.groups || {}, groupId)
+      );
+      windowId = matchedWindow?.windowId;
+    }
+    if (!Number.isInteger(windowId)) {
+      return;
+    }
+
+    const tree = windowTree(windowId);
+    const group = tree.groups?.[groupId];
+    const collapsed = typeof payload.collapsed === "boolean" ? payload.collapsed : !group?.collapsed;
+
+    try {
+      await chrome.tabGroups.update(groupId, { collapsed });
+    } catch {
+      // Best effort.
+    }
+
+    await refreshGroupMetadata(windowId);
+    return;
+  }
+
   const tab = await getTab(payload.tabId);
   if (!tab) {
     return;
@@ -626,8 +657,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 chrome.tabs.onCreated.addListener(async (tab) => {
   await ensureInitialized();
   const tree = windowTree(tab.windowId);
-  // Do not infer parent from opener for regular browser new-tab flows.
-  // Child relationships are only created through explicit tree actions.
+  const openerNodeId = Number.isInteger(tab.openerTabId) ? nodeIdFromTabId(tab.openerTabId) : null;
+  const openerNode = openerNodeId ? tree.nodes[openerNodeId] : null;
+
+  if (openerNode && !!openerNode.pinned === !!tab.pinned) {
+    setWindowTree(upsertTabNode(tree, tab, { parentNodeId: openerNodeId }));
+    return;
+  }
+
   setWindowTree(upsertTabNode(tree, tab));
 });
 

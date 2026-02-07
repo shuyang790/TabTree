@@ -196,9 +196,6 @@ const dom = {
   addChildGlobal: document.getElementById("add-child-global"),
   batchBar: document.getElementById("batch-bar"),
   batchCount: document.getElementById("batch-count"),
-  batchClose: document.getElementById("batch-close"),
-  batchRoot: document.getElementById("batch-root"),
-  batchClear: document.getElementById("batch-clear"),
   settingsPanel: document.getElementById("settings-panel"),
   openSettings: document.getElementById("open-settings"),
   closeSettings: document.getElementById("close-settings"),
@@ -743,7 +740,8 @@ async function onRowClicked(event, tabId) {
   render();
 }
 
-function createNodeRow(tree, node) {
+function createNodeRow(tree, node, options = {}) {
+  const { showGroupBadge = true } = options;
   const row = document.createElement("div");
   row.className = "tree-row";
   row.dataset.tabId = String(node.tabId);
@@ -792,7 +790,7 @@ function createNodeRow(tree, node) {
 
   const badges = document.createElement("span");
   badges.className = "badges";
-  if (node.groupId !== null) {
+  if (showGroupBadge && node.groupId !== null) {
     const group = groupDisplay(tree, node.groupId);
     const groupBadge = document.createElement("span");
     groupBadge.className = "badge badge-group";
@@ -918,7 +916,7 @@ function createNodeRow(tree, node) {
   return row;
 }
 
-function createNodeElement(tree, nodeKey, query) {
+function createNodeElement(tree, nodeKey, query, rowOptions = {}) {
   if (!shouldRenderNode(tree, nodeKey, query)) {
     return null;
   }
@@ -930,14 +928,14 @@ function createNodeElement(tree, nodeKey, query) {
 
   const holder = document.createElement("div");
   holder.className = "tree-node";
-  holder.appendChild(createNodeRow(tree, node));
+  holder.appendChild(createNodeRow(tree, node, rowOptions));
 
   if (node.childNodeIds.length && !node.collapsed) {
     const children = document.createElement("div");
     children.className = "children";
     children.setAttribute("role", "group");
     for (const childId of node.childNodeIds) {
-      const childEl = createNodeElement(tree, childId, query);
+      const childEl = createNodeElement(tree, childId, query, rowOptions);
       if (childEl) {
         children.appendChild(childEl);
       }
@@ -966,7 +964,7 @@ function createPinnedStrip(tree, pinnedRootNodeIds, query) {
     if (!node) {
       continue;
     }
-    const row = createNodeRow(tree, node);
+    const row = createNodeRow(tree, node, { showGroupBadge: true });
     track.appendChild(row);
     renderedCount += 1;
   }
@@ -985,7 +983,7 @@ function createGroupSection(tree, groupId, rootNodeIds, query) {
 
   const renderedChildren = [];
   for (const nodeKey of rootNodeIds) {
-    const child = createNodeElement(tree, nodeKey, query);
+    const child = createNodeElement(tree, nodeKey, query, { showGroupBadge: false });
     if (child) {
       renderedChildren.push(child);
     }
@@ -1001,6 +999,10 @@ function createGroupSection(tree, groupId, rootNodeIds, query) {
 
   const header = document.createElement("div");
   header.className = "group-header";
+  header.setAttribute("role", "button");
+  header.setAttribute("tabindex", "0");
+  header.setAttribute("aria-expanded", String(!group.collapsed));
+  header.title = group.collapsed ? "Expand group" : "Collapse group";
 
   const colorDot = document.createElement("span");
   colorDot.className = "group-color-dot";
@@ -1012,6 +1014,26 @@ function createGroupSection(tree, groupId, rootNodeIds, query) {
   const count = document.createElement("span");
   count.className = "group-count";
   count.textContent = String(rootNodeIds.length);
+
+  const toggleGroupCollapsed = async () => {
+    await send(MESSAGE_TYPES.TREE_ACTION, {
+      type: TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE,
+      groupId,
+      windowId: tree.windowId
+    });
+  };
+
+  header.addEventListener("click", async () => {
+    await toggleGroupCollapsed();
+  });
+
+  header.addEventListener("keydown", async (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    await toggleGroupCollapsed();
+  });
 
   header.append(colorDot, name, count);
   section.appendChild(header);
@@ -1099,7 +1121,7 @@ function renderTree() {
   }
 
   for (const rootNodeId of ungrouped) {
-    const el = createNodeElement(tree, rootNodeId, query);
+    const el = createNodeElement(tree, rootNodeId, query, { showGroupBadge: true });
     if (el) {
       dom.treeRoot.appendChild(el);
       renderedCount += 1;
@@ -1125,36 +1147,6 @@ function render() {
   updateShortcutHint();
   updateBatchBar();
   renderTree();
-}
-
-async function handleBatchClose() {
-  const tree = currentWindowTree();
-  if (!tree) {
-    return;
-  }
-  const selected = selectedTabIdsArray();
-  if (selected.length <= 1) {
-    return;
-  }
-
-  const plan = buildClosePlan(tree, selected);
-  if (!plan.rootTabIds.length) {
-    return;
-  }
-
-  await requestClose({ kind: "batch", tabIds: plan.rootTabIds }, plan.totalTabs, true);
-}
-
-async function handleBatchMoveToRoot() {
-  const selected = selectedTabIdsArray();
-  if (selected.length <= 1) {
-    return;
-  }
-
-  await send(MESSAGE_TYPES.TREE_ACTION, {
-    type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
-    tabIds: selected
-  });
 }
 
 async function bootstrap() {
@@ -1209,19 +1201,6 @@ function bindEvents() {
       type: TREE_ACTIONS.ADD_CHILD_TAB,
       parentTabId: activeTabId
     });
-  });
-
-  dom.batchClose.addEventListener("click", async () => {
-    await handleBatchClose();
-  });
-
-  dom.batchRoot.addEventListener("click", async () => {
-    await handleBatchMoveToRoot();
-  });
-
-  dom.batchClear.addEventListener("click", () => {
-    replaceSelection([], null);
-    render();
   });
 
   dom.openSettings.addEventListener("click", () => {
