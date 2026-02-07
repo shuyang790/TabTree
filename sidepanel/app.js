@@ -277,6 +277,7 @@ const state = {
   focusedWindowId: null,
   search: "",
   draggingTabIds: [],
+  draggingGroupId: null,
   selectedTabIds: new Set(),
   selectionAnchorTabId: null,
   pendingCloseAction: null,
@@ -1117,9 +1118,53 @@ function getDropPosition(event, row) {
 }
 
 function clearDropClasses() {
-  dom.treeRoot.querySelectorAll(".drop-before, .drop-after, .drop-inside").forEach((el) => {
-    el.classList.remove("drop-before", "drop-after", "drop-inside");
+  dom.treeRoot.querySelectorAll(".drop-before, .drop-after, .drop-inside, .group-drop-before, .group-drop-after").forEach((el) => {
+    el.classList.remove("drop-before", "drop-after", "drop-inside", "group-drop-before", "group-drop-after");
   });
+}
+
+function canDropGroup(tree, sourceGroupId, options = {}) {
+  const { targetGroupId = null, targetTabId = null } = options;
+  if (!Number.isInteger(sourceGroupId)) {
+    return false;
+  }
+  const sourceHasRows = Object.values(tree.nodes).some((node) => node.groupId === sourceGroupId && !node.pinned);
+  if (!sourceHasRows) {
+    return false;
+  }
+  if (Number.isInteger(targetGroupId) && targetGroupId === sourceGroupId) {
+    return false;
+  }
+  if (Number.isFinite(targetTabId)) {
+    const targetNode = tree.nodes[nodeId(targetTabId)];
+    if (!targetNode || targetNode.pinned || targetNode.parentNodeId) {
+      return false;
+    }
+    if (targetNode.groupId === sourceGroupId) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function moveGroupBlockToTarget(tree, target, position) {
+  if (!state.draggingGroupId || (position !== "before" && position !== "after")) {
+    return;
+  }
+  const payload = {
+    type: TREE_ACTIONS.MOVE_GROUP_BLOCK,
+    sourceGroupId: state.draggingGroupId,
+    windowId: tree.windowId,
+    position
+  };
+
+  if (target.kind === "group") {
+    payload.targetGroupId = target.groupId;
+  } else if (target.kind === "tab") {
+    payload.targetTabId = target.tabId;
+  }
+
+  await send(MESSAGE_TYPES.TREE_ACTION, payload);
 }
 
 function setSearchDropActive(active) {
@@ -1536,6 +1581,11 @@ function createNodeRow(tree, node, options = {}) {
   });
 
   row.addEventListener("dragstart", (event) => {
+    if (state.draggingGroupId) {
+      event.preventDefault();
+      return;
+    }
+
     const selection = state.selectedTabIds.has(node.tabId) && state.selectedTabIds.size > 1
       ? selectedTabIdsArray()
       : [node.tabId];
@@ -1560,6 +1610,21 @@ function createNodeRow(tree, node, options = {}) {
 
   row.addEventListener("dragover", (event) => {
     event.preventDefault();
+    if (Number.isInteger(state.draggingGroupId)) {
+      const position = getDropPosition(event, row);
+      if (position === "inside") {
+        clearDropClasses();
+        return;
+      }
+      if (!canDropGroup(tree, state.draggingGroupId, { targetGroupId: node.groupId, targetTabId: node.tabId })) {
+        clearDropClasses();
+        return;
+      }
+      clearDropClasses();
+      row.classList.add(position === "before" ? "group-drop-before" : "group-drop-after");
+      return;
+    }
+
     if (!state.draggingTabIds.length || state.draggingTabIds.includes(node.tabId)) {
       return;
     }
@@ -1580,11 +1645,24 @@ function createNodeRow(tree, node, options = {}) {
   });
 
   row.addEventListener("dragleave", () => {
-    row.classList.remove("drop-before", "drop-after", "drop-inside");
+    row.classList.remove("drop-before", "drop-after", "drop-inside", "group-drop-before", "group-drop-after");
   });
 
   row.addEventListener("drop", async (event) => {
     event.preventDefault();
+    if (Number.isInteger(state.draggingGroupId)) {
+      const position = getDropPosition(event, row);
+      clearDropClasses();
+      if (position === "inside"
+        || !canDropGroup(tree, state.draggingGroupId, { targetGroupId: node.groupId, targetTabId: node.tabId })) {
+        state.draggingGroupId = null;
+        return;
+      }
+      await moveGroupBlockToTarget(tree, { kind: "tab", tabId: node.tabId }, position);
+      state.draggingGroupId = null;
+      return;
+    }
+
     if (!state.draggingTabIds.length || state.draggingTabIds.includes(node.tabId)) {
       clearDropClasses();
       return;
@@ -1701,6 +1779,7 @@ function createGroupSection(tree, groupId, rootNodeIds, query) {
   header.setAttribute("tabindex", "0");
   header.setAttribute("aria-expanded", String(!group.collapsed));
   header.title = group.collapsed ? "Expand group" : "Collapse group";
+  header.draggable = true;
 
   const colorDot = document.createElement("span");
   colorDot.className = "group-color-dot";
@@ -1735,6 +1814,57 @@ function createGroupSection(tree, groupId, rootNodeIds, query) {
   header.addEventListener("contextmenu", (event) => {
     openGroupContextMenu(event, groupId, tree.windowId);
   });
+  header.addEventListener("dragstart", (event) => {
+    state.draggingGroupId = groupId;
+    state.draggingTabIds = [];
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.dropEffect = "move";
+      event.dataTransfer.setData("text/plain", `group:${groupId}`);
+    }
+    header.classList.add("dragging");
+    clearDropClasses();
+    setSearchDropActive(false);
+  });
+  header.addEventListener("dragend", () => {
+    state.draggingGroupId = null;
+    header.classList.remove("dragging");
+    clearDropClasses();
+  });
+  header.addEventListener("dragover", (event) => {
+    if (!Number.isInteger(state.draggingGroupId)) {
+      return;
+    }
+    event.preventDefault();
+    const position = getDropPosition(event, header);
+    if (position === "inside") {
+      clearDropClasses();
+      return;
+    }
+    if (!canDropGroup(tree, state.draggingGroupId, { targetGroupId: groupId })) {
+      clearDropClasses();
+      return;
+    }
+    clearDropClasses();
+    header.classList.add(position === "before" ? "group-drop-before" : "group-drop-after");
+  });
+  header.addEventListener("dragleave", () => {
+    header.classList.remove("group-drop-before", "group-drop-after");
+  });
+  header.addEventListener("drop", async (event) => {
+    if (!Number.isInteger(state.draggingGroupId)) {
+      return;
+    }
+    event.preventDefault();
+    const position = getDropPosition(event, header);
+    clearDropClasses();
+    if (position === "inside" || !canDropGroup(tree, state.draggingGroupId, { targetGroupId: groupId })) {
+      state.draggingGroupId = null;
+      return;
+    }
+    await moveGroupBlockToTarget(tree, { kind: "group", groupId }, position);
+    state.draggingGroupId = null;
+  });
 
   header.append(colorDot, name, count);
   section.appendChild(header);
@@ -1754,8 +1884,8 @@ function createGroupSection(tree, groupId, rootNodeIds, query) {
 
 function rootBuckets(tree) {
   const pinned = [];
-  const grouped = new Map();
-  const ungrouped = [];
+  const blocks = [];
+  const groupBlockById = new Map();
 
   for (const rootNodeId of tree.rootNodeIds) {
     const node = tree.nodes[rootNodeId];
@@ -1767,22 +1897,25 @@ function rootBuckets(tree) {
       continue;
     }
     if (state.settings?.showGroupHeaders && node.groupId !== null) {
-      if (!grouped.has(node.groupId)) {
-        grouped.set(node.groupId, []);
+      if (!groupBlockById.has(node.groupId)) {
+        const block = {
+          type: "group",
+          groupId: node.groupId,
+          rootNodeIds: []
+        };
+        groupBlockById.set(node.groupId, block);
+        blocks.push(block);
       }
-      grouped.get(node.groupId).push(rootNodeId);
+      groupBlockById.get(node.groupId).rootNodeIds.push(rootNodeId);
       continue;
     }
-    ungrouped.push(rootNodeId);
+    blocks.push({
+      type: "node",
+      rootNodeId
+    });
   }
 
-  const groupedList = [...grouped.entries()].sort(([, a], [, b]) => {
-    const ai = tree.nodes[a[0]]?.index ?? 0;
-    const bi = tree.nodes[b[0]]?.index ?? 0;
-    return ai - bi;
-  });
-
-  return { pinned, groupedList, ungrouped };
+  return { pinned, blocks };
 }
 
 function renderTree() {
@@ -1797,7 +1930,7 @@ function renderTree() {
   }
 
   const query = state.search.trim().toLowerCase();
-  const { pinned, groupedList, ungrouped } = rootBuckets(tree);
+  const { pinned, blocks } = rootBuckets(tree);
 
   let renderedCount = 0;
 
@@ -1813,16 +1946,17 @@ function renderTree() {
     }
   }
 
-  for (const [groupId, roots] of groupedList) {
-    const section = createGroupSection(tree, groupId, roots, query);
-    if (section) {
-      dom.treeRoot.appendChild(section);
-      renderedCount += 1;
+  for (const block of blocks) {
+    if (block.type === "group") {
+      const section = createGroupSection(tree, block.groupId, block.rootNodeIds, query);
+      if (section) {
+        dom.treeRoot.appendChild(section);
+        renderedCount += 1;
+      }
+      continue;
     }
-  }
 
-  for (const rootNodeId of ungrouped) {
-    const el = createNodeElement(tree, rootNodeId, query, { showGroupBadge: true });
+    const el = createNodeElement(tree, block.rootNodeId, query, { showGroupBadge: true });
     if (el) {
       dom.treeRoot.appendChild(el);
       renderedCount += 1;
@@ -1877,7 +2011,7 @@ function bindEvents() {
   });
 
   dom.searchWrap.addEventListener("dragover", (event) => {
-    if (!state.draggingTabIds.length) {
+    if (!state.draggingTabIds.length || Number.isInteger(state.draggingGroupId)) {
       return;
     }
     event.preventDefault();

@@ -32,6 +32,8 @@ const state = {
 };
 
 const TAB_GROUP_COLORS = new Set(["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"]);
+const WINDOW_SYNC_DEBOUNCE_MS = 90;
+const syncTimers = new Map();
 
 const schedulePersist = createDebouncedPersister(async () => {
   await Promise.all(Object.values(state.windows).map((tree) => saveWindowTree(tree)));
@@ -291,6 +293,49 @@ async function pruneWindowTreeAgainstLiveTabs(windowId) {
   if (changed) {
     setWindowTree(next);
   }
+}
+
+async function syncWindowOrdering(windowId) {
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ windowId });
+  } catch {
+    return;
+  }
+
+  let next = windowTree(windowId);
+  const liveTabIds = new Set(tabs.map((tab) => tab.id));
+
+  for (const tab of tabs) {
+    next = upsertTabNode(next, tab);
+  }
+
+  const staleNodeIds = Object.keys(next.nodes).filter((id) => {
+    const tabId = next.nodes[id]?.tabId;
+    return Number.isFinite(tabId) && !liveTabIds.has(tabId);
+  });
+
+  for (const staleNodeId of staleNodeIds) {
+    if (!next.nodes[staleNodeId]) {
+      continue;
+    }
+    next = removeNodePromoteChildren(next, staleNodeId);
+  }
+
+  next = sortTreeByIndex(next);
+  setWindowTree(next);
+}
+
+function scheduleWindowOrderingSync(windowId) {
+  const existing = syncTimers.get(windowId);
+  if (existing) {
+    clearTimeout(existing);
+  }
+  const handle = setTimeout(() => {
+    syncTimers.delete(windowId);
+    void syncWindowOrdering(windowId);
+  }, WINDOW_SYNC_DEBOUNCE_MS);
+  syncTimers.set(windowId, handle);
 }
 
 async function ensureInitialized() {
@@ -611,6 +656,87 @@ async function batchReparent(tabIds, newParentTabId) {
   }
 }
 
+function insertionIndexForGroupMove(tabs, sourceTabIds, payload) {
+  const ordered = [...tabs].sort((a, b) => a.index - b.index);
+  const sourceSet = new Set(sourceTabIds);
+  const remaining = ordered.filter((tab) => !sourceSet.has(tab.id));
+  if (!remaining.length) {
+    return 0;
+  }
+
+  let targetPosition = null;
+  if (Number.isFinite(payload.targetTabId)) {
+    targetPosition = remaining.findIndex((tab) => tab.id === payload.targetTabId);
+  } else if (Number.isFinite(payload.targetGroupId)) {
+    const groupPositions = remaining
+      .map((tab, idx) => ({ tab, idx }))
+      .filter(({ tab }) => tab.groupId === payload.targetGroupId)
+      .map(({ idx }) => idx);
+    if (groupPositions.length) {
+      targetPosition = payload.position === "after"
+        ? groupPositions[groupPositions.length - 1]
+        : groupPositions[0];
+    }
+  }
+
+  if (targetPosition === null || targetPosition < 0) {
+    return remaining.length;
+  }
+
+  if (payload.position === "after") {
+    targetPosition += 1;
+  }
+
+  if (targetPosition >= remaining.length) {
+    return -1;
+  }
+  return remaining[targetPosition].index;
+}
+
+async function moveGroupBlock(payload) {
+  const sourceGroupId = payload.sourceGroupId;
+  const position = payload.position;
+  if (!Number.isInteger(sourceGroupId) || (position !== "before" && position !== "after")) {
+    return;
+  }
+
+  const windowId = await resolveGroupWindowId(sourceGroupId, payload.windowId);
+  if (!Number.isInteger(windowId)) {
+    return;
+  }
+
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ windowId });
+  } catch {
+    return;
+  }
+
+  const sourceTabs = tabs
+    .filter((tab) => tab.groupId === sourceGroupId)
+    .sort((a, b) => a.index - b.index);
+  const sourceTabIds = sourceTabs.map((tab) => tab.id);
+  if (!sourceTabIds.length) {
+    return;
+  }
+
+  if (Number.isFinite(payload.targetTabId) && sourceTabIds.includes(payload.targetTabId)) {
+    return;
+  }
+  if (Number.isFinite(payload.targetGroupId) && payload.targetGroupId === sourceGroupId) {
+    return;
+  }
+
+  const index = insertionIndexForGroupMove(tabs, sourceTabIds, payload);
+  try {
+    await chrome.tabs.move(sourceTabIds, { index });
+  } catch {
+    // Best effort.
+  }
+
+  scheduleWindowOrderingSync(windowId);
+}
+
 async function resolveGroupWindowId(groupId, windowIdHint = null) {
   if (Number.isInteger(windowIdHint)) {
     return windowIdHint;
@@ -695,6 +821,10 @@ async function handleTreeAction(payload) {
 
   if (type === TREE_ACTIONS.BATCH_REPARENT) {
     return batchReparent(payload.tabIds || [], payload.newParentTabId);
+  }
+
+  if (type === TREE_ACTIONS.MOVE_GROUP_BLOCK) {
+    return moveGroupBlock(payload);
   }
 
   if (type === TREE_ACTIONS.RENAME_GROUP) {
@@ -939,9 +1069,7 @@ chrome.tabs.onMoved.addListener(async (tabId) => {
   if (!tab) {
     return;
   }
-  const tree = windowTree(tab.windowId);
-  const next = sortTreeByIndex(upsertTabNode(tree, tab));
-  setWindowTree(next);
+  scheduleWindowOrderingSync(tab.windowId);
 });
 
 chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
@@ -995,11 +1123,13 @@ chrome.tabGroups.onCreated.addListener(async (group) => {
 
 chrome.tabGroups.onUpdated.addListener(async (group) => {
   await ensureInitialized();
+  scheduleWindowOrderingSync(group.windowId);
   await refreshGroupMetadata(group.windowId);
 });
 
 chrome.tabGroups.onMoved.addListener(async (group) => {
   await ensureInitialized();
+  scheduleWindowOrderingSync(group.windowId);
   await refreshGroupMetadata(group.windowId);
 });
 
