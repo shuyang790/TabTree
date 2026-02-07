@@ -670,6 +670,13 @@ function scopedUrls(tree, tabIds) {
     .filter((url) => typeof url === "string" && url.trim().length > 0);
 }
 
+function groupTabIds(tree, groupId) {
+  return Object.values(tree.nodes)
+    .filter((node) => node.groupId === groupId)
+    .map((node) => node.tabId)
+    .filter((tabId) => Number.isFinite(tabId));
+}
+
 async function executeContextMenuAction(action) {
   const tree = currentWindowTree();
   if (!tree) {
@@ -679,6 +686,23 @@ async function executeContextMenuAction(action) {
   if (action === "rename-group") {
     state.contextMenu.renameOpen = true;
     renderContextMenu();
+    return;
+  }
+
+  if (action === "close-group") {
+    const tabIds = groupTabIds(tree, state.contextMenu.groupId);
+    closeContextMenu();
+    if (!tabIds.length) {
+      return;
+    }
+    await requestClose(
+      {
+        kind: "batch-tabs",
+        tabIds
+      },
+      tabIds.length,
+      true
+    );
     return;
   }
 
@@ -858,6 +882,10 @@ function buildGroupContextMenu(tree) {
   const groupId = state.contextMenu.groupId;
   const group = tree.groups?.[groupId];
   const groupExists = !!group;
+  const closeTabIds = groupTabIds(tree, groupId);
+  const closeLabel = closeTabIds.length <= 1
+    ? "Close tab group"
+    : `Close tab group (${closeTabIds.length})`;
 
   if (!state.contextMenu.renameOpen) {
     fragment.appendChild(createContextMenuButton("Rename group...", "rename-group", !groupExists));
@@ -956,6 +984,10 @@ function buildGroupContextMenu(tree) {
 
   submenu.append(trigger, panel);
   fragment.appendChild(submenu);
+  fragment.appendChild(createContextMenuSeparator());
+  fragment.appendChild(
+    createContextMenuButton(closeLabel, "close-group", !groupExists || closeTabIds.length === 0)
+  );
 
   return fragment;
 }

@@ -229,6 +229,70 @@ async function groupLiveTabIdsByWindow(tabIds) {
   return grouped;
 }
 
+function removeTabIdsFromWindowTree(windowId, tabIds) {
+  const uniqueTabIds = Array.from(new Set(tabIds.filter((id) => Number.isFinite(id))));
+  if (!uniqueTabIds.length) {
+    return false;
+  }
+
+  let next = windowTree(windowId);
+  let changed = false;
+  for (const tabId of uniqueTabIds) {
+    const staleNodeId = nodeIdFromTabId(tabId);
+    if (!next.nodes[staleNodeId]) {
+      continue;
+    }
+    next = removeNodePromoteChildren(next, staleNodeId);
+    changed = true;
+  }
+
+  if (changed) {
+    setWindowTree(next);
+  }
+  return changed;
+}
+
+async function pruneWindowTreeAgainstLiveTabs(windowId) {
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ windowId });
+  } catch {
+    return;
+  }
+
+  let next = windowTree(windowId);
+  const liveTabIds = new Set(tabs.map((tab) => tab.id));
+  const staleNodeIds = Object.keys(next.nodes).filter((id) => {
+    const tabId = next.nodes[id]?.tabId;
+    return Number.isFinite(tabId) && !liveTabIds.has(tabId);
+  });
+
+  let changed = false;
+  for (const staleNodeId of staleNodeIds) {
+    if (!next.nodes[staleNodeId]) {
+      continue;
+    }
+    next = removeNodePromoteChildren(next, staleNodeId);
+    changed = true;
+  }
+
+  const selectedIsLive = Number.isFinite(next.selectedTabId) && liveTabIds.has(next.selectedTabId);
+  const activeTabId = tabs.find((tab) => tab.active)?.id ?? null;
+  const desiredSelectedTabId = selectedIsLive ? next.selectedTabId : activeTabId;
+  if (next.selectedTabId !== desiredSelectedTabId) {
+    next = {
+      ...next,
+      selectedTabId: desiredSelectedTabId,
+      updatedAt: Date.now()
+    };
+    changed = true;
+  }
+
+  if (changed) {
+    setWindowTree(next);
+  }
+}
+
 async function ensureInitialized() {
   if (state.initialized) {
     return;
@@ -329,6 +393,7 @@ async function closeSubtree(windowId, tabId, includeDescendants = true) {
     } catch {
       // Tab may already be closed.
     }
+    await pruneWindowTreeAgainstLiveTabs(windowId);
     return;
   }
 
@@ -336,10 +401,16 @@ async function closeSubtree(windowId, tabId, includeDescendants = true) {
   const nodeId = nodeIdFromTabId(tabId);
   const { tree: next, removedTabIds } = removeSubtree(tree, nodeId);
   if (!removedTabIds.length) {
+    await pruneWindowTreeAgainstLiveTabs(windowId);
     return;
   }
   setWindowTree(next);
-  await chrome.tabs.remove(removedTabIds);
+  try {
+    await chrome.tabs.remove(removedTabIds);
+  } catch {
+    // Best effort.
+  }
+  await pruneWindowTreeAgainstLiveTabs(windowId);
 }
 
 async function activateTab(tabId) {
@@ -374,23 +445,61 @@ async function batchCloseSubtrees(tabIds) {
     const uniqueRemoveIds = Array.from(new Set(removeTabIds));
     setWindowTree(next);
     if (uniqueRemoveIds.length) {
-      await chrome.tabs.remove(uniqueRemoveIds);
+      try {
+        await chrome.tabs.remove(uniqueRemoveIds);
+      } catch {
+        // Best effort.
+      }
     }
+    await pruneWindowTreeAgainstLiveTabs(windowId);
   }
 }
 
 async function batchCloseTabs(tabIds) {
-  const grouped = await groupLiveTabIdsByWindow(tabIds);
-  for (const [, ids] of grouped.entries()) {
-    const uniqueTabIds = Array.from(new Set(ids));
-    if (!uniqueTabIds.length) {
-      continue;
+  const requestedIds = Array.from(new Set(tabIds.filter((id) => Number.isFinite(id))));
+  if (!requestedIds.length) {
+    return;
+  }
+
+  const requestedByWindow = new Map();
+  for (const tabId of requestedIds) {
+    const nodeId = nodeIdFromTabId(tabId);
+    for (const tree of Object.values(state.windows)) {
+      if (!tree.nodes[nodeId]) {
+        continue;
+      }
+      if (!requestedByWindow.has(tree.windowId)) {
+        requestedByWindow.set(tree.windowId, []);
+      }
+      requestedByWindow.get(tree.windowId).push(tabId);
+      break;
     }
-    try {
-      await chrome.tabs.remove(uniqueTabIds);
-    } catch {
-      // Best effort.
+  }
+
+  const liveByWindow = await groupLiveTabIdsByWindow(requestedIds);
+  const affectedWindowIds = new Set([
+    ...requestedByWindow.keys(),
+    ...liveByWindow.keys()
+  ]);
+
+  for (const windowId of affectedWindowIds) {
+    const requestedInWindow = Array.from(new Set(requestedByWindow.get(windowId) || []));
+    const liveInWindow = Array.from(new Set(liveByWindow.get(windowId) || []));
+    const liveSet = new Set(liveInWindow);
+    const staleInWindow = requestedInWindow.filter((id) => !liveSet.has(id));
+
+    if (staleInWindow.length) {
+      removeTabIdsFromWindowTree(windowId, staleInWindow);
     }
+
+    if (liveInWindow.length) {
+      try {
+        await chrome.tabs.remove(liveInWindow);
+      } catch {
+        // Best effort.
+      }
+    }
+    await pruneWindowTreeAgainstLiveTabs(windowId);
   }
 }
 
@@ -621,6 +730,22 @@ async function handleTreeAction(payload) {
     return;
   }
 
+  if (type === TREE_ACTIONS.CLOSE_SUBTREE) {
+    const closingTab = await getTab(payload.tabId);
+    if (closingTab) {
+      await closeSubtree(closingTab.windowId, payload.tabId, payload.includeDescendants ?? true);
+      return;
+    }
+
+    const staleNodeId = nodeIdFromTabId(payload.tabId);
+    const staleWindowId = Object.values(state.windows).find((win) => !!win.nodes[staleNodeId])?.windowId;
+    if (Number.isInteger(staleWindowId)) {
+      removeTabIdsFromWindowTree(staleWindowId, [payload.tabId]);
+      await pruneWindowTreeAgainstLiveTabs(staleWindowId);
+    }
+    return;
+  }
+
   const tab = await getTab(payload.tabId);
   if (!tab) {
     return;
@@ -685,10 +810,6 @@ async function handleTreeAction(payload) {
       }
     }
     return;
-  }
-
-  if (type === TREE_ACTIONS.CLOSE_SUBTREE) {
-    await closeSubtree(tab.windowId, payload.tabId, payload.includeDescendants ?? true);
   }
 }
 
