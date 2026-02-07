@@ -158,6 +158,23 @@ function childInsertIndex(tree, parentNodeId, fallbackIndex) {
   return maxIndex + 1;
 }
 
+function initialTabUrl(tab) {
+  if (typeof tab?.pendingUrl === "string" && tab.pendingUrl.length > 0) {
+    return tab.pendingUrl;
+  }
+  if (typeof tab?.url === "string") {
+    return tab.url;
+  }
+  return "";
+}
+
+function isBrowserNewTabUrl(url) {
+  if (typeof url !== "string" || !url) {
+    return false;
+  }
+  return url === "chrome://newtab/" || url === "chrome://newtab";
+}
+
 function canReparent(tree, movingNodeId, parentNodeId) {
   const moving = tree.nodes[movingNodeId];
   if (!moving) {
@@ -659,8 +676,9 @@ chrome.tabs.onCreated.addListener(async (tab) => {
   const tree = windowTree(tab.windowId);
   const openerNodeId = Number.isInteger(tab.openerTabId) ? nodeIdFromTabId(tab.openerTabId) : null;
   const openerNode = openerNodeId ? tree.nodes[openerNodeId] : null;
+  const createdUrl = initialTabUrl(tab);
 
-  if (openerNode && !!openerNode.pinned === !!tab.pinned) {
+  if (openerNode && !!openerNode.pinned === !!tab.pinned && !isBrowserNewTabUrl(createdUrl)) {
     setWindowTree(upsertTabNode(tree, tab, { parentNodeId: openerNodeId }));
     return;
   }
