@@ -16,28 +16,28 @@ function rowByTitle(sidePanelPage, title) {
 
 test.describe("TabTree extension", () => {
   test("loads side panel app shell", async ({ sidePanelPage }) => {
-    await expect(sidePanelPage.getByPlaceholder("Search tabs by title or URL")).toBeVisible();
-    await expect(sidePanelPage.getByRole("button", { name: "Settings" })).toBeVisible();
-    await expect(sidePanelPage.getByRole("button", { name: "Add child tab" })).toBeVisible();
+    await expect(sidePanelPage.locator("#search")).toBeVisible();
+    await expect(sidePanelPage.locator("#open-settings")).toBeVisible();
+    await expect(sidePanelPage.locator("#add-child-global")).toBeVisible();
     await expect(sidePanelPage.locator(".tree-root")).toBeVisible();
   });
 
   test("opens settings panel and persists a setting", async ({ sidePanelPage }) => {
-    await sidePanelPage.getByRole("button", { name: "Settings" }).click();
+    await sidePanelPage.locator("#open-settings").click();
     const densitySelect = sidePanelPage.locator('select[name="density"]');
     await expect(densitySelect).toBeVisible();
 
     await densitySelect.selectOption("compact");
 
     await sidePanelPage.reload();
-    await sidePanelPage.getByRole("button", { name: "Settings" }).click();
+    await sidePanelPage.locator("#open-settings").click();
     await expect(sidePanelPage.locator('select[name="density"]')).toHaveValue("compact");
   });
 
   test("add child action opens a new tab", async ({ context, sidePanelPage }) => {
     const beforeCount = context.pages().length;
 
-    await sidePanelPage.getByRole("button", { name: "Add child tab" }).click();
+    await sidePanelPage.locator("#add-child-global").click();
 
     await expect
       .poll(() => context.pages().length, { message: "Expected add-child to create a new tab" })
@@ -58,7 +58,7 @@ test.describe("TabTree extension", () => {
     await rowB.click({ modifiers: ["Shift"] });
     await rowB.click({ button: "right" });
 
-    const closeSelected = sidePanelPage.getByRole("button", { name: /Close .*selected tab/i });
+    const closeSelected = sidePanelPage.locator('.context-menu-item[data-action="close-selected-tabs"]');
     await expect(closeSelected).toBeVisible();
     await closeSelected.click();
 
@@ -88,14 +88,14 @@ test.describe("TabTree extension", () => {
     await rowB.click({ modifiers: ["Shift"] });
     await rowA.click({ button: "right" });
 
-    await sidePanelPage.getByRole("button", { name: "Add selected to new tab group" }).click();
+    await sidePanelPage.locator('.context-menu-item[data-action="group-selected-new"]').click();
 
     const groupSection = sidePanelPage.locator(".group-section").filter({ has: rowA }).first();
     const groupHeader = groupSection.locator(".group-header");
     await expect(groupHeader).toBeVisible();
 
     await groupHeader.click({ button: "right" });
-    await sidePanelPage.getByRole("button", { name: "Rename group..." }).click();
+    await sidePanelPage.locator('.context-menu-item[data-action="rename-group"]').click();
 
     const renameInput = sidePanelPage.locator(".context-rename-input");
     await expect(renameInput).toBeVisible();
@@ -109,10 +109,10 @@ test.describe("TabTree extension", () => {
     await expect(renamedHeader).toBeVisible();
 
     await renamedHeader.click({ button: "right" });
-    const colorTrigger = sidePanelPage.getByRole("button", { name: "Color" });
+    const colorTrigger = sidePanelPage.locator('.context-submenu-trigger[data-action="group-color"]');
     await expect(colorTrigger).toBeVisible();
     await colorTrigger.hover();
-    await sidePanelPage.getByRole("button", { name: "Red" }).click();
+    await sidePanelPage.locator('.context-color-item[data-color="red"]').click();
 
     await expect.poll(async () => {
       const colorDot = sidePanelPage

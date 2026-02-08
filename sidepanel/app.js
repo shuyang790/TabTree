@@ -13,15 +13,15 @@ const GROUP_COLOR_MAP = {
 };
 
 const GROUP_COLOR_OPTIONS = [
-  { value: "grey", label: "Grey" },
-  { value: "blue", label: "Blue" },
-  { value: "red", label: "Red" },
-  { value: "yellow", label: "Yellow" },
-  { value: "green", label: "Green" },
-  { value: "pink", label: "Pink" },
-  { value: "purple", label: "Purple" },
-  { value: "cyan", label: "Cyan" },
-  { value: "orange", label: "Orange" }
+  { value: "grey", labelKey: "colorGrey" },
+  { value: "blue", labelKey: "colorBlue" },
+  { value: "red", labelKey: "colorRed" },
+  { value: "yellow", labelKey: "colorYellow" },
+  { value: "green", labelKey: "colorGreen" },
+  { value: "pink", labelKey: "colorPink" },
+  { value: "purple", labelKey: "colorPurple" },
+  { value: "cyan", labelKey: "colorCyan" },
+  { value: "orange", labelKey: "colorOrange" }
 ];
 
 const BASE_THEME_TOKENS = {
@@ -319,6 +319,44 @@ if (dom.contextMenu) {
   dom.contextMenu.tabIndex = -1;
 }
 
+function t(key, substitutions = [], fallback = key) {
+  const substitutionsList = Array.isArray(substitutions) ? substitutions : [substitutions];
+  const message = chrome.i18n.getMessage(key, substitutionsList);
+  return message || fallback;
+}
+
+function localizeStaticUi() {
+  const uiLanguage = chrome.i18n.getUILanguage();
+  if (uiLanguage) {
+    document.documentElement.lang = uiLanguage;
+  }
+
+  for (const element of document.querySelectorAll("[data-i18n]")) {
+    const key = element.dataset.i18n;
+    element.textContent = t(key, [], element.textContent);
+  }
+
+  for (const element of document.querySelectorAll("[data-i18n-title]")) {
+    const key = element.dataset.i18nTitle;
+    const fallback = element.getAttribute("title") || "";
+    element.setAttribute("title", t(key, [], fallback));
+  }
+
+  for (const element of document.querySelectorAll("[data-i18n-placeholder]")) {
+    const key = element.dataset.i18nPlaceholder;
+    const fallback = element.getAttribute("placeholder") || "";
+    element.setAttribute("placeholder", t(key, [], fallback));
+  }
+
+  for (const element of document.querySelectorAll("[data-i18n-aria-label]")) {
+    const key = element.dataset.i18nAriaLabel;
+    const fallback = element.getAttribute("aria-label") || "";
+    element.setAttribute("aria-label", t(key, [], fallback));
+  }
+}
+
+localizeStaticUi();
+
 function nodeId(tabId) {
   return `tab:${tabId}`;
 }
@@ -504,7 +542,11 @@ function updateShortcutHint() {
     dom.hintBar.textContent = "";
     return;
   }
-  dom.hintBar.textContent = "Shift+Click selects range. Right-click for actions. Drag search bar to move to top-level.";
+  dom.hintBar.textContent = t(
+    "shortcutHintText",
+    [],
+    "Shift+Click selects range. Right-click for actions. Drag search bar to move to top-level."
+  );
 }
 
 function updateBatchBar() {
@@ -515,7 +557,7 @@ function updateBatchBar() {
     return;
   }
   dom.batchBar.hidden = false;
-  dom.batchCount.textContent = `${count} selected`;
+  dom.batchCount.textContent = t("selectedCount", [String(count)], `${count} selected`);
 }
 
 function resolveContextScopeTabIds(primaryTabId) {
@@ -826,6 +868,7 @@ function createContextMenuButton(label, action, disabled = false) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "context-menu-item";
+  button.dataset.action = action;
   button.textContent = label;
   button.disabled = disabled;
   button.addEventListener("click", async (event) => {
@@ -849,30 +892,34 @@ function buildTabContextMenu(tree) {
   const closeCount = scopeTabIds.length;
   const hasGroupedTabs = scopeTabIds.some((tabId) => tree.nodes[nodeId(tabId)]?.groupId !== null);
   const closeLabel = closeCount === 0
-    ? "Close selected tab(s)"
+    ? t("closeSelectedTabsGeneric", [], "Close selected tab(s)")
     : closeCount === 1
-      ? "Close selected tab"
-      : `Close ${closeCount} selected tabs`;
+      ? t("closeSelectedTab", [], "Close selected tab")
+      : t("closeSelectedTabsMany", [String(closeCount)], `Close ${closeCount} selected tabs`);
   const copyUrls = scopedUrls(tree, scopeTabIds);
 
   fragment.appendChild(
     createContextMenuButton(closeLabel, "close-selected-tabs", closeCount === 0)
   );
   fragment.appendChild(
-    createContextMenuButton("Add selected to new tab group", "group-selected-new", closeCount === 0 || hasGroupedTabs)
+    createContextMenuButton(
+      t("addSelectedToNewTabGroup", [], "Add selected to new tab group"),
+      "group-selected-new",
+      closeCount === 0 || hasGroupedTabs
+    )
   );
   fragment.appendChild(createContextMenuSeparator());
   fragment.appendChild(
-    createContextMenuButton("Add child tab", "add-child", !primaryNode)
+    createContextMenuButton(t("addChildTab", [], "Add child tab"), "add-child", !primaryNode)
   );
   fragment.appendChild(
-    createContextMenuButton("Move selected to top-level", "move-selected-root", closeCount === 0)
+    createContextMenuButton(t("moveSelectedToTopLevel", [], "Move selected to top-level"), "move-selected-root", closeCount === 0)
   );
   fragment.appendChild(
-    createContextMenuButton("Toggle collapse", "toggle-collapse", !primaryNode?.childNodeIds?.length)
+    createContextMenuButton(t("toggleCollapse", [], "Toggle collapse"), "toggle-collapse", !primaryNode?.childNodeIds?.length)
   );
   fragment.appendChild(
-    createContextMenuButton("Copy URL(s)", "copy-urls", !copyUrls.length)
+    createContextMenuButton(t("copyUrls", [], "Copy URL(s)"), "copy-urls", !copyUrls.length)
   );
 
   return fragment;
@@ -885,11 +932,11 @@ function buildGroupContextMenu(tree) {
   const groupExists = !!group;
   const closeTabIds = groupTabIds(tree, groupId);
   const closeLabel = closeTabIds.length <= 1
-    ? "Close tab group"
-    : `Close tab group (${closeTabIds.length})`;
+    ? t("closeTabGroup", [], "Close tab group")
+    : t("closeTabGroupWithCount", [String(closeTabIds.length)], `Close tab group (${closeTabIds.length})`);
 
   if (!state.contextMenu.renameOpen) {
-    fragment.appendChild(createContextMenuButton("Rename group...", "rename-group", !groupExists));
+    fragment.appendChild(createContextMenuButton(t("renameGroup", [], "Rename group..."), "rename-group", !groupExists));
   } else {
     const form = document.createElement("form");
     form.className = "context-rename-form";
@@ -899,7 +946,7 @@ function buildGroupContextMenu(tree) {
     input.className = "context-rename-input";
     input.name = "group-title";
     input.value = group?.title || "";
-    input.placeholder = "Group name";
+    input.placeholder = t("groupNamePlaceholder", [], "Group name");
     input.autocomplete = "off";
     input.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
@@ -911,7 +958,7 @@ function buildGroupContextMenu(tree) {
     const apply = document.createElement("button");
     apply.type = "submit";
     apply.className = "context-rename-apply";
-    apply.textContent = "Save";
+    apply.textContent = t("save", [], "Save");
 
     form.append(input, apply);
     fragment.appendChild(form);
@@ -923,7 +970,8 @@ function buildGroupContextMenu(tree) {
   const trigger = document.createElement("button");
   trigger.type = "button";
   trigger.className = "context-menu-item context-submenu-trigger";
-  trigger.textContent = "Color";
+  trigger.dataset.action = "group-color";
+  trigger.textContent = t("color", [], "Color");
   trigger.disabled = !groupExists;
   trigger.setAttribute("aria-haspopup", "menu");
   trigger.setAttribute("aria-expanded", "false");
@@ -950,7 +998,7 @@ function buildGroupContextMenu(tree) {
     dot.style.setProperty("--group-color", GROUP_COLOR_MAP[option.value]);
 
     const label = document.createElement("span");
-    label.textContent = option.label;
+    label.textContent = t(option.labelKey, [], option.value);
 
     colorBtn.append(dot, label);
     panel.appendChild(colorBtn);
@@ -1059,7 +1107,7 @@ function matchesSearch(node, query) {
 function groupDisplay(tree, groupId) {
   const group = tree.groups?.[groupId] || null;
   return {
-    name: group?.title?.trim() || `Group ${groupId}`,
+    name: group?.title?.trim() || t("groupFallbackName", [String(groupId)], `Group ${groupId}`),
     color: GROUP_COLOR_MAP[group?.color] || GROUP_COLOR_MAP.grey,
     collapsed: !!group?.collapsed
   };
@@ -1265,7 +1313,11 @@ async function requestClose(action, totalTabs, isBatch) {
   }
 
   state.pendingCloseAction = { action, isBatch };
-  dom.confirmMessage.textContent = `This will close ${totalTabs} tabs. Continue?`;
+  dom.confirmMessage.textContent = t(
+    "confirmCloseMessage",
+    [String(totalTabs)],
+    `This will close ${totalTabs} tabs. Continue?`
+  );
   dom.confirmSkip.checked = false;
   dom.confirmOverlay.hidden = false;
 }
@@ -1480,13 +1532,13 @@ function createNodeRow(tree, node, options = {}) {
   }
   if (node.pinned) {
     row.classList.add("pinned-row");
-    row.title = node.lastKnownTitle || "Pinned tab";
+    row.title = node.lastKnownTitle || t("pinnedTabTitle", [], "Pinned tab");
   }
 
   const twisty = document.createElement("button");
   twisty.className = "twisty";
   twisty.textContent = node.childNodeIds.length ? (node.collapsed ? "▸" : "▾") : "";
-  twisty.title = node.childNodeIds.length ? "Toggle children" : "";
+  twisty.title = node.childNodeIds.length ? t("toggleChildren", [], "Toggle children") : "";
   twisty.addEventListener("click", async (event) => {
     event.stopPropagation();
     if (!node.childNodeIds.length) {
@@ -1508,7 +1560,7 @@ function createNodeRow(tree, node, options = {}) {
   titleWrap.className = "title-wrap";
   const title = document.createElement("span");
   title.className = "title";
-  title.textContent = node.lastKnownTitle || "Untitled tab";
+  title.textContent = node.lastKnownTitle || t("untitledTab", [], "Untitled tab");
   titleWrap.appendChild(title);
 
   const badges = document.createElement("span");
@@ -1531,7 +1583,7 @@ function createNodeRow(tree, node, options = {}) {
   const addChild = document.createElement("button");
   addChild.className = "icon-btn";
   addChild.textContent = "+";
-  addChild.title = "Add child tab";
+  addChild.title = t("addChildTab", [], "Add child tab");
   addChild.addEventListener("click", async (event) => {
     event.stopPropagation();
     await send(MESSAGE_TYPES.TREE_ACTION, {
@@ -1546,7 +1598,9 @@ function createNodeRow(tree, node, options = {}) {
     const close = document.createElement("button");
     close.className = "icon-btn";
     close.textContent = "×";
-    close.title = closesSubtree ? "Close subtree" : "Close tab";
+    close.title = closesSubtree
+      ? t("closeSubtree", [], "Close subtree")
+      : t("closeTab", [], "Close tab");
     close.addEventListener("click", async (event) => {
       event.stopPropagation();
 
@@ -1778,7 +1832,9 @@ function createGroupSection(tree, groupId, rootNodeIds, query) {
   header.setAttribute("role", "button");
   header.setAttribute("tabindex", "0");
   header.setAttribute("aria-expanded", String(!group.collapsed));
-  header.title = group.collapsed ? "Expand group" : "Collapse group";
+  header.title = group.collapsed
+    ? t("expandGroup", [], "Expand group")
+    : t("collapseGroup", [], "Collapse group");
   header.draggable = true;
 
   const colorDot = document.createElement("span");
@@ -1924,7 +1980,7 @@ function renderTree() {
   if (!tree) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "No tabs available.";
+    empty.textContent = t("noTabsAvailable", [], "No tabs available.");
     dom.treeRoot.appendChild(empty);
     return;
   }
@@ -1937,7 +1993,7 @@ function renderTree() {
   if (pinned.length) {
     const pinLabel = document.createElement("div");
     pinLabel.className = "section-title";
-    pinLabel.textContent = "Pinned";
+    pinLabel.textContent = t("sectionPinned", [], "Pinned");
     dom.treeRoot.appendChild(pinLabel);
     const { element, renderedCount: pinnedCount } = createPinnedStrip(tree, pinned, query);
     if (element) {
@@ -1966,7 +2022,9 @@ function renderTree() {
   if (!renderedCount) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = query ? "No tabs match your search." : "No tabs in this window.";
+    empty.textContent = query
+      ? t("noTabsMatchSearch", [], "No tabs match your search.")
+      : t("noTabsInWindow", [], "No tabs in this window.");
     dom.treeRoot.appendChild(empty);
   }
 }

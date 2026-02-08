@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "TabTree",
-  "description": "Tree-style vertical tabs in Chrome side panel.",
+  "name": "__MSG_extName__",
+  "description": "__MSG_extDescription__",
   "version": "0.2.4",
+  "default_locale": "en",
   "minimum_chrome_version": "140",
   "permissions": ["tabs", "storage", "sidePanel", "tabGroups", "sessions"],
   "background": {
@@ -13,7 +14,7 @@
     "default_path": "sidepanel/index.html"
   },
   "action": {
-    "default_title": "TabTree",
+    "default_title": "__MSG_actionDefaultTitle__",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -29,23 +30,23 @@
   },
   "commands": {
     "add-child-tab": {
-      "description": "Add a child tab under the active tab"
+      "description": "__MSG_cmdAddChildDescription__"
     },
     "focus-side-panel": {
-      "description": "Focus TabTree side panel",
+      "description": "__MSG_cmdFocusPanelDescription__",
       "suggested_key": {
         "default": "Ctrl+Shift+Y",
         "mac": "Command+Shift+Y"
       }
     },
     "promote-tab-level": {
-      "description": "Promote active tab one tree level"
+      "description": "__MSG_cmdPromoteTabLevelDescription__"
     },
     "toggle-collapse-node": {
-      "description": "Toggle collapse for active tab node"
+      "description": "__MSG_cmdToggleCollapseDescription__"
     },
     "move-tab-under-previous-sibling": {
-      "description": "Reparent active tab under previous root sibling"
+      "description": "__MSG_cmdMoveUnderPreviousRootSiblingDescription__"
     }
   }
 }

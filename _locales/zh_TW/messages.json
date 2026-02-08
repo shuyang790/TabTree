@@ -1,0 +1,221 @@
+{
+  "extName": {
+    "message": "TabTree"
+  },
+  "extDescription": {
+    "message": "Chrome 側欄中的樹狀垂直分頁。"
+  },
+  "actionDefaultTitle": {
+    "message": "TabTree"
+  },
+  "cmdAddChildDescription": {
+    "message": "在目前分頁下新增子分頁"
+  },
+  "cmdFocusPanelDescription": {
+    "message": "聚焦 TabTree 側欄"
+  },
+  "cmdPromoteTabLevelDescription": {
+    "message": "將目前分頁提升一層"
+  },
+  "cmdToggleCollapseDescription": {
+    "message": "切換目前分頁節點的收合狀態"
+  },
+  "cmdMoveUnderPreviousRootSiblingDescription": {
+    "message": "將目前分頁重新掛到上一個根同層節點下"
+  },
+  "searchPlaceholder": {
+    "message": "依標題或 URL 搜尋分頁"
+  },
+  "addChildTab": {
+    "message": "新增子分頁"
+  },
+  "settings": {
+    "message": "設定"
+  },
+  "dropToTopLevelHint": {
+    "message": "拖放到這裡可移到頂層"
+  },
+  "tabTreeAriaLabel": {
+    "message": "分頁樹"
+  },
+  "settingsPanelTitle": {
+    "message": "外觀與行為"
+  },
+  "close": {
+    "message": "關閉"
+  },
+  "lightAppearance": {
+    "message": "淺色外觀"
+  },
+  "darkAppearance": {
+    "message": "深色外觀"
+  },
+  "accentColor": {
+    "message": "強調色"
+  },
+  "density": {
+    "message": "密度"
+  },
+  "densityCompact": {
+    "message": "緊湊"
+  },
+  "densityComfortable": {
+    "message": "舒適"
+  },
+  "densityCozy": {
+    "message": "寬鬆"
+  },
+  "densitySpacious": {
+    "message": "寬敞"
+  },
+  "fontScale": {
+    "message": "字體縮放"
+  },
+  "indentWidth": {
+    "message": "縮排寬度"
+  },
+  "cornerRadius": {
+    "message": "圓角半徑"
+  },
+  "showFavicons": {
+    "message": "顯示網站圖示"
+  },
+  "showCloseButtons": {
+    "message": "顯示關閉按鈕"
+  },
+  "showGroupSubtrees": {
+    "message": "顯示群組子樹"
+  },
+  "showShortcutHints": {
+    "message": "顯示快捷提示"
+  },
+  "confirmBeforeClosingTree": {
+    "message": "關閉樹狀結構前確認（2+ 個分頁）"
+  },
+  "closeTabsQuestion": {
+    "message": "要關閉分頁嗎？"
+  },
+  "dontAskAgain": {
+    "message": "不要再詢問"
+  },
+  "cancel": {
+    "message": "取消"
+  },
+  "tabActionsAriaLabel": {
+    "message": "分頁操作"
+  },
+  "shortcutHintText": {
+    "message": "Shift+點擊可做範圍選取。右鍵可查看更多操作。拖曳搜尋列可移到頂層。"
+  },
+  "selectedCount": {
+    "message": "已選取 $1 項"
+  },
+  "closeSelectedTabsGeneric": {
+    "message": "關閉已選分頁"
+  },
+  "closeSelectedTab": {
+    "message": "關閉已選分頁"
+  },
+  "closeSelectedTabsMany": {
+    "message": "關閉 $1 個已選分頁"
+  },
+  "addSelectedToNewTabGroup": {
+    "message": "將已選項目加入新分頁群組"
+  },
+  "moveSelectedToTopLevel": {
+    "message": "將已選項目移到頂層"
+  },
+  "toggleCollapse": {
+    "message": "切換收合"
+  },
+  "copyUrls": {
+    "message": "複製 URL"
+  },
+  "closeTabGroup": {
+    "message": "關閉分頁群組"
+  },
+  "closeTabGroupWithCount": {
+    "message": "關閉分頁群組（$1）"
+  },
+  "renameGroup": {
+    "message": "重新命名群組..."
+  },
+  "groupNamePlaceholder": {
+    "message": "群組名稱"
+  },
+  "save": {
+    "message": "儲存"
+  },
+  "color": {
+    "message": "顏色"
+  },
+  "colorGrey": {
+    "message": "灰色"
+  },
+  "colorBlue": {
+    "message": "藍色"
+  },
+  "colorRed": {
+    "message": "紅色"
+  },
+  "colorYellow": {
+    "message": "黃色"
+  },
+  "colorGreen": {
+    "message": "綠色"
+  },
+  "colorPink": {
+    "message": "粉紅色"
+  },
+  "colorPurple": {
+    "message": "紫色"
+  },
+  "colorCyan": {
+    "message": "青色"
+  },
+  "colorOrange": {
+    "message": "橘色"
+  },
+  "confirmCloseMessage": {
+    "message": "這將關閉 $1 個分頁。要繼續嗎？"
+  },
+  "pinnedTabTitle": {
+    "message": "已釘選分頁"
+  },
+  "toggleChildren": {
+    "message": "切換子項目"
+  },
+  "expandGroup": {
+    "message": "展開群組"
+  },
+  "collapseGroup": {
+    "message": "收合群組"
+  },
+  "untitledTab": {
+    "message": "未命名分頁"
+  },
+  "closeSubtree": {
+    "message": "關閉子樹"
+  },
+  "closeTab": {
+    "message": "關閉分頁"
+  },
+  "noTabsAvailable": {
+    "message": "沒有可用分頁。"
+  },
+  "sectionPinned": {
+    "message": "已釘選"
+  },
+  "noTabsMatchSearch": {
+    "message": "沒有分頁符合你的搜尋。"
+  },
+  "noTabsInWindow": {
+    "message": "此視窗中沒有分頁。"
+  },
+  "groupFallbackName": {
+    "message": "群組 $1"
+  },
+  "unnamedGroup": {
+    "message": "未命名群組"
+  }
+}

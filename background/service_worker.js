@@ -35,6 +35,10 @@ const TAB_GROUP_COLORS = new Set(["grey", "blue", "red", "yellow", "green", "pin
 const WINDOW_SYNC_DEBOUNCE_MS = 90;
 const syncTimers = new Map();
 
+function t(key, fallback = key) {
+  return chrome.i18n.getMessage(key) || fallback;
+}
+
 const schedulePersist = createDebouncedPersister(async () => {
   await Promise.all(Object.values(state.windows).map((tree) => saveWindowTree(tree)));
   await saveSyncSnapshot(state.windows);
@@ -133,7 +137,7 @@ async function refreshGroupMetadata(windowId) {
   for (const group of groups) {
     groupMap[group.id] = {
       id: group.id,
-      title: group.title || "Unnamed group",
+      title: group.title || t("unnamedGroup", "Unnamed group"),
       color: group.color,
       collapsed: !!group.collapsed
     };
@@ -385,7 +389,7 @@ async function hydrateWindow(windowId, tabs) {
   for (const group of groups) {
     tree.groups[group.id] = {
       id: group.id,
-      title: group.title || "Unnamed group",
+      title: group.title || t("unnamedGroup", "Unnamed group"),
       color: group.color,
       collapsed: !!group.collapsed
     };

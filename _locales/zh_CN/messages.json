@@ -1,0 +1,221 @@
+{
+  "extName": {
+    "message": "TabTree"
+  },
+  "extDescription": {
+    "message": "Chrome 边栏中的树状垂直选项卡。"
+  },
+  "actionDefaultTitle": {
+    "message": "TabTree"
+  },
+  "cmdAddChildDescription": {
+    "message": "在活动标签页下添加子标签页"
+  },
+  "cmdFocusPanelDescription": {
+    "message": "聚焦 TabTree 边栏"
+  },
+  "cmdPromoteTabLevelDescription": {
+    "message": "将活动标签页提升一级"
+  },
+  "cmdToggleCollapseDescription": {
+    "message": "切换活动标签页节点折叠状态"
+  },
+  "cmdMoveUnderPreviousRootSiblingDescription": {
+    "message": "将活动标签页重新挂到前一个根同级节点下"
+  },
+  "searchPlaceholder": {
+    "message": "按标题或 URL 搜索标签页"
+  },
+  "addChildTab": {
+    "message": "添加子标签页"
+  },
+  "settings": {
+    "message": "设置"
+  },
+  "dropToTopLevelHint": {
+    "message": "拖放到这里可移动到顶层"
+  },
+  "tabTreeAriaLabel": {
+    "message": "标签树"
+  },
+  "settingsPanelTitle": {
+    "message": "外观与行为"
+  },
+  "close": {
+    "message": "关闭"
+  },
+  "lightAppearance": {
+    "message": "浅色外观"
+  },
+  "darkAppearance": {
+    "message": "深色外观"
+  },
+  "accentColor": {
+    "message": "强调色"
+  },
+  "density": {
+    "message": "密度"
+  },
+  "densityCompact": {
+    "message": "紧凑"
+  },
+  "densityComfortable": {
+    "message": "舒适"
+  },
+  "densityCozy": {
+    "message": "宽松"
+  },
+  "densitySpacious": {
+    "message": "宽敞"
+  },
+  "fontScale": {
+    "message": "字体缩放"
+  },
+  "indentWidth": {
+    "message": "缩进宽度"
+  },
+  "cornerRadius": {
+    "message": "圆角半径"
+  },
+  "showFavicons": {
+    "message": "显示网站图标"
+  },
+  "showCloseButtons": {
+    "message": "显示关闭按钮"
+  },
+  "showGroupSubtrees": {
+    "message": "显示分组子树"
+  },
+  "showShortcutHints": {
+    "message": "显示快捷提示"
+  },
+  "confirmBeforeClosingTree": {
+    "message": "关闭树前确认（2+ 个标签页）"
+  },
+  "closeTabsQuestion": {
+    "message": "关闭标签页？"
+  },
+  "dontAskAgain": {
+    "message": "不再询问"
+  },
+  "cancel": {
+    "message": "取消"
+  },
+  "tabActionsAriaLabel": {
+    "message": "标签页操作"
+  },
+  "shortcutHintText": {
+    "message": "Shift+单击可范围选择。右键查看更多操作。拖拽搜索栏可移动到顶层。"
+  },
+  "selectedCount": {
+    "message": "已选择 $1 项"
+  },
+  "closeSelectedTabsGeneric": {
+    "message": "关闭所选标签页"
+  },
+  "closeSelectedTab": {
+    "message": "关闭所选标签页"
+  },
+  "closeSelectedTabsMany": {
+    "message": "关闭 $1 个所选标签页"
+  },
+  "addSelectedToNewTabGroup": {
+    "message": "将所选项添加到新标签组"
+  },
+  "moveSelectedToTopLevel": {
+    "message": "将所选项移动到顶层"
+  },
+  "toggleCollapse": {
+    "message": "切换折叠"
+  },
+  "copyUrls": {
+    "message": "复制 URL"
+  },
+  "closeTabGroup": {
+    "message": "关闭标签组"
+  },
+  "closeTabGroupWithCount": {
+    "message": "关闭标签组（$1）"
+  },
+  "renameGroup": {
+    "message": "重命名分组..."
+  },
+  "groupNamePlaceholder": {
+    "message": "分组名称"
+  },
+  "save": {
+    "message": "保存"
+  },
+  "color": {
+    "message": "颜色"
+  },
+  "colorGrey": {
+    "message": "灰色"
+  },
+  "colorBlue": {
+    "message": "蓝色"
+  },
+  "colorRed": {
+    "message": "红色"
+  },
+  "colorYellow": {
+    "message": "黄色"
+  },
+  "colorGreen": {
+    "message": "绿色"
+  },
+  "colorPink": {
+    "message": "粉色"
+  },
+  "colorPurple": {
+    "message": "紫色"
+  },
+  "colorCyan": {
+    "message": "青色"
+  },
+  "colorOrange": {
+    "message": "橙色"
+  },
+  "confirmCloseMessage": {
+    "message": "这将关闭 $1 个标签页。是否继续？"
+  },
+  "pinnedTabTitle": {
+    "message": "已固定标签页"
+  },
+  "toggleChildren": {
+    "message": "切换子项"
+  },
+  "expandGroup": {
+    "message": "展开分组"
+  },
+  "collapseGroup": {
+    "message": "折叠分组"
+  },
+  "untitledTab": {
+    "message": "未命名标签页"
+  },
+  "closeSubtree": {
+    "message": "关闭子树"
+  },
+  "closeTab": {
+    "message": "关闭标签页"
+  },
+  "noTabsAvailable": {
+    "message": "没有可用标签页。"
+  },
+  "sectionPinned": {
+    "message": "已固定"
+  },
+  "noTabsMatchSearch": {
+    "message": "没有标签页匹配搜索。"
+  },
+  "noTabsInWindow": {
+    "message": "此窗口中没有标签页。"
+  },
+  "groupFallbackName": {
+    "message": "分组 $1"
+  },
+  "unnamedGroup": {
+    "message": "未命名分组"
+  }
+}

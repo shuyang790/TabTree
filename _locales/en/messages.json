@@ -1,0 +1,221 @@
+{
+  "extName": {
+    "message": "TabTree"
+  },
+  "extDescription": {
+    "message": "Tree-style vertical tabs in Chrome side panel."
+  },
+  "actionDefaultTitle": {
+    "message": "TabTree"
+  },
+  "cmdAddChildDescription": {
+    "message": "Add a child tab under the active tab"
+  },
+  "cmdFocusPanelDescription": {
+    "message": "Focus TabTree side panel"
+  },
+  "cmdPromoteTabLevelDescription": {
+    "message": "Promote active tab one tree level"
+  },
+  "cmdToggleCollapseDescription": {
+    "message": "Toggle collapse for active tab node"
+  },
+  "cmdMoveUnderPreviousRootSiblingDescription": {
+    "message": "Reparent active tab under previous root sibling"
+  },
+  "searchPlaceholder": {
+    "message": "Search tabs by title or URL"
+  },
+  "addChildTab": {
+    "message": "Add child tab"
+  },
+  "settings": {
+    "message": "Settings"
+  },
+  "dropToTopLevelHint": {
+    "message": "Drop here to move to top-level"
+  },
+  "tabTreeAriaLabel": {
+    "message": "Tab tree"
+  },
+  "settingsPanelTitle": {
+    "message": "Appearance & Behavior"
+  },
+  "close": {
+    "message": "Close"
+  },
+  "lightAppearance": {
+    "message": "Light Appearance"
+  },
+  "darkAppearance": {
+    "message": "Dark Appearance"
+  },
+  "accentColor": {
+    "message": "Accent Color"
+  },
+  "density": {
+    "message": "Density"
+  },
+  "densityCompact": {
+    "message": "Compact"
+  },
+  "densityComfortable": {
+    "message": "Comfortable"
+  },
+  "densityCozy": {
+    "message": "Cozy"
+  },
+  "densitySpacious": {
+    "message": "Spacious"
+  },
+  "fontScale": {
+    "message": "Font Scale"
+  },
+  "indentWidth": {
+    "message": "Indent Width"
+  },
+  "cornerRadius": {
+    "message": "Corner Radius"
+  },
+  "showFavicons": {
+    "message": "Show favicons"
+  },
+  "showCloseButtons": {
+    "message": "Show close buttons"
+  },
+  "showGroupSubtrees": {
+    "message": "Show group subtrees"
+  },
+  "showShortcutHints": {
+    "message": "Show shortcut hints"
+  },
+  "confirmBeforeClosingTree": {
+    "message": "Confirm before closing tree (2+ tabs)"
+  },
+  "closeTabsQuestion": {
+    "message": "Close tabs?"
+  },
+  "dontAskAgain": {
+    "message": "Don't ask again"
+  },
+  "cancel": {
+    "message": "Cancel"
+  },
+  "tabActionsAriaLabel": {
+    "message": "Tab actions"
+  },
+  "shortcutHintText": {
+    "message": "Shift+Click selects range. Right-click for actions. Drag search bar to move to top-level."
+  },
+  "selectedCount": {
+    "message": "$1 selected"
+  },
+  "closeSelectedTabsGeneric": {
+    "message": "Close selected tab(s)"
+  },
+  "closeSelectedTab": {
+    "message": "Close selected tab"
+  },
+  "closeSelectedTabsMany": {
+    "message": "Close $1 selected tabs"
+  },
+  "addSelectedToNewTabGroup": {
+    "message": "Add selected to new tab group"
+  },
+  "moveSelectedToTopLevel": {
+    "message": "Move selected to top-level"
+  },
+  "toggleCollapse": {
+    "message": "Toggle collapse"
+  },
+  "copyUrls": {
+    "message": "Copy URL(s)"
+  },
+  "closeTabGroup": {
+    "message": "Close tab group"
+  },
+  "closeTabGroupWithCount": {
+    "message": "Close tab group ($1)"
+  },
+  "renameGroup": {
+    "message": "Rename group..."
+  },
+  "groupNamePlaceholder": {
+    "message": "Group name"
+  },
+  "save": {
+    "message": "Save"
+  },
+  "color": {
+    "message": "Color"
+  },
+  "colorGrey": {
+    "message": "Grey"
+  },
+  "colorBlue": {
+    "message": "Blue"
+  },
+  "colorRed": {
+    "message": "Red"
+  },
+  "colorYellow": {
+    "message": "Yellow"
+  },
+  "colorGreen": {
+    "message": "Green"
+  },
+  "colorPink": {
+    "message": "Pink"
+  },
+  "colorPurple": {
+    "message": "Purple"
+  },
+  "colorCyan": {
+    "message": "Cyan"
+  },
+  "colorOrange": {
+    "message": "Orange"
+  },
+  "confirmCloseMessage": {
+    "message": "This will close $1 tabs. Continue?"
+  },
+  "pinnedTabTitle": {
+    "message": "Pinned tab"
+  },
+  "toggleChildren": {
+    "message": "Toggle children"
+  },
+  "expandGroup": {
+    "message": "Expand group"
+  },
+  "collapseGroup": {
+    "message": "Collapse group"
+  },
+  "untitledTab": {
+    "message": "Untitled tab"
+  },
+  "closeSubtree": {
+    "message": "Close subtree"
+  },
+  "closeTab": {
+    "message": "Close tab"
+  },
+  "noTabsAvailable": {
+    "message": "No tabs available."
+  },
+  "sectionPinned": {
+    "message": "Pinned"
+  },
+  "noTabsMatchSearch": {
+    "message": "No tabs match your search."
+  },
+  "noTabsInWindow": {
+    "message": "No tabs in this window."
+  },
+  "groupFallbackName": {
+    "message": "Group $1"
+  },
+  "unnamedGroup": {
+    "message": "Unnamed group"
+  }
+}

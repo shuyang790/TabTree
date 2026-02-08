@@ -9,7 +9,12 @@
   <body>
     <div class="app-shell">
       <div id="search-wrap" class="search-wrap" data-drop-active="false">
-        <input id="search" type="search" placeholder="Search tabs by title or URL" />
+        <input
+          id="search"
+          type="search"
+          placeholder="Search tabs by title or URL"
+          data-i18n-placeholder="searchPlaceholder"
+        />
         <div class="search-actions">
           <button
             id="add-child-global"
@@ -17,12 +22,22 @@
             type="button"
             title="Add child tab"
             aria-label="Add child tab"
+            data-i18n-title="addChildTab"
+            data-i18n-aria-label="addChildTab"
           >
             <svg class="topbar-icon" viewBox="0 0 20 20" aria-hidden="true">
               <path d="M10 4v12M4 10h12" />
             </svg>
           </button>
-          <button id="open-settings" class="topbar-icon-btn" type="button" title="Settings" aria-label="Settings">
+          <button
+            id="open-settings"
+            class="topbar-icon-btn"
+            type="button"
+            title="Settings"
+            aria-label="Settings"
+            data-i18n-title="settings"
+            data-i18n-aria-label="settings"
+          >
             <svg class="topbar-icon" viewBox="0 0 20 20" aria-hidden="true">
               <path
                 d="M8 2.8a2 2 0 0 1 4 0l.17 1.07a6.2 6.2 0 0 1 1.28.54l.94-.53a2 2 0 1 1 2 3.47l-.93.54a6.4 6.4 0 0 1 0 1.46l.93.54a2 2 0 1 1-2 3.47l-.94-.53a6.2 6.2 0 0 1-1.28.54L12 17.2a2 2 0 1 1-4 0l-.17-1.07a6.2 6.2 0 0 1-1.28-.54l-.94.53a2 2 0 1 1-2-3.47l.93-.54a6.4 6.4 0 0 1 0-1.46l-.93-.54a2 2 0 1 1 2-3.47l.94.53c.4-.24.84-.42 1.28-.54z"
@@ -31,27 +46,35 @@
             </svg>
           </button>
         </div>
-        <div id="search-drop-hint" class="search-drop-hint" hidden>Drop here to move to top-level</div>
+        <div id="search-drop-hint" class="search-drop-hint" hidden data-i18n="dropToTopLevelHint">
+          Drop here to move to top-level
+        </div>
       </div>
 
       <div id="batch-bar" class="batch-bar" hidden>
         <span id="batch-count" class="batch-count"></span>
       </div>
 
-      <section id="tree-root" class="tree-root" aria-label="Tab tree" role="tree"></section>
+      <section
+        id="tree-root"
+        class="tree-root"
+        aria-label="Tab tree"
+        role="tree"
+        data-i18n-aria-label="tabTreeAriaLabel"
+      ></section>
 
       <footer class="hint-bar" id="hint-bar"></footer>
     </div>
 
     <aside id="settings-panel" class="settings-panel" hidden>
       <div class="settings-head">
-        <h2>Appearance & Behavior</h2>
-        <button id="close-settings" class="btn btn-ghost">Close</button>
+        <h2 data-i18n="settingsPanelTitle">Appearance & Behavior</h2>
+        <button id="close-settings" class="btn btn-ghost" data-i18n="close">Close</button>
       </div>
 
       <form id="settings-form" class="settings-form">
         <label>
-          Light Appearance
+          <span data-i18n="lightAppearance">Light Appearance</span>
           <select name="themePresetLight">
             <option value="base-light">Base Light</option>
             <optgroup label="Catppuccin">
@@ -84,7 +107,7 @@
         </label>
 
         <label>
-          Dark Appearance
+          <span data-i18n="darkAppearance">Dark Appearance</span>
           <select name="themePresetDark">
             <option value="base-dark">Base Dark</option>
             <optgroup label="Catppuccin">
@@ -117,78 +140,85 @@
         </label>
 
         <label>
-          Accent Color
+          <span data-i18n="accentColor">Accent Color</span>
           <input type="color" name="accentColor" />
         </label>
 
         <label>
-          Density
+          <span data-i18n="density">Density</span>
           <select name="density">
-            <option value="compact">Compact</option>
-            <option value="comfortable">Comfortable</option>
-            <option value="cozy">Cozy</option>
-            <option value="spacious">Spacious</option>
+            <option value="compact" data-i18n="densityCompact">Compact</option>
+            <option value="comfortable" data-i18n="densityComfortable">Comfortable</option>
+            <option value="cozy" data-i18n="densityCozy">Cozy</option>
+            <option value="spacious" data-i18n="densitySpacious">Spacious</option>
           </select>
         </label>
 
         <label>
-          Font Scale
+          <span data-i18n="fontScale">Font Scale</span>
           <input type="range" name="fontScale" min="0.9" max="1.2" step="0.05" />
         </label>
 
         <label>
-          Indent Width
+          <span data-i18n="indentWidth">Indent Width</span>
           <input type="range" name="indentPx" min="10" max="28" step="1" />
         </label>
 
         <label>
-          Corner Radius
+          <span data-i18n="cornerRadius">Corner Radius</span>
           <input type="range" name="radiusPx" min="2" max="16" step="1" />
         </label>
 
         <label class="checkbox">
           <input type="checkbox" name="showFavicons" />
-          Show favicons
+          <span data-i18n="showFavicons">Show favicons</span>
         </label>
 
         <label class="checkbox">
           <input type="checkbox" name="showCloseButton" />
-          Show close buttons
+          <span data-i18n="showCloseButtons">Show close buttons</span>
         </label>
 
         <label class="checkbox">
           <input type="checkbox" name="showGroupHeaders" />
-          Show group subtrees
+          <span data-i18n="showGroupSubtrees">Show group subtrees</span>
         </label>
 
         <label class="checkbox">
           <input type="checkbox" name="shortcutHintsEnabled" />
-          Show shortcut hints
+          <span data-i18n="showShortcutHints">Show shortcut hints</span>
         </label>
 
         <label class="checkbox">
           <input type="checkbox" name="confirmCloseSubtree" />
-          Confirm before closing tree (2+ tabs)
+          <span data-i18n="confirmBeforeClosingTree">Confirm before closing tree (2+ tabs)</span>
         </label>
       </form>
     </aside>
 
     <div id="confirm-overlay" class="confirm-overlay" hidden>
       <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-        <h3 id="confirm-title">Close tabs?</h3>
+        <h3 id="confirm-title" data-i18n="closeTabsQuestion">Close tabs?</h3>
         <p id="confirm-message" class="confirm-message"></p>
         <label class="checkbox confirm-check">
           <input id="confirm-skip" type="checkbox" />
-          Don't ask again
+          <span data-i18n="dontAskAgain">Don't ask again</span>
         </label>
         <div class="confirm-actions">
-          <button id="confirm-cancel" class="btn btn-ghost">Cancel</button>
-          <button id="confirm-ok" class="btn btn-danger">Close</button>
+          <button id="confirm-cancel" class="btn btn-ghost" data-i18n="cancel">Cancel</button>
+          <button id="confirm-ok" class="btn btn-danger" data-i18n="close">Close</button>
         </div>
       </div>
     </div>
 
-    <div id="context-menu" class="context-menu" hidden role="menu" aria-label="Tab actions"></div>
+    <div
+      id="context-menu"
+      class="context-menu"
+      hidden
+      role="menu"
+      aria-label="Tab actions"
+      data-i18n-aria-label="tabActionsAriaLabel"
+    ></div>
 
     <script type="module" src="app.js"></script>
   </body>
