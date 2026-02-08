@@ -239,6 +239,22 @@ const THEME_PRESETS = {
 const BASE_LIGHT_PRESET = "base-light";
 const BASE_DARK_PRESET = "base-dark";
 const DEFAULT_ACCENT = "#0b57d0";
+const DROP_EDGE_RATIO = 0.2;
+const INSIDE_DROP_DWELL_MS = 180;
+const AUTO_SCROLL_EDGE_PX = 56;
+const AUTO_SCROLL_MAX_STEP = 18;
+const DROP_TARGET_CLASSES = [
+  "drop-valid-before",
+  "drop-valid-after",
+  "drop-valid-inside",
+  "drop-invalid",
+  // Cleanup legacy classes from prior versions.
+  "drop-before",
+  "drop-after",
+  "drop-inside",
+  "group-drop-before",
+  "group-drop-after"
+];
 
 const DENSITY_PRESETS = {
   compact: {
@@ -279,6 +295,24 @@ const state = {
   search: "",
   draggingTabIds: [],
   draggingGroupId: null,
+  dragTarget: {
+    kind: null,
+    tabId: null,
+    groupId: null,
+    position: null,
+    valid: false
+  },
+  dragTargetElement: null,
+  dragInsideHover: {
+    kind: null,
+    id: null,
+    since: 0
+  },
+  dragAutoScroll: {
+    active: false,
+    clientY: 0,
+    rafId: null
+  },
   selectedTabIds: new Set(),
   selectionAnchorTabId: null,
   pendingCloseAction: null,
@@ -733,6 +767,46 @@ function groupTabIds(tree, groupId) {
     .filter((tabId) => Number.isFinite(tabId));
 }
 
+function orderedExistingGroups(tree) {
+  const ordered = [];
+  const seen = new Set();
+  const { blocks } = rootBuckets(tree);
+
+  for (const block of blocks) {
+    if (block.type !== "group") {
+      continue;
+    }
+    const group = tree.groups?.[block.groupId];
+    if (!group || seen.has(group.id)) {
+      continue;
+    }
+    const tabCount = groupTabIds(tree, group.id).length;
+    ordered.push({
+      id: group.id,
+      title: group.title || t("unnamedGroup", [], "Unnamed group"),
+      color: group.color,
+      tabCount
+    });
+    seen.add(group.id);
+  }
+
+  for (const group of Object.values(tree.groups || {})) {
+    if (!Number.isInteger(group?.id) || seen.has(group.id)) {
+      continue;
+    }
+    const tabCount = groupTabIds(tree, group.id).length;
+    ordered.push({
+      id: group.id,
+      title: group.title || t("unnamedGroup", [], "Unnamed group"),
+      color: group.color,
+      tabCount
+    });
+    seen.add(group.id);
+  }
+
+  return ordered;
+}
+
 async function executeContextMenuAction(action) {
   const tree = currentWindowTree();
   if (!tree) {
@@ -789,6 +863,23 @@ async function executeContextMenuAction(action) {
     await send(MESSAGE_TYPES.TREE_ACTION, {
       type: TREE_ACTIONS.BATCH_GROUP_NEW,
       tabIds
+    });
+    return;
+  }
+
+  if (typeof action === "string" && action.startsWith("group-selected-existing:")) {
+    const tabIds = state.contextMenu.scopeTabIds;
+    const groupId = Number(action.slice("group-selected-existing:".length));
+    const windowId = state.contextMenu.windowId;
+    closeContextMenu();
+    if (!tabIds.length || !Number.isInteger(groupId)) {
+      return;
+    }
+    await send(MESSAGE_TYPES.TREE_ACTION, {
+      type: TREE_ACTIONS.BATCH_GROUP_EXISTING,
+      tabIds,
+      groupId,
+      windowId
     });
     return;
   }
@@ -904,6 +995,7 @@ function buildTabContextMenu(tree) {
   const scopeTabIds = state.contextMenu.scopeTabIds;
   const closeCount = scopeTabIds.length;
   const hasGroupedTabs = scopeTabIds.some((tabId) => tree.nodes[nodeId(tabId)]?.groupId !== null);
+  const existingGroups = orderedExistingGroups(tree);
   const closeLabel = closeCount === 0
     ? t("closeSelectedTabsGeneric", [], "Close selected tab(s)")
     : closeCount === 1
@@ -916,11 +1008,82 @@ function buildTabContextMenu(tree) {
   );
   fragment.appendChild(
     createContextMenuButton(
-      t("addSelectedToNewTabGroup", [], "Add selected to new tab group"),
+      t("addToNewTabGroup", [], "Add to new tab group"),
       "group-selected-new",
       closeCount === 0 || hasGroupedTabs
     )
   );
+  const existingSubmenu = document.createElement("div");
+  existingSubmenu.className = "context-submenu";
+
+  const existingTrigger = document.createElement("button");
+  existingTrigger.type = "button";
+  existingTrigger.className = "context-menu-item context-submenu-trigger";
+  existingTrigger.textContent = t("addToExistingTabGroup", [], "Add to existing tab group");
+  existingTrigger.disabled = closeCount === 0 || existingGroups.length === 0;
+  existingTrigger.setAttribute("aria-haspopup", "menu");
+  existingTrigger.setAttribute("aria-expanded", "false");
+
+  const existingPanel = document.createElement("div");
+  existingPanel.className = "context-submenu-panel";
+  existingPanel.setAttribute("role", "menu");
+
+  for (const group of existingGroups) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "context-menu-item context-group-item";
+    item.dataset.action = `group-selected-existing:${group.id}`;
+    item.dataset.groupId = String(group.id);
+
+    const dot = document.createElement("span");
+    dot.className = "context-color-dot context-group-dot";
+    dot.style.setProperty("--group-color", GROUP_COLOR_MAP[group.color] || GROUP_COLOR_MAP.grey);
+
+    const label = document.createElement("span");
+    label.className = "context-group-label";
+    label.textContent = group.title?.trim() || t("groupFallbackName", [String(group.id)], `Group ${group.id}`);
+
+    const count = document.createElement("span");
+    count.className = "context-group-count";
+    count.textContent = String(group.tabCount);
+
+    item.append(dot, label, count);
+    item.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await executeContextMenuAction(item.dataset.action);
+    });
+    existingPanel.appendChild(item);
+  }
+
+  existingTrigger.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const willOpen = !existingSubmenu.classList.contains("open");
+    existingSubmenu.classList.toggle("open", willOpen);
+    existingTrigger.setAttribute("aria-expanded", String(willOpen));
+    if (willOpen) {
+      const first = existingPanel.querySelector(".context-menu-item:not([disabled])");
+      if (first) {
+        first.focus();
+      }
+    }
+  });
+
+  existingTrigger.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowRight") {
+      return;
+    }
+    event.preventDefault();
+    existingSubmenu.classList.add("open");
+    existingTrigger.setAttribute("aria-expanded", "true");
+    const first = existingPanel.querySelector(".context-menu-item:not([disabled])");
+    if (first) {
+      first.focus();
+    }
+  });
+
+  existingSubmenu.append(existingTrigger, existingPanel);
+  fragment.appendChild(existingSubmenu);
   fragment.appendChild(createContextMenuSeparator());
   fragment.appendChild(
     createContextMenuButton(t("addChildTab", [], "Add child tab"), "add-child", !primaryNode)
@@ -1166,22 +1329,211 @@ function subtreeMaxIndex(tree, rootNodeId) {
   return max;
 }
 
-function getDropPosition(event, row) {
+function getDropPosition(event, row, options = {}) {
+  const { allowInside = true } = options;
   const rect = row.getBoundingClientRect();
   const y = event.clientY - rect.top;
-  if (y < rect.height * 0.25) {
+  if (y < rect.height * DROP_EDGE_RATIO) {
     return "before";
   }
-  if (y > rect.height * 0.75) {
+  if (y > rect.height * (1 - DROP_EDGE_RATIO)) {
     return "after";
+  }
+  if (!allowInside) {
+    return y < rect.height * 0.5 ? "before" : "after";
   }
   return "inside";
 }
 
+function emptyDragTarget() {
+  return {
+    kind: null,
+    tabId: null,
+    groupId: null,
+    position: null,
+    valid: false
+  };
+}
+
+function sameDragTarget(a, b) {
+  return a.kind === b.kind
+    && a.tabId === b.tabId
+    && a.groupId === b.groupId
+    && a.position === b.position
+    && a.valid === b.valid;
+}
+
+function dropClassesForTarget(target) {
+  if (!target || target.kind === null || target.kind === "root") {
+    return [];
+  }
+  if (!target.valid) {
+    return ["drop-invalid"];
+  }
+  if (target.position === "before") {
+    return ["drop-valid-before"];
+  }
+  if (target.position === "after") {
+    return ["drop-valid-after"];
+  }
+  if (target.position === "inside") {
+    return ["drop-valid-inside"];
+  }
+  return [];
+}
+
+function removeDropTargetClasses(element) {
+  if (!element) {
+    return;
+  }
+  element.classList.remove(...DROP_TARGET_CLASSES);
+}
+
+function resetInsideDropHover() {
+  state.dragInsideHover.kind = null;
+  state.dragInsideHover.id = null;
+  state.dragInsideHover.since = 0;
+}
+
+function updateSearchDropAffordance() {
+  const active = state.draggingTabIds.length > 0 && !Number.isInteger(state.draggingGroupId);
+  const focused = active && state.dragTarget.kind === "root" && state.dragTarget.valid;
+  dom.searchWrap.dataset.dropActive = active ? "true" : "false";
+  dom.searchWrap.dataset.dropFocused = focused ? "true" : "false";
+  dom.searchDropHint.hidden = !active;
+}
+
+function setDragTarget(target = null, element = null) {
+  const next = target
+    ? {
+      kind: target.kind || null,
+      tabId: Number.isFinite(target.tabId) ? target.tabId : null,
+      groupId: Number.isInteger(target.groupId) ? target.groupId : null,
+      position: target.position || null,
+      valid: !!target.valid
+    }
+    : emptyDragTarget();
+
+  if (sameDragTarget(state.dragTarget, next) && state.dragTargetElement === element) {
+    updateSearchDropAffordance();
+    return;
+  }
+
+  removeDropTargetClasses(state.dragTargetElement);
+  state.dragTarget = next;
+  state.dragTargetElement = element || null;
+
+  if (state.dragTargetElement) {
+    state.dragTargetElement.classList.add(...dropClassesForTarget(next));
+  }
+
+  updateSearchDropAffordance();
+}
+
 function clearDropClasses() {
-  dom.treeRoot.querySelectorAll(".drop-before, .drop-after, .drop-inside, .group-drop-before, .group-drop-after").forEach((el) => {
-    el.classList.remove("drop-before", "drop-after", "drop-inside", "group-drop-before", "group-drop-after");
-  });
+  removeDropTargetClasses(state.dragTargetElement);
+  state.dragTarget = emptyDragTarget();
+  state.dragTargetElement = null;
+
+  dom.treeRoot.querySelectorAll(".drop-valid-before, .drop-valid-after, .drop-valid-inside, .drop-invalid, .drop-before, .drop-after, .drop-inside, .group-drop-before, .group-drop-after")
+    .forEach((el) => removeDropTargetClasses(el));
+
+  updateSearchDropAffordance();
+}
+
+function maybeAutoScroll(clientY) {
+  if (!state.draggingTabIds.length && !Number.isInteger(state.draggingGroupId)) {
+    return;
+  }
+
+  state.dragAutoScroll.active = true;
+  state.dragAutoScroll.clientY = clientY;
+
+  if (state.dragAutoScroll.rafId) {
+    return;
+  }
+
+  const tick = () => {
+    state.dragAutoScroll.rafId = null;
+    if (!state.dragAutoScroll.active) {
+      return;
+    }
+
+    const rect = dom.treeRoot.getBoundingClientRect();
+    const y = state.dragAutoScroll.clientY;
+    let delta = 0;
+
+    if (y < rect.top + AUTO_SCROLL_EDGE_PX) {
+      const ratio = Math.min(1, (rect.top + AUTO_SCROLL_EDGE_PX - y) / AUTO_SCROLL_EDGE_PX);
+      delta = -Math.ceil(ratio * AUTO_SCROLL_MAX_STEP);
+    } else if (y > rect.bottom - AUTO_SCROLL_EDGE_PX) {
+      const ratio = Math.min(1, (y - (rect.bottom - AUTO_SCROLL_EDGE_PX)) / AUTO_SCROLL_EDGE_PX);
+      delta = Math.ceil(ratio * AUTO_SCROLL_MAX_STEP);
+    }
+
+    if (delta !== 0) {
+      dom.treeRoot.scrollTop += delta;
+      state.dragAutoScroll.rafId = requestAnimationFrame(tick);
+    }
+  };
+
+  state.dragAutoScroll.rafId = requestAnimationFrame(tick);
+}
+
+function stopAutoScroll() {
+  state.dragAutoScroll.active = false;
+  if (state.dragAutoScroll.rafId) {
+    cancelAnimationFrame(state.dragAutoScroll.rafId);
+    state.dragAutoScroll.rafId = null;
+  }
+}
+
+function canActivateInsideDrop(kind, id) {
+  const now = Date.now();
+  if (state.dragInsideHover.kind !== kind || state.dragInsideHover.id !== id) {
+    state.dragInsideHover.kind = kind;
+    state.dragInsideHover.id = id;
+    state.dragInsideHover.since = now;
+    return false;
+  }
+  return now - state.dragInsideHover.since >= INSIDE_DROP_DWELL_MS;
+}
+
+function fallbackEdgePosition(event, row) {
+  const rect = row.getBoundingClientRect();
+  return event.clientY - rect.top < rect.height * 0.5 ? "before" : "after";
+}
+
+function resolveTabDropIntent(tree, row, targetTabId, event) {
+  const candidate = getDropPosition(event, row, { allowInside: true });
+  if (candidate !== "inside") {
+    resetInsideDropHover();
+    return {
+      position: candidate,
+      valid: canDrop(tree, state.draggingTabIds, targetTabId, candidate)
+    };
+  }
+
+  if (!canDrop(tree, state.draggingTabIds, targetTabId, "inside")) {
+    resetInsideDropHover();
+    return {
+      position: "inside",
+      valid: false
+    };
+  }
+
+  if (canActivateInsideDrop("tab", targetTabId)) {
+    return {
+      position: "inside",
+      valid: true
+    };
+  }
+
+  const fallback = fallbackEdgePosition(event, row);
+  return {
+    position: fallback,
+    valid: canDrop(tree, state.draggingTabIds, targetTabId, fallback)
+  };
 }
 
 function canDropGroup(tree, sourceGroupId, options = {}) {
@@ -1226,11 +1578,6 @@ async function moveGroupBlockToTarget(tree, target, position) {
   }
 
   await send(MESSAGE_TYPES.TREE_ACTION, payload);
-}
-
-function setSearchDropActive(active) {
-  dom.searchWrap.dataset.dropActive = active ? "true" : "false";
-  dom.searchDropHint.hidden = !active;
 }
 
 function dedupeCloseRootNodeIds(tree, nodeIds) {
@@ -1479,6 +1826,8 @@ async function dropToRoot(tree) {
     const draggingNode = tree.nodes[nodeId(tabId)];
     if (!draggingNode) {
       state.draggingTabIds = [];
+      resetInsideDropHover();
+      clearDropClasses();
       return;
     }
 
@@ -1497,8 +1846,9 @@ async function dropToRoot(tree) {
   }
 
   state.draggingTabIds = [];
+  resetInsideDropHover();
+  stopAutoScroll();
   clearDropClasses();
-  setSearchDropActive(false);
 }
 
 async function onRowClicked(event, tabId) {
@@ -1658,6 +2008,9 @@ function createNodeRow(tree, node, options = {}) {
       : [node.tabId];
 
     state.draggingTabIds = selection;
+    resetInsideDropHover();
+    stopAutoScroll();
+    setDragTarget(null, null);
 
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
@@ -1665,93 +2018,121 @@ function createNodeRow(tree, node, options = {}) {
       event.dataTransfer.setData("text/plain", selection.join(","));
     }
     row.classList.add("dragging");
-    setSearchDropActive(true);
+    updateSearchDropAffordance();
   });
 
   row.addEventListener("dragend", () => {
     state.draggingTabIds = [];
+    resetInsideDropHover();
+    stopAutoScroll();
     row.classList.remove("dragging");
     clearDropClasses();
-    setSearchDropActive(false);
   });
 
   row.addEventListener("dragover", (event) => {
+    if (!state.draggingTabIds.length && !Number.isInteger(state.draggingGroupId)) {
+      return;
+    }
     event.preventDefault();
+    maybeAutoScroll(event.clientY);
+
     if (Number.isInteger(state.draggingGroupId)) {
-      const position = getDropPosition(event, row);
-      if (position === "inside") {
-        clearDropClasses();
-        return;
+      resetInsideDropHover();
+      const position = getDropPosition(event, row, { allowInside: false });
+      const valid = canDropGroup(tree, state.draggingGroupId, { targetGroupId: node.groupId, targetTabId: node.tabId });
+      setDragTarget({
+        kind: "tab",
+        tabId: node.tabId,
+        position,
+        valid
+      }, row);
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = valid ? "move" : "none";
       }
-      if (!canDropGroup(tree, state.draggingGroupId, { targetGroupId: node.groupId, targetTabId: node.tabId })) {
-        clearDropClasses();
-        return;
+      return;
+    }
+
+    if (!state.draggingTabIds.length) {
+      return;
+    }
+
+    if (state.draggingTabIds.includes(node.tabId)) {
+      resetInsideDropHover();
+      const position = getDropPosition(event, row, { allowInside: true });
+      setDragTarget({
+        kind: "tab",
+        tabId: node.tabId,
+        position,
+        valid: false
+      }, row);
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "none";
       }
-      clearDropClasses();
-      row.classList.add(position === "before" ? "group-drop-before" : "group-drop-after");
       return;
     }
 
-    if (!state.draggingTabIds.length || state.draggingTabIds.includes(node.tabId)) {
-      return;
+    const intent = resolveTabDropIntent(tree, row, node.tabId, event);
+    setDragTarget({
+      kind: "tab",
+      tabId: node.tabId,
+      position: intent.position,
+      valid: intent.valid
+    }, row);
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = intent.valid ? "move" : "none";
     }
-
-    const position = getDropPosition(event, row);
-    clearDropClasses();
-    if (!canDrop(tree, state.draggingTabIds, node.tabId, position)) {
-      return;
-    }
-
-    if (position === "before") {
-      row.classList.add("drop-before");
-    } else if (position === "after") {
-      row.classList.add("drop-after");
-    } else {
-      row.classList.add("drop-inside");
-    }
-  });
-
-  row.addEventListener("dragleave", () => {
-    row.classList.remove("drop-before", "drop-after", "drop-inside", "group-drop-before", "group-drop-after");
   });
 
   row.addEventListener("drop", async (event) => {
+    if (!state.draggingTabIds.length && !Number.isInteger(state.draggingGroupId)) {
+      return;
+    }
     event.preventDefault();
+    stopAutoScroll();
+
     if (Number.isInteger(state.draggingGroupId)) {
-      const position = getDropPosition(event, row);
-      clearDropClasses();
-      if (position === "inside"
-        || !canDropGroup(tree, state.draggingGroupId, { targetGroupId: node.groupId, targetTabId: node.tabId })) {
-        state.draggingGroupId = null;
+      resetInsideDropHover();
+      const position = getDropPosition(event, row, { allowInside: false });
+      const valid = canDropGroup(tree, state.draggingGroupId, { targetGroupId: node.groupId, targetTabId: node.tabId });
+      setDragTarget({
+        kind: "tab",
+        tabId: node.tabId,
+        position,
+        valid
+      }, row);
+      if (!valid) {
         return;
       }
       await moveGroupBlockToTarget(tree, { kind: "tab", tabId: node.tabId }, position);
       state.draggingGroupId = null;
+      clearDropClasses();
       return;
     }
 
     if (!state.draggingTabIds.length || state.draggingTabIds.includes(node.tabId)) {
-      clearDropClasses();
       return;
     }
 
-    const position = getDropPosition(event, row);
-    if (!canDrop(tree, state.draggingTabIds, node.tabId, position)) {
-      clearDropClasses();
-      state.draggingTabIds = [];
+    const intent = resolveTabDropIntent(tree, row, node.tabId, event);
+    setDragTarget({
+      kind: "tab",
+      tabId: node.tabId,
+      position: intent.position,
+      valid: intent.valid
+    }, row);
+    if (!intent.valid) {
       return;
     }
 
-    const payload = buildDropPayload(tree, state.draggingTabIds, node.tabId, position);
-    clearDropClasses();
+    const payload = buildDropPayload(tree, state.draggingTabIds, node.tabId, intent.position);
     if (!payload) {
-      state.draggingTabIds = [];
       return;
     }
 
     await send(MESSAGE_TYPES.TREE_ACTION, payload);
     state.draggingTabIds = [];
-    setSearchDropActive(false);
+    resetInsideDropHover();
+    clearDropClasses();
   });
 
   row.append(twisty, favicon, titleWrap, actions);
@@ -1886,17 +2267,21 @@ function createGroupSection(tree, groupId, rootNodeIds, query) {
   header.addEventListener("dragstart", (event) => {
     state.draggingGroupId = groupId;
     state.draggingTabIds = [];
+    resetInsideDropHover();
+    stopAutoScroll();
+    setDragTarget(null, null);
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.dropEffect = "move";
       event.dataTransfer.setData("text/plain", `group:${groupId}`);
     }
     header.classList.add("dragging");
-    clearDropClasses();
-    setSearchDropActive(false);
+    updateSearchDropAffordance();
   });
   header.addEventListener("dragend", () => {
     state.draggingGroupId = null;
+    resetInsideDropHover();
+    stopAutoScroll();
     header.classList.remove("dragging");
     clearDropClasses();
   });
@@ -1905,34 +2290,39 @@ function createGroupSection(tree, groupId, rootNodeIds, query) {
       return;
     }
     event.preventDefault();
-    const position = getDropPosition(event, header);
-    if (position === "inside") {
-      clearDropClasses();
-      return;
+    maybeAutoScroll(event.clientY);
+    const position = getDropPosition(event, header, { allowInside: false });
+    const valid = canDropGroup(tree, state.draggingGroupId, { targetGroupId: groupId });
+    setDragTarget({
+      kind: "group",
+      groupId,
+      position,
+      valid
+    }, header);
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = valid ? "move" : "none";
     }
-    if (!canDropGroup(tree, state.draggingGroupId, { targetGroupId: groupId })) {
-      clearDropClasses();
-      return;
-    }
-    clearDropClasses();
-    header.classList.add(position === "before" ? "group-drop-before" : "group-drop-after");
-  });
-  header.addEventListener("dragleave", () => {
-    header.classList.remove("group-drop-before", "group-drop-after");
   });
   header.addEventListener("drop", async (event) => {
     if (!Number.isInteger(state.draggingGroupId)) {
       return;
     }
     event.preventDefault();
-    const position = getDropPosition(event, header);
-    clearDropClasses();
-    if (position === "inside" || !canDropGroup(tree, state.draggingGroupId, { targetGroupId: groupId })) {
-      state.draggingGroupId = null;
+    stopAutoScroll();
+    const position = getDropPosition(event, header, { allowInside: false });
+    const valid = canDropGroup(tree, state.draggingGroupId, { targetGroupId: groupId });
+    setDragTarget({
+      kind: "group",
+      groupId,
+      position,
+      valid
+    }, header);
+    if (!valid) {
       return;
     }
     await moveGroupBlockToTarget(tree, { kind: "group", groupId }, position);
     state.draggingGroupId = null;
+    clearDropClasses();
   });
 
   header.append(colorDot, name, count);
@@ -2092,22 +2482,44 @@ function bindEvents() {
       return;
     }
     event.preventDefault();
-    setSearchDropActive(true);
+    setDragTarget({
+      kind: "root",
+      position: "inside",
+      valid: true
+    }, dom.searchWrap);
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
   });
 
   dom.searchWrap.addEventListener("dragleave", (event) => {
-    if (!dom.searchWrap.contains(event.relatedTarget)) {
-      setSearchDropActive(false);
+    if (!dom.searchWrap.contains(event.relatedTarget) && state.dragTarget.kind === "root") {
+      setDragTarget(null, null);
     }
   });
 
   dom.searchWrap.addEventListener("drop", async (event) => {
+    if (!state.draggingTabIds.length || Number.isInteger(state.draggingGroupId)) {
+      return;
+    }
     event.preventDefault();
+    stopAutoScroll();
     const tree = currentWindowTree();
     if (!tree) {
       return;
     }
     await dropToRoot(tree);
+    clearDropClasses();
+  });
+
+  dom.treeRoot.addEventListener("dragleave", (event) => {
+    if (dom.treeRoot.contains(event.relatedTarget)) {
+      return;
+    }
+    if (state.dragTarget.kind !== "root") {
+      setDragTarget(null, null);
+    }
+    stopAutoScroll();
   });
 
   dom.addChildGlobal.addEventListener("click", async () => {

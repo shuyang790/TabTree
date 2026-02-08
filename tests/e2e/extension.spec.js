@@ -177,6 +177,90 @@ test.describe("TabTree extension", () => {
     await tabB.close().catch(() => {});
   });
 
+  test("tab context menu can add selected tabs to an existing tab group via submenu", async ({ context, sidePanelPage }) => {
+    const seedA = await createTitledTab(context, "Existing Group Seed A");
+    const seedB = await createTitledTab(context, "Existing Group Seed B");
+    const moveA = await createTitledTab(context, "Move To Existing A");
+    const moveB = await createTitledTab(context, "Move To Existing B");
+
+    const seedRowA = rowByTitle(sidePanelPage, "Existing Group Seed A");
+    const seedRowB = rowByTitle(sidePanelPage, "Existing Group Seed B");
+    const moveRowA = rowByTitle(sidePanelPage, "Move To Existing A");
+    const moveRowB = rowByTitle(sidePanelPage, "Move To Existing B");
+
+    await expect(seedRowA).toBeVisible();
+    await expect(seedRowB).toBeVisible();
+    await expect(moveRowA).toBeVisible();
+    await expect(moveRowB).toBeVisible();
+
+    await seedRowA.click();
+    await seedRowB.click({ modifiers: ["Shift"] });
+    await seedRowA.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="group-selected-new"]').click();
+
+    const seedGroupHeader = sidePanelPage
+      .locator(".group-section")
+      .filter({ has: seedRowA })
+      .first()
+      .locator(".group-header");
+    await expect(seedGroupHeader).toBeVisible();
+    const targetGroupId = Number(await seedGroupHeader.getAttribute("data-group-id"));
+    expect(Number.isInteger(targetGroupId)).toBeTruthy();
+
+    await moveRowA.click();
+    await moveRowB.click({ modifiers: ["Shift"] });
+    await moveRowA.click({ button: "right" });
+
+    const contextMenu = sidePanelPage.locator("#context-menu");
+    await expect(contextMenu).toBeVisible();
+    await expect(sidePanelPage.locator('.context-menu-item[data-action="group-selected-new"]')).toHaveText("Add to new tab group");
+
+    const existingTrigger = sidePanelPage
+      .locator(".context-submenu-trigger")
+      .filter({ hasText: "Add to existing tab group" })
+      .first();
+    await expect(existingTrigger).toBeVisible();
+    await existingTrigger.click();
+
+    const existingSubmenu = existingTrigger.locator("xpath=ancestor::div[contains(@class,'context-submenu')][1]");
+    const existingPanel = existingSubmenu.locator(".context-submenu-panel");
+    await expect(contextMenu).toBeVisible();
+    await expect(existingPanel).toBeVisible();
+
+    await existingPanel.locator(`.context-group-item[data-group-id="${targetGroupId}"]`).click();
+
+    const windowId = await sidePanelPage.evaluate(async () => (await chrome.windows.getCurrent()).id);
+    await expect.poll(async () => {
+      return sidePanelPage.evaluate(async ({ windowId, targetGroupId }) => {
+        const response = await chrome.runtime.sendMessage({
+          type: "GET_STATE",
+          payload: { windowId }
+        });
+        const windows = response?.payload?.windows || {};
+        const tree = windows[windowId] || windows[String(windowId)] || null;
+        if (!tree) {
+          return null;
+        }
+
+        const nodes = Object.values(tree.nodes || {});
+        const movedA = nodes.find((node) => (node.lastKnownTitle || "").includes("Move To Existing A")) || null;
+        const movedB = nodes.find((node) => (node.lastKnownTitle || "").includes("Move To Existing B")) || null;
+        return {
+          movedAGroupId: movedA?.groupId ?? null,
+          movedBGroupId: movedB?.groupId ?? null
+        };
+      }, { windowId, targetGroupId });
+    }).toEqual({
+      movedAGroupId: targetGroupId,
+      movedBGroupId: targetGroupId
+    });
+
+    await seedA.close().catch(() => {});
+    await seedB.close().catch(() => {});
+    await moveA.close().catch(() => {});
+    await moveB.close().catch(() => {});
+  });
+
   test("moving a two-tab group keeps both tabs visible in side panel", async ({ context, sidePanelPage }) => {
     const tabA = await createTitledTab(context, "Move Group A");
     const tabB = await createTitledTab(context, "Move Group B");

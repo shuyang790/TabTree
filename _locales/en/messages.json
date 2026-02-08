@@ -122,6 +122,12 @@
   "addSelectedToNewTabGroup": {
     "message": "Add selected to new tab group"
   },
+  "addToNewTabGroup": {
+    "message": "Add to new tab group"
+  },
+  "addToExistingTabGroup": {
+    "message": "Add to existing tab group"
+  },
   "moveSelectedToTopLevel": {
     "message": "Move selected to top-level"
   },

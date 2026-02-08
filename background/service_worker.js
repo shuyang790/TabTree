@@ -579,6 +579,43 @@ async function batchGroupNew(tabIds) {
   }
 }
 
+async function batchGroupExisting(tabIds, groupId, windowIdHint = null) {
+  if (!Number.isInteger(groupId)) {
+    return;
+  }
+
+  const targetWindowId = await resolveGroupWindowId(groupId, windowIdHint);
+  if (!Number.isInteger(targetWindowId)) {
+    return;
+  }
+
+  const grouped = await groupLiveTabIdsByWindow(tabIds);
+  const ids = grouped.get(targetWindowId) || [];
+  if (!ids.length) {
+    return;
+  }
+
+  const tabs = await Promise.all(ids.map((id) => getTab(id)));
+  const groupableTabIds = tabs
+    .filter((tab) => tab && tab.windowId === targetWindowId && !tab.pinned)
+    .sort((a, b) => a.index - b.index)
+    .map((tab) => tab.id);
+
+  const uniqueTabIds = Array.from(new Set(groupableTabIds));
+  if (!uniqueTabIds.length) {
+    return;
+  }
+
+  try {
+    await chrome.tabs.group({ groupId, tabIds: uniqueTabIds });
+  } catch {
+    // Best effort.
+  }
+
+  await syncWindowOrdering(targetWindowId);
+  await refreshGroupMetadata(targetWindowId);
+}
+
 async function batchMoveToRoot(tabIds) {
   const grouped = await groupLiveTabIdsByWindow(tabIds);
   for (const [windowId, ids] of grouped.entries()) {
@@ -834,6 +871,10 @@ async function handleTreeAction(payload) {
 
   if (type === TREE_ACTIONS.BATCH_GROUP_NEW) {
     return batchGroupNew(payload.tabIds || []);
+  }
+
+  if (type === TREE_ACTIONS.BATCH_GROUP_EXISTING) {
+    return batchGroupExisting(payload.tabIds || [], payload.groupId, payload.windowId ?? null);
   }
 
   if (type === TREE_ACTIONS.BATCH_CLOSE_SUBTREES) {

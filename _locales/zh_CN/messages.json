@@ -122,6 +122,12 @@
   "addSelectedToNewTabGroup": {
     "message": "将所选项添加到新标签组"
   },
+  "addToNewTabGroup": {
+    "message": "添加到新标签组"
+  },
+  "addToExistingTabGroup": {
+    "message": "添加到现有标签组"
+  },
   "moveSelectedToTopLevel": {
     "message": "将所选项移动到顶层"
   },

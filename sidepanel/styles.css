@@ -656,21 +656,21 @@ button:focus-visible {
 
 .context-menu {
   position: fixed;
-  min-width: 220px;
-  max-width: 280px;
+  min-width: 198px;
+  max-width: min(248px, calc(100vw - 18px));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-elev);
   box-shadow: var(--shadow);
-  padding: 4px;
+  padding: 3px;
   display: grid;
-  gap: 2px;
+  gap: 1px;
   z-index: 30;
 }
 
 .context-menu.context-menu-group {
-  min-width: 132px;
-  max-width: 156px;
+  min-width: 124px;
+  max-width: 146px;
 }
 
 .context-menu[hidden] {
@@ -681,14 +681,14 @@ button:focus-visible {
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 30px;
+  min-height: 28px;
   border: 0;
   border-radius: calc(var(--radius) - 3px);
   background: transparent;
   color: var(--text);
-  font-size: 0.86rem;
+  font-size: 0.84rem;
   text-align: left;
-  padding: 0 8px;
+  padding: 0 7px;
   cursor: pointer;
 }
 
@@ -711,7 +711,7 @@ button:focus-visible {
 .context-menu-separator {
   height: 1px;
   background: var(--border);
-  margin: 3px 4px;
+  margin: 2px 4px;
 }
 
 .context-submenu {
@@ -726,28 +726,28 @@ button:focus-visible {
 
 .context-submenu-panel {
   position: absolute;
-  left: calc(100% + 4px);
-  top: -4px;
-  min-width: 150px;
+  left: calc(100% + 2px);
+  top: -3px;
+  min-width: 138px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-elev);
   box-shadow: var(--shadow);
-  padding: 4px;
+  padding: 3px;
   display: none;
-  gap: 2px;
+  gap: 1px;
   max-height: min(50vh, 260px);
   overflow-y: auto;
 }
 
 .context-submenu-left .context-submenu-panel {
   left: auto;
-  right: calc(100% + 4px);
+  right: calc(100% + 2px);
 }
 
 .context-submenu-up .context-submenu-panel {
   top: auto;
-  bottom: -4px;
+  bottom: -3px;
 }
 
 .context-menu.context-menu-group .context-submenu-panel {
@@ -762,6 +762,27 @@ button:focus-visible {
 
 .context-color-item {
   gap: 8px;
+}
+
+.context-group-item {
+  gap: 8px;
+}
+
+.context-group-dot {
+  flex: 0 0 auto;
+}
+
+.context-group-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-group-count {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 0.74rem;
 }
 
 .context-color-dot {

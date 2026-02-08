@@ -122,6 +122,12 @@
   "addSelectedToNewTabGroup": {
     "message": "將已選項目加入新分頁群組"
   },
+  "addToNewTabGroup": {
+    "message": "加入新分頁群組"
+  },
+  "addToExistingTabGroup": {
+    "message": "加入現有分頁群組"
+  },
   "moveSelectedToTopLevel": {
     "message": "將已選項目移到頂層"
   },
