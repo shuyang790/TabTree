@@ -18,6 +18,13 @@
   --tree-pad-y: 10px;
   --child-pad: 8px;
   --topbar-pad-y: 10px;
+  --group-ribbon-w: 4px;
+  --group-border-alpha: 66%;
+  --group-bg-alpha: 92%;
+  --group-header-bg-alpha: 86%;
+  --group-dot-size: 11px;
+  --group-name-tint-alpha: 44%;
+  --group-count-tint-alpha: 72%;
 }
 
 * {
@@ -98,6 +105,11 @@ button:focus-visible {
 .search-wrap[data-drop-active="true"] {
   background: var(--accent-weak);
   border-bottom-color: color-mix(in srgb, var(--accent), transparent 45%);
+}
+
+.search-wrap[data-drop-focused="true"] {
+  background: color-mix(in srgb, var(--accent), transparent 82%);
+  border-bottom-color: color-mix(in srgb, var(--accent), transparent 20%);
 }
 
 #search {
@@ -263,14 +275,20 @@ button:focus-visible {
 }
 
 .tree-row.dragging {
-  opacity: 0.55;
+  opacity: 0.78;
+  transform: scale(0.992);
+  border-color: color-mix(in srgb, var(--accent), transparent 60%);
+  background: color-mix(in srgb, var(--accent), transparent 92%);
 }
 
+.tree-row.drop-valid-inside,
 .tree-row.drop-inside {
   border-color: var(--accent);
   background: var(--accent-weak);
 }
 
+.tree-row.drop-valid-before::before,
+.tree-row.drop-valid-after::after,
 .tree-row.drop-before::before,
 .tree-row.drop-after::after {
   content: "";
@@ -282,14 +300,20 @@ button:focus-visible {
   border-radius: 3px;
 }
 
+.tree-row.drop-valid-before::before,
 .tree-row.drop-before::before {
   top: -1px;
 }
 
+.tree-row.drop-valid-after::after,
 .tree-row.drop-after::after {
   bottom: -1px;
 }
 
+.tree-row.drop-valid-before::before,
+.tree-row.drop-valid-after::after,
+.group-header.drop-valid-before::before,
+.group-header.drop-valid-after::after,
 .tree-row.group-drop-before::before,
 .tree-row.group-drop-after::after,
 .group-header.group-drop-before::before,
@@ -303,14 +327,29 @@ button:focus-visible {
   border-radius: 3px;
 }
 
+.tree-row.drop-valid-before::before,
+.group-header.drop-valid-before::before,
 .tree-row.group-drop-before::before,
 .group-header.group-drop-before::before {
   top: -1px;
 }
 
+.tree-row.drop-valid-after::after,
+.group-header.drop-valid-after::after,
 .tree-row.group-drop-after::after,
 .group-header.group-drop-after::after {
   bottom: -1px;
+}
+
+.tree-row.drop-invalid,
+.group-header.drop-invalid {
+  border-color: color-mix(in srgb, #d64545, transparent 40%);
+  background: color-mix(in srgb, #d64545, transparent 92%);
+  cursor: not-allowed;
+}
+
+.group-header.drop-invalid {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #d64545, transparent 42%);
 }
 
 .tree-row.pinned-row {
@@ -432,9 +471,24 @@ button:focus-visible {
 
 .group-section {
   margin: 6px 0;
-  border: 1px solid color-mix(in srgb, var(--group-color), transparent 75%);
+  position: relative;
+  overflow: clip;
+  border: 1px solid color-mix(in srgb, var(--group-color), transparent var(--group-border-alpha));
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--group-color), transparent 95%);
+  background: color-mix(in srgb, var(--group-color), transparent var(--group-bg-alpha));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--group-color), transparent 90%);
+}
+
+.group-section::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--group-ribbon-w);
+  background: color-mix(in srgb, var(--group-color), white 6%);
+  opacity: 0.95;
+  pointer-events: none;
 }
 
 .group-header {
@@ -442,9 +496,15 @@ button:focus-visible {
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  border-bottom: 1px solid color-mix(in srgb, var(--group-color), transparent 78%);
+  border-bottom: 1px solid color-mix(in srgb, var(--group-color), transparent 68%);
+  background: color-mix(in srgb, var(--group-color), transparent var(--group-header-bg-alpha));
   cursor: pointer;
   position: relative;
+  transition: background 0.16s ease;
+}
+
+.group-header:hover {
+  background: color-mix(in srgb, var(--group-color), transparent 82%);
 }
 
 .group-header:focus-visible {
@@ -453,26 +513,30 @@ button:focus-visible {
 }
 
 .group-header.dragging {
-  opacity: 0.6;
+  opacity: 0.78;
+  background: color-mix(in srgb, var(--group-color), transparent 80%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--group-color), transparent 32%);
 }
 
 .group-color-dot {
-  width: 8px;
-  height: 8px;
+  width: var(--group-dot-size);
+  height: var(--group-dot-size);
   border-radius: 999px;
   background: var(--group-color);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--group-color), white 15%),
+    0 0 0 3px color-mix(in srgb, var(--group-color), transparent 88%);
 }
 
 .group-name {
   font-size: 0.82rem;
   font-weight: 600;
-  color: var(--text);
+  color: color-mix(in srgb, var(--group-color), var(--text) var(--group-name-tint-alpha));
 }
 
 .group-count {
   margin-left: auto;
   font-size: 0.72rem;
-  color: var(--text-muted);
+  color: color-mix(in srgb, var(--group-color), var(--text-muted) var(--group-count-tint-alpha));
 }
 
 .group-children {
