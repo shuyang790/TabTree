@@ -5,6 +5,7 @@ import {
   buildTreeFromTabs,
   createEmptyWindowTree,
   moveNode,
+  normalizeGroupedTabParents,
   nodeIdFromTabId,
   removeNodePromoteChildren,
   setActiveTab,
@@ -98,4 +99,44 @@ test("upsertTabNode reparents existing node when parentNodeId is provided", () =
 
   assert.equal(tree.nodes[nodeIdFromTabId(2)].parentNodeId, nodeIdFromTabId(1));
   assert.deepEqual(tree.rootNodeIds, [nodeIdFromTabId(1)]);
+});
+
+test("normalizeGroupedTabParents detaches grouped child from non-group parent", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0, groupId: -1 }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1, groupId: 7 }));
+  tree = moveNode(tree, nodeIdFromTabId(2), nodeIdFromTabId(1));
+
+  tree = normalizeGroupedTabParents(tree);
+
+  assert.equal(tree.nodes[nodeIdFromTabId(2)].parentNodeId, null);
+  assert.deepEqual(tree.rootNodeIds, [nodeIdFromTabId(1), nodeIdFromTabId(2)]);
+});
+
+test("normalizeGroupedTabParents keeps grouped child when parent is same group", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0, groupId: 5 }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1, groupId: 5 }));
+  tree = moveNode(tree, nodeIdFromTabId(2), nodeIdFromTabId(1));
+
+  tree = normalizeGroupedTabParents(tree);
+
+  assert.equal(tree.nodes[nodeIdFromTabId(2)].parentNodeId, nodeIdFromTabId(1));
+  assert.deepEqual(tree.rootNodeIds, [nodeIdFromTabId(1)]);
+  assert.deepEqual(tree.nodes[nodeIdFromTabId(1)].childNodeIds, [nodeIdFromTabId(2)]);
+});
+
+test("normalizeGroupedTabParents keeps grouped subtree intact after boundary detach", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0, groupId: -1 }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1, groupId: 9 }));
+  tree = upsertTabNode(tree, tab({ id: 3, index: 2, groupId: 9 }));
+
+  tree = moveNode(tree, nodeIdFromTabId(2), nodeIdFromTabId(1));
+  tree = moveNode(tree, nodeIdFromTabId(3), nodeIdFromTabId(2));
+  tree = normalizeGroupedTabParents(tree);
+
+  assert.equal(tree.nodes[nodeIdFromTabId(2)].parentNodeId, null);
+  assert.equal(tree.nodes[nodeIdFromTabId(3)].parentNodeId, nodeIdFromTabId(2));
+  assert.deepEqual(tree.nodes[nodeIdFromTabId(2)].childNodeIds, [nodeIdFromTabId(3)]);
 });

@@ -5,6 +5,7 @@ import {
   getDescendantNodeIds,
   inferTreeFromSyncSnapshot,
   moveNode,
+  normalizeGroupedTabParents,
   nodeIdFromTabId,
   removeNodePromoteChildren,
   removeSubtree,
@@ -326,6 +327,7 @@ async function syncWindowOrdering(windowId) {
     next = removeNodePromoteChildren(next, staleNodeId);
   }
 
+  next = normalizeGroupedTabParents(next);
   next = sortTreeByIndex(next);
   setWindowTree(next);
 }
@@ -572,6 +574,7 @@ async function batchGroupNew(tabIds) {
       // Best effort.
     }
 
+    await syncWindowOrdering(windowId);
     await refreshGroupMetadata(windowId);
   }
 }
@@ -732,13 +735,31 @@ async function moveGroupBlock(payload) {
   }
 
   const index = insertionIndexForGroupMove(tabs, sourceTabIds, payload);
+  let moved = false;
   try {
-    await chrome.tabs.move(sourceTabIds, { index });
+    await chrome.tabGroups.move(sourceGroupId, { index });
+    moved = true;
+  } catch {
+    // Fallback to tab move when group move fails.
+  }
+
+  if (!moved) {
+    try {
+      await chrome.tabs.move(sourceTabIds, { index });
+    } catch {
+      // Best effort.
+    }
+  }
+
+  // Safety net: ensure all source tabs still belong to the source group after move.
+  try {
+    await chrome.tabs.group({ groupId: sourceGroupId, tabIds: sourceTabIds });
   } catch {
     // Best effort.
   }
 
-  scheduleWindowOrderingSync(windowId);
+  await syncWindowOrdering(windowId);
+  await refreshGroupMetadata(windowId);
 }
 
 async function resolveGroupWindowId(groupId, windowIdHint = null) {

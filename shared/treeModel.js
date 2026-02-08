@@ -313,6 +313,41 @@ export function ensureValidTree(tree) {
   return next;
 }
 
+export function normalizeGroupedTabParents(tree) {
+  const next = cloneTree(tree);
+  let changed = false;
+
+  for (const [nodeId, node] of Object.entries(next.nodes)) {
+    if (!Number.isInteger(node.groupId) || node.groupId < 0 || !node.parentNodeId) {
+      continue;
+    }
+
+    const parentNode = next.nodes[node.parentNodeId];
+    const parentGroupId = Number.isInteger(parentNode?.groupId) && parentNode.groupId >= 0
+      ? parentNode.groupId
+      : null;
+
+    if (parentGroupId === node.groupId) {
+      continue;
+    }
+
+    if (parentNode) {
+      removeFromArray(parentNode.childNodeIds, nodeId);
+    }
+    node.parentNodeId = null;
+    if (!next.rootNodeIds.includes(nodeId)) {
+      next.rootNodeIds.push(nodeId);
+    }
+    changed = true;
+  }
+
+  if (!changed) {
+    return next;
+  }
+
+  return sortTreeByIndex(ensureValidTree(next));
+}
+
 export function buildTreeFromTabs(tabs, previousTree = null) {
   const tree = createEmptyWindowTree(tabs[0]?.windowId ?? -1);
   tree.groups = { ...(previousTree?.groups || {}) };

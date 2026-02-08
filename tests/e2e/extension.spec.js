@@ -176,4 +176,94 @@ test.describe("TabTree extension", () => {
     await tabA.close().catch(() => {});
     await tabB.close().catch(() => {});
   });
+
+  test("moving a two-tab group keeps both tabs visible in side panel", async ({ context, sidePanelPage }) => {
+    const tabA = await createTitledTab(context, "Move Group A");
+    const tabB = await createTitledTab(context, "Move Group B");
+    const tabC = await createTitledTab(context, "Move Group Target");
+
+    const rowA = rowByTitle(sidePanelPage, "Move Group A");
+    const rowB = rowByTitle(sidePanelPage, "Move Group B");
+    const rowC = rowByTitle(sidePanelPage, "Move Group Target");
+
+    await expect(rowA).toBeVisible();
+    await expect(rowB).toBeVisible();
+    await expect(rowC).toBeVisible();
+
+    await rowA.click();
+    await rowB.click({ modifiers: ["Shift"] });
+    await rowA.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="group-selected-new"]').click();
+
+    const groupSection = sidePanelPage.locator(".group-section").filter({ has: rowA }).first();
+    const groupHeader = groupSection.locator(".group-header");
+    await expect(groupHeader).toBeVisible();
+
+    const sourceGroupId = Number(await groupHeader.getAttribute("data-group-id"));
+    const targetTabId = Number(await rowC.getAttribute("data-tab-id"));
+    const windowId = await sidePanelPage.evaluate(async () => (await chrome.windows.getCurrent()).id);
+
+    await sidePanelPage.evaluate(async ({ sourceGroupId, targetTabId, windowId }) => {
+      await chrome.runtime.sendMessage({
+        type: "TREE_ACTION",
+        payload: {
+          type: "MOVE_GROUP_BLOCK",
+          sourceGroupId,
+          targetTabId,
+          position: "before",
+          windowId
+        }
+      });
+    }, { sourceGroupId, targetTabId, windowId });
+
+    const movedGroupSection = sidePanelPage
+      .locator(".group-section")
+      .filter({ has: sidePanelPage.locator(`.group-header[data-group-id="${sourceGroupId}"]`) })
+      .first();
+
+    await expect(movedGroupSection).toBeVisible();
+    await expect.poll(async () => {
+      const summary = await sidePanelPage.evaluate(async ({ windowId, sourceGroupId, titleA, titleB }) => {
+        const response = await chrome.runtime.sendMessage({
+          type: "GET_STATE",
+          payload: { windowId }
+        });
+        const windows = response?.payload?.windows || {};
+        const tree = windows[windowId] || windows[String(windowId)] || null;
+        if (!tree) {
+          return null;
+        }
+
+        const nodes = Object.values(tree.nodes || {});
+        const matchByTitle = (title) => nodes.find((node) => (node.lastKnownTitle || "").includes(title)) || null;
+        const nodeA = matchByTitle(titleA);
+        const nodeB = matchByTitle(titleB);
+
+        return {
+          nodeAInTree: !!nodeA,
+          nodeBInTree: !!nodeB,
+          nodeAGroupId: nodeA?.groupId ?? null,
+          nodeBGroupId: nodeB?.groupId ?? null,
+          groupedCount: nodes.filter((node) => node.groupId === sourceGroupId).length
+        };
+      }, {
+        windowId,
+        sourceGroupId,
+        titleA: "Move Group A",
+        titleB: "Move Group B"
+      });
+
+      return summary;
+    }, { timeout: 10000 }).toEqual({
+      nodeAInTree: true,
+      nodeBInTree: true,
+      nodeAGroupId: sourceGroupId,
+      nodeBGroupId: sourceGroupId,
+      groupedCount: 2
+    });
+
+    await tabA.close().catch(() => {});
+    await tabB.close().catch(() => {});
+    await tabC.close().catch(() => {});
+  });
 });
