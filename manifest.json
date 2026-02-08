@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "TabTree",
   "description": "Tree-style vertical tabs in Chrome side panel.",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "minimum_chrome_version": "140",
   "permissions": ["tabs", "storage", "sidePanel", "tabGroups", "sessions"],
   "background": {

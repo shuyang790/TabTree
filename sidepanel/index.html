@@ -8,19 +8,29 @@
   </head>
   <body>
     <div class="app-shell">
-      <header class="topbar">
-        <div class="brand">
-          <span class="brand-dot"></span>
-          <span class="brand-text">TabTree</span>
-        </div>
-        <div class="topbar-actions">
-          <button id="add-child-global" class="btn" title="Add child tab to active tab">Add Child</button>
-          <button id="open-settings" class="btn btn-ghost" title="Open settings">Settings</button>
-        </div>
-      </header>
-
       <div id="search-wrap" class="search-wrap" data-drop-active="false">
         <input id="search" type="search" placeholder="Search tabs by title or URL" />
+        <div class="search-actions">
+          <button
+            id="add-child-global"
+            class="topbar-icon-btn"
+            type="button"
+            title="Add child tab"
+            aria-label="Add child tab"
+          >
+            <svg class="topbar-icon" viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M10 4v12M4 10h12" />
+            </svg>
+          </button>
+          <button id="open-settings" class="topbar-icon-btn" type="button" title="Settings" aria-label="Settings">
+            <svg class="topbar-icon" viewBox="0 0 20 20" aria-hidden="true">
+              <path
+                d="M8 2.8a2 2 0 0 1 4 0l.17 1.07a6.2 6.2 0 0 1 1.28.54l.94-.53a2 2 0 1 1 2 3.47l-.93.54a6.4 6.4 0 0 1 0 1.46l.93.54a2 2 0 1 1-2 3.47l-.94-.53a6.2 6.2 0 0 1-1.28.54L12 17.2a2 2 0 1 1-4 0l-.17-1.07a6.2 6.2 0 0 1-1.28-.54l-.94.53a2 2 0 1 1-2-3.47l.93-.54a6.4 6.4 0 0 1 0-1.46l-.93-.54a2 2 0 1 1 2-3.47l.94.53c.4-.24.84-.42 1.28-.54z"
+              />
+              <circle cx="10" cy="10" r="2.3" />
+            </svg>
+          </button>
+        </div>
         <div id="search-drop-hint" class="search-drop-hint" hidden>Drop here to move to top-level</div>
       </div>
 
