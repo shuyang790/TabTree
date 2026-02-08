@@ -274,6 +274,7 @@ const DENSITY_PRESETS = {
 const state = {
   settings: null,
   windows: {},
+  panelWindowId: null,
   focusedWindowId: null,
   search: "",
   draggingTabIds: [],
@@ -362,11 +363,23 @@ function nodeId(tabId) {
 }
 
 function currentWindowTree() {
-  if (state.focusedWindowId && state.windows[state.focusedWindowId]) {
+  if (Number.isInteger(state.panelWindowId) && state.windows[state.panelWindowId]) {
+    return state.windows[state.panelWindowId];
+  }
+  if (Number.isInteger(state.focusedWindowId) && state.windows[state.focusedWindowId]) {
     return state.windows[state.focusedWindowId];
   }
   const firstWindowId = Object.keys(state.windows)[0];
   return firstWindowId ? state.windows[firstWindowId] : null;
+}
+
+async function resolvePanelWindowId() {
+  try {
+    const current = await chrome.windows.getCurrent();
+    return Number.isInteger(current?.id) ? current.id : null;
+  } catch {
+    return null;
+  }
 }
 
 function currentActiveTabId() {
@@ -2044,11 +2057,17 @@ function render() {
 }
 
 async function bootstrap() {
-  const response = await send(MESSAGE_TYPES.GET_STATE);
+  state.panelWindowId = await resolvePanelWindowId();
+  const response = await send(MESSAGE_TYPES.GET_STATE, {
+    windowId: state.panelWindowId
+  });
   if (response?.ok) {
     state.settings = response.payload.settings;
     state.windows = response.payload.windows || {};
     state.focusedWindowId = response.payload.focusedWindowId;
+    if (!Number.isInteger(state.panelWindowId) && Number.isInteger(response.payload.focusedWindowId)) {
+      state.panelWindowId = response.payload.focusedWindowId;
+    }
     const activeTabId = currentActiveTabId();
     if (activeTabId) {
       replaceSelection([activeTabId], activeTabId);
@@ -2251,8 +2270,11 @@ function bindEvents() {
     const payload = message.payload;
     state.settings = payload.settings || state.settings;
     state.windows = payload.windows || state.windows;
-    if (payload.focusedWindowId) {
+    if (Number.isInteger(payload.focusedWindowId)) {
       state.focusedWindowId = payload.focusedWindowId;
+      if (!Number.isInteger(state.panelWindowId)) {
+        state.panelWindowId = payload.focusedWindowId;
+      }
     }
 
     const activeTabId = currentActiveTabId();

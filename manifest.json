@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "__MSG_extName__",
   "description": "__MSG_extDescription__",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "default_locale": "en",
   "minimum_chrome_version": "140",
   "permissions": ["tabs", "storage", "sidePanel", "tabGroups", "sessions"],

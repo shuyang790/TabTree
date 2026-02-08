@@ -74,6 +74,56 @@ test.describe("TabTree extension", () => {
     await tabB.close().catch(() => {});
   });
 
+  test("keeps side panel tree scoped to its window", async ({ context, extensionId, sidePanelPage }) => {
+    const sidePanelUrl = `chrome-extension://${extensionId}/sidepanel/index.html`;
+    const windowOneTitle = "Window One Unique";
+    const windowTwoTitle = "Window Two Unique";
+    const windowTwoUpdateTitle = "Window Two Update";
+
+    const windowOneId = await sidePanelPage.evaluate(async () => (await chrome.windows.getCurrent()).id);
+
+    const pagePromise = context.waitForEvent("page");
+    await sidePanelPage.evaluate(async (url) => {
+      await chrome.windows.create({ url });
+    }, sidePanelUrl);
+    const sidePanelPageTwo = await pagePromise;
+    await sidePanelPageTwo.waitForLoadState("domcontentloaded");
+
+    const windowTwoId = await sidePanelPageTwo.evaluate(async () => (await chrome.windows.getCurrent()).id);
+    expect(windowTwoId).not.toBe(windowOneId);
+
+    await sidePanelPage.evaluate(async ({ windowId, title }) => {
+      await chrome.tabs.create({
+        windowId,
+        url: `data:text/html,${encodeURIComponent(`<title>${title}</title><main>${title}</main>`)}`
+      });
+    }, { windowId: windowOneId, title: windowOneTitle });
+
+    await sidePanelPageTwo.evaluate(async ({ windowId, title }) => {
+      await chrome.tabs.create({
+        windowId,
+        url: `data:text/html,${encodeURIComponent(`<title>${title}</title><main>${title}</main>`)}`
+      });
+    }, { windowId: windowTwoId, title: windowTwoTitle });
+
+    await expect(rowByTitle(sidePanelPage, windowOneTitle)).toBeVisible();
+    await expect(rowByTitle(sidePanelPageTwo, windowTwoTitle)).toBeVisible();
+    await expect(rowByTitle(sidePanelPage, windowTwoTitle)).toHaveCount(0);
+    await expect(rowByTitle(sidePanelPageTwo, windowOneTitle)).toHaveCount(0);
+
+    await sidePanelPageTwo.evaluate(async ({ windowId, title }) => {
+      await chrome.tabs.create({
+        windowId,
+        url: `data:text/html,${encodeURIComponent(`<title>${title}</title><main>${title}</main>`)}`
+      });
+    }, { windowId: windowTwoId, title: windowTwoUpdateTitle });
+
+    await expect(rowByTitle(sidePanelPageTwo, windowTwoUpdateTitle)).toBeVisible();
+    await expect(rowByTitle(sidePanelPage, windowTwoUpdateTitle)).toHaveCount(0);
+
+    await sidePanelPageTwo.close().catch(() => {});
+  });
+
   test("group-header context menu can rename and recolor a group", async ({ context, sidePanelPage }) => {
     const tabA = await createTitledTab(context, "Ctx Group A");
     const tabB = await createTitledTab(context, "Ctx Group B");

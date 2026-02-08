@@ -1016,6 +1016,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     await ensureInitialized();
 
     if (message?.type === MESSAGE_TYPES.GET_STATE) {
+      const requestedWindowId = message?.payload?.windowId;
+      if (Number.isInteger(requestedWindowId)) {
+        sendResponse({ ok: true, payload: getStatePayload(requestedWindowId) });
+        return;
+      }
       const active = await getActiveTab();
       sendResponse({ ok: true, payload: getStatePayload(active?.windowId || null) });
       return;
