@@ -35,7 +35,6 @@ html,
 body {
   margin: 0;
   height: 100%;
-  font-family: "Avenir Next", "Segoe UI", sans-serif;
   font-size: calc(14px * var(--font-scale));
   color: var(--text);
   background: radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent), transparent 92%), transparent 45%),
