@@ -2,6 +2,16 @@
 
 Tree-style vertical tabs in Chrome's side panel with sync-backed appearance/settings and keyboard commands.
 
+## Screenshots
+
+| Tree Overview (Dark) | Grouped Tabs (Light) |
+| --- | --- |
+| ![TabTree dark tree overview with nested tasks and pinned row](docs/images/01-tree-overview-dark.png) | ![TabTree light mode grouped tabs with color-coded header](docs/images/02-groups-and-colors-light.png) |
+
+| Multi-select + Batch Actions (Dark) | Settings + Theme Controls (Light) |
+| --- | --- |
+| ![TabTree dark mode multi-select with batch bar and context menu](docs/images/03-multiselect-batch-dark.png) | ![TabTree settings panel with theme presets and density controls](docs/images/04-settings-theme-light.png) |
+
 ## Implemented
 
 - MV3 extension with side panel UI (`manifest_version: 3`)
@@ -77,6 +87,20 @@ For headed mode:
 ```bash
 npm run test:e2e:headed
 ```
+
+Generate README screenshots:
+
+```bash
+npm run test:e2e:screenshots
+```
+
+For headed screenshot capture:
+
+```bash
+npm run test:e2e:screenshots:headed
+```
+
+Screenshot assets are written to `docs/images/` at `1200x750`.
 
 ### E2E coverage
 

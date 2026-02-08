@@ -7,7 +7,9 @@
     "test": "npm run test:unit",
     "test:unit": "node --test",
     "test:e2e": "playwright test",
-    "test:e2e:headed": "PW_HEADLESS=0 playwright test"
+    "test:e2e:headed": "PW_HEADLESS=0 playwright test",
+    "test:e2e:screenshots": "playwright test tests/e2e/screenshots.spec.js",
+    "test:e2e:screenshots:headed": "PW_HEADLESS=0 playwright test tests/e2e/screenshots.spec.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0"
