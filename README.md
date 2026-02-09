@@ -12,6 +12,15 @@ Tree-style vertical tabs for Chrome Side Panel that help you organize browsing i
 - Appearance and behavior settings synced via `chrome.storage.sync`
 - Per-window heavy tree state stored in `chrome.storage.local`
 
+## Official Icon
+
+TabTree now uses the Option 2 transparent stacked-tabs mark as the official extension icon.
+
+![TabTree official extension icon](icons/icon128.png)
+
+- Source SVG: `icons/icon.svg`
+- Packaged icon sizes: `icons/icon16.png`, `icons/icon32.png`, `icons/icon48.png`, `icons/icon128.png`
+
 ## Screenshots
 
 | Tree Overview (Dark) | Grouped Tabs (Light) |
