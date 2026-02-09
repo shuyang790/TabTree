@@ -1,109 +1,171 @@
-# TabTree (Chrome Extension)
+# TabTree
 
-Tree-style vertical tabs in Chrome's side panel with sync-backed appearance/settings and keyboard commands.
+Tree-style vertical tabs for Chrome Side Panel that help you organize browsing into parent/child hierarchies, groups, and batch actions.
+
+## At a Glance
+
+- Chrome extension (Manifest V3) side panel UI
+- Tree model for tab relationships (parent, child, collapse/expand)
+- Multi-select with Shift-click and batch operations
+- Tab group-aware rendering with rename/color support
+- Pinned tabs shown in a dedicated horizontal strip
+- Appearance and behavior settings synced via `chrome.storage.sync`
+- Per-window heavy tree state stored in `chrome.storage.local`
 
 ## Screenshots
 
 | Tree Overview (Dark) | Grouped Tabs (Light) |
 | --- | --- |
 | ![TabTree dark tree overview with nested tasks and pinned row](docs/images/01-tree-overview-dark.png) | ![TabTree light mode grouped tabs with color-coded header](docs/images/02-groups-and-colors-light.png) |
+| *Nested tab hierarchy with pinned strip and collapse controls.* | *Color-coded group subtree with group naming and grouping workflow.* |
 
 | Multi-select + Batch Actions (Dark) | Settings + Theme Controls (Light) |
 | --- | --- |
 | ![TabTree dark mode multi-select with batch bar and context menu](docs/images/03-multiselect-batch-dark.png) | ![TabTree settings panel with theme presets and density controls](docs/images/04-settings-theme-light.png) |
+| *Range selection plus context menu actions for bulk operations.* | *Appearance and behavior controls including presets, density, and sizing.* |
 
-## Implemented
+## Why TabTree
 
-- MV3 extension with side panel UI (`manifest_version: 3`)
-- Tree tab model with parent/child relationships
-- Drag-and-drop reparenting
-- Shift-click multi-select with batch operations
-- Search/filter by title or URL
-- Search row doubles as drag-to-root drop target
-- Pinned icon-only rows
-- Tab group subtrees with group name and color
-- Parent-close behavior: promotes children
-- Commands including add-child tab (user-configurable)
-- Appearance always follows browser/OS light-dark preference
-- Preset themes: Catppuccin (4), Everforest (2), Gruvbox (2), Tokyo Night (2), Kanagawa (2), One (2)
-- Separate Light and Dark appearance presets with shared accent color
-- Appearance customization (multiple density presets, font scale, indent, radius)
-- Close-tree confirmation dialog (2+ tabs) with sync-persisted skip option
-- Settings persisted to `chrome.storage.sync`
-- Window tree state persisted to `chrome.storage.local`
-- Lightweight metadata snapshot persisted to `chrome.storage.sync`
+- Keep related work together by nesting tabs under parent tasks.
+- Reduce tab clutter with fast drag/drop and batch actions.
+- Work naturally with Chrome tab groups instead of fighting them.
+- Keep your visual setup consistent across devices through sync-backed settings.
 
-## Project Layout
+## Install in Chrome
 
-- `manifest.json`
-- `background/service_worker.js`
-- `sidepanel/index.html`
-- `sidepanel/app.js`
-- `sidepanel/styles.css`
-- `shared/constants.js`
-- `shared/treeModel.js`
-- `shared/treeStore.js`
-- `tests/treeModel.test.js`
+### Requirements
 
-## Load in Chrome
+- Chrome `140+` (from `manifest.json`)
 
-1. Open `chrome://extensions`
-2. Enable **Developer mode**
-3. Click **Load unpacked** and select this folder
-4. Pin the extension and click it once to open side panel behavior
+### Steps
 
-## Shortcuts
+1. Open `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked** and select this repository folder.
+4. Pin the extension and open TabTree from the toolbar.
+5. (Optional) Configure shortcuts at `chrome://extensions/shortcuts`.
 
-Open `chrome://extensions/shortcuts` to customize commands.
+## Quickstart Workflows
 
-## Test
+### 1. Create a child tab under the active tab
 
-```bash
-npm test
-```
+1. Focus the tab you want to be the parent.
+2. Use the add-child action (button in side panel or shortcut if configured).
+3. The new tab is created as that tab's child in the tree.
 
-## Notes
+### 2. Reorganize tabs with drag and drop
 
+1. Drag a row to move it `inside`, `before`, or `after` another row.
+2. Drag to the search row area to move tabs to top-level.
+3. Group and pin constraints are enforced automatically (for example, pinned and unpinned zones stay separate).
+
+### 3. Use multi-select and batch actions
+
+1. Click one tab row, then `Shift+Click` another to select a range.
+2. Right-click selected rows for batch actions like close, group, and move-to-root.
+3. A close confirmation appears for actions that affect 2+ tabs unless you disable it in settings.
+
+### 4. Work with tab groups
+
+1. Select tabs and choose **Add to new tab group** (or existing group) from context menu.
+2. Right-click a group header to rename the group or change color.
+3. Collapse/expand group sections from the group header.
+
+### 5. Tune appearance
+
+1. Open **Settings** from the side panel.
+2. Pick independent Light/Dark presets and accent color.
+3. Adjust density, font scale, indent width, and corner radius.
+
+## Shortcuts and Commands
+
+Configure all shortcuts at `chrome://extensions/shortcuts`.
+
+| Command ID | Action | Default key |
+| --- | --- | --- |
+| `add-child-tab` | Add a child tab under the active tab | Not set by default |
+| `focus-side-panel` | Focus TabTree side panel | `Ctrl+Shift+Y` (Windows/Linux), `Command+Shift+Y` (macOS) |
+| `promote-tab-level` | Promote active tab one tree level | Not set by default |
+| `toggle-collapse-node` | Toggle collapse for active tab node | Not set by default |
+| `move-tab-under-previous-sibling` | Reparent active tab under previous root sibling | Not set by default |
+
+## Settings and Data Sync
+
+- `chrome.storage.sync`: Appearance and behavior settings plus a lightweight metadata snapshot
+- `chrome.storage.local`: Per-window heavy tree state
+
+## Behavior Notes
+
+- Parent-close behavior promotes children when needed.
+- Grouped tabs render as group subtrees with group name and color.
+- Pinned tabs render in a separate horizontal strip.
 - Restore is best-effort based on URL/opener relationships and stored metadata.
 - Cross-device behavior is metadata sync only; tabs are not auto-opened remotely.
 
-## E2E (Playwright)
+## Troubleshooting
 
-### Install dependencies
+### Side panel is not showing
+
+- Reopen TabTree from the extension action.
+- Reload the extension in `chrome://extensions` after manifest or service worker changes.
+
+### Shortcut does not trigger
+
+- Open `chrome://extensions/shortcuts` and check for conflicts.
+- Assign a custom key if the command has no default binding.
+
+### Theme or settings seem stale
+
+- Toggle the setting once, then reopen the side panel.
+- If still stale, reload the extension to restart the service worker and UI.
+
+### Drag/drop does not behave as expected
+
+- Confirm source and target are both pinned or both unpinned.
+- Use the search row drop target to explicitly move tabs back to top-level.
+
+## For Contributors
+
+### Project Layout
+
+- `manifest.json`: extension manifest, permissions, commands
+- `background/service_worker.js`: authoritative tree actions and reconciliation
+- `sidepanel/index.html`: side panel markup
+- `sidepanel/app.js`: UI rendering, events, settings handling
+- `sidepanel/styles.css`: styling and component states
+- `shared/constants.js`: defaults, message/action contracts
+- `shared/treeModel.js`: tree reducer/helpers
+- `shared/treeStore.js`: storage adapters
+- `tests/*.test.js`: unit tests
+- `tests/e2e/*`: Playwright end-to-end tests
+
+### Local Test Commands
+
+Install dependencies first:
 
 ```bash
 npm install
 npx playwright install chromium
 ```
 
-### Run
+Then run tests:
 
 ```bash
+npm test
 npm run test:e2e
-```
-
-For headed mode:
-
-```bash
 npm run test:e2e:headed
 ```
 
-Generate README screenshots:
+### Screenshot Generation
 
 ```bash
 npm run test:e2e:screenshots
-```
-
-For headed screenshot capture:
-
-```bash
 npm run test:e2e:screenshots:headed
 ```
 
-Screenshot assets are written to `docs/images/` at `1200x750`.
+Screenshot assets are generated at `docs/images/` (PNG, `1200x750`).
 
-### E2E coverage
+## Current Status
 
-- Extension bootstraps and renders side panel shell
-- Settings panel interaction and sync persistence check
-- Global "Add Child" action opens a new tab
+- Version: `0.2.5`
+- Status: Active development
