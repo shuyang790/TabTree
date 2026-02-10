@@ -417,13 +417,18 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
     }
   }
 
-  const tabsByUrl = new Map();
+  const firstTabByUrl = new Map();
+  const secondTabByUrl = new Map();
   for (const tab of sortedTabs) {
     const url = normalizeUrl(tab.url);
-    if (!tabsByUrl.has(url)) {
-      tabsByUrl.set(url, []);
+    const first = firstTabByUrl.get(url);
+    if (!first) {
+      firstTabByUrl.set(url, tab);
+      continue;
     }
-    tabsByUrl.get(url).push(tab);
+    if (!secondTabByUrl.has(url) && first.id !== tab.id) {
+      secondTabByUrl.set(url, tab);
+    }
   }
 
   for (const tab of sortedTabs) {
@@ -442,8 +447,11 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
     if (!match?.parentUrl) {
       continue;
     }
-    const parentCandidates = tabsByUrl.get(match.parentUrl) || [];
-    const parentTab = parentCandidates.find((candidate) => candidate.id !== tab.id) || null;
+    const firstCandidate = firstTabByUrl.get(match.parentUrl) || null;
+    const secondCandidate = secondTabByUrl.get(match.parentUrl) || null;
+    const parentTab = firstCandidate?.id !== tab.id
+      ? firstCandidate
+      : secondCandidate;
     if (!parentTab || parentTab.id === tab.id) {
       continue;
     }

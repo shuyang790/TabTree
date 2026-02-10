@@ -175,3 +175,41 @@ test("reconcileSelectedTabId prefers active fallback when valid", () => {
   const reconciled = reconcileSelectedTabId(tree, 2);
   assert.equal(reconciled.selectedTabId, 2);
 });
+
+test("buildTreeFromTabs handles large duplicate-url snapshots without self-parent cycles", () => {
+  const tabCount = 800;
+  const tabs = Array.from({ length: tabCount }, (_, idx) =>
+    tab({
+      id: idx + 1,
+      index: idx,
+      url: `https://dup.test/${idx % 10}`
+    })
+  );
+
+  const previousTree = createEmptyWindowTree(1);
+  previousTree.nodes = {};
+  previousTree.rootNodeIds = [];
+  for (let idx = 0; idx < tabCount; idx += 1) {
+    const currentId = nodeIdFromTabId(idx + 1);
+    const parentNodeId = idx > 0 ? nodeIdFromTabId(idx) : null;
+    previousTree.nodes[currentId] = {
+      nodeId: currentId,
+      tabId: idx + 1,
+      parentNodeId,
+      childNodeIds: [],
+      collapsed: idx % 7 === 0,
+      lastKnownUrl: `https://dup.test/${idx % 10}`
+    };
+    previousTree.rootNodeIds.push(currentId);
+    if (parentNodeId && previousTree.nodes[parentNodeId]) {
+      previousTree.nodes[parentNodeId].childNodeIds.push(currentId);
+    }
+  }
+
+  const tree = buildTreeFromTabs(tabs, previousTree);
+
+  assert.equal(Object.keys(tree.nodes).length, tabCount);
+  for (const node of Object.values(tree.nodes)) {
+    assert.notEqual(node.parentNodeId, node.nodeId);
+  }
+});
