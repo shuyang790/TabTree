@@ -267,6 +267,11 @@ button:focus-visible {
   background: var(--row-hover);
 }
 
+.tree-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
 .tree-row.active {
   background: var(--row-active);
   border-color: color-mix(in srgb, var(--accent), transparent 65%);
@@ -835,6 +840,18 @@ button:focus-visible {
 
 .context-rename-apply:hover {
   background: var(--row-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-wrap,
+  .node-actions,
+  .group-header {
+    transition: none;
+  }
+
+  .tree-row.dragging {
+    transform: none;
+  }
 }
 
 @media (max-width: 720px) {
