@@ -392,8 +392,7 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
       previousRecords.push({
         url: normalizeUrl(node.lastKnownUrl),
         parentUrl: node.parentNodeId ? normalizeUrl(previousTree.nodes[node.parentNodeId]?.lastKnownUrl) : null,
-        collapsed: !!node.collapsed,
-        consumed: false
+        collapsed: !!node.collapsed
       });
     }
   }
@@ -412,7 +411,6 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
     const matches = previousByUrl.get(url);
     const match = matches?.shift() || null;
     if (match) {
-      match.consumed = true;
       matchedByTabId.set(tab.id, match);
     }
   }

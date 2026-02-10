@@ -90,3 +90,35 @@ test("persist coordinator retries when flush fails", async () => {
 
   coordinator.dispose();
 });
+
+test("persist coordinator throttles snapshot writes but still flushes window trees", async () => {
+  const windowsState = {
+    1: { windowId: 1, nodes: {}, rootNodeIds: [] }
+  };
+  let windowWrites = 0;
+  let snapshotWrites = 0;
+
+  const coordinator = createPersistCoordinator({
+    saveWindowTree: async () => {
+      windowWrites += 1;
+    },
+    saveSyncSnapshot: async () => {
+      snapshotWrites += 1;
+    },
+    getWindowsState: () => windowsState,
+    flushDebounceMs: 10,
+    snapshotMinIntervalMs: 80
+  });
+
+  coordinator.markWindowDirty(1);
+  await waitFor(() => windowWrites >= 1 && snapshotWrites >= 1);
+
+  coordinator.markWindowDirty(1);
+  await waitFor(() => windowWrites >= 2, { timeoutMs: 600 });
+  assert.equal(snapshotWrites, 1);
+
+  await waitFor(() => snapshotWrites >= 2, { timeoutMs: 1200 });
+  assert.ok(windowWrites >= 2);
+
+  coordinator.dispose();
+});
