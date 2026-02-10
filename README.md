@@ -169,5 +169,5 @@ Screenshot assets are generated at `docs/images/` (PNG, `1200x750`).
 
 ## Current Status
 
-- Version: `0.2.7`
+- Version: `0.2.8`
 - Status: Active development
