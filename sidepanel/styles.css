@@ -255,6 +255,14 @@ button:focus-visible {
   position: relative;
 }
 
+.tree-root.hide-favicons .tree-row:not(.pinned-row) {
+  grid-template-columns: 18px 1fr auto;
+}
+
+.tree-root.hide-favicons .tree-row:not(.pinned-row) .favicon {
+  display: none;
+}
+
 .tree-row:hover {
   background: var(--row-hover);
 }

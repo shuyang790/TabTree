@@ -317,6 +317,7 @@ const state = {
   selectedTabIds: new Set(),
   selectionAnchorTabId: null,
   focusedTabId: null,
+  confirmReturnFocusEl: null,
   pendingCloseAction: null,
   contextMenu: {
     open: false,
@@ -327,7 +328,8 @@ const state = {
     scopeTabIds: [],
     groupId: null,
     windowId: null,
-    renameOpen: false
+    renameOpen: false,
+    returnTabId: null
   }
 };
 
@@ -440,7 +442,8 @@ function resetContextMenuState() {
     scopeTabIds: [],
     groupId: null,
     windowId: null,
-    renameOpen: false
+    renameOpen: false,
+    returnTabId: null
   };
 }
 
@@ -752,9 +755,14 @@ function closeContextMenu() {
   if (!state.contextMenu.open) {
     return;
   }
+  const shouldRestoreFocus = dom.contextMenu.contains(document.activeElement);
+  const returnTabId = state.contextMenu.returnTabId;
   dom.contextMenu.hidden = true;
   dom.contextMenu.innerHTML = "";
   resetContextMenuState();
+  if (shouldRestoreFocus && Number.isFinite(returnTabId)) {
+    focusTreeRow(returnTabId);
+  }
 }
 
 function openTabContextMenu(event, tabId) {
@@ -770,7 +778,8 @@ function openTabContextMenu(event, tabId) {
     scopeTabIds: resolveContextScopeTabIds(tabId),
     groupId: null,
     windowId: currentWindowTree()?.windowId || null,
-    renameOpen: false
+    renameOpen: false,
+    returnTabId: tabId
   };
   renderContextMenu();
 }
@@ -788,7 +797,8 @@ function openGroupContextMenu(event, groupId, windowId) {
     scopeTabIds: [],
     groupId,
     windowId,
-    renameOpen: false
+    renameOpen: false,
+    returnTabId: null
   };
   renderContextMenu();
 }
@@ -1770,6 +1780,7 @@ async function requestClose(action, totalTabs, isBatch) {
   }
 
   state.pendingCloseAction = { action, isBatch };
+  state.confirmReturnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   dom.confirmMessage.textContent = t(
     "confirmCloseMessage",
     [String(totalTabs)],
@@ -1777,12 +1788,19 @@ async function requestClose(action, totalTabs, isBatch) {
   );
   dom.confirmSkip.checked = false;
   dom.confirmOverlay.hidden = false;
+  queueMicrotask(() => {
+    dom.confirmCancel.focus();
+  });
 }
 
 function closeConfirmDialog() {
   state.pendingCloseAction = null;
   dom.confirmOverlay.hidden = true;
   dom.confirmSkip.checked = false;
+  if (state.confirmReturnFocusEl?.isConnected) {
+    state.confirmReturnFocusEl.focus();
+  }
+  state.confirmReturnFocusEl = null;
 }
 
 function canDrop(tree, sourceTabIds, targetTabId, position) {
@@ -2019,7 +2037,8 @@ function createNodeRow(tree, node, options = {}) {
   const favicon = document.createElement("img");
   favicon.className = "favicon";
   favicon.alt = "";
-  favicon.src = state.settings?.showFavicons ? node.favIconUrl || "" : "";
+  const shouldShowFavicon = node.pinned || state.settings?.showFavicons;
+  favicon.src = shouldShowFavicon ? node.favIconUrl || "" : "";
   favicon.style.visibility = favicon.src ? "visible" : "hidden";
 
   const titleWrap = document.createElement("div");
@@ -2574,6 +2593,7 @@ function rootBuckets(tree) {
 
 function renderTree() {
   dom.treeRoot.innerHTML = "";
+  dom.treeRoot.classList.toggle("hide-favicons", !state.settings?.showFavicons);
   const tree = currentWindowTree();
   if (!tree) {
     const empty = document.createElement("div");
@@ -2822,6 +2842,30 @@ function bindEvents() {
   });
 
   document.addEventListener("keydown", (event) => {
+    if (!dom.confirmOverlay.hidden) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeConfirmDialog();
+        return;
+      }
+
+      if (event.key === "Tab") {
+        const focusables = Array.from(dom.confirmOverlay.querySelectorAll("button, input"))
+          .filter((el) => !el.disabled && el.getClientRects().length > 0);
+        if (!focusables.length) {
+          return;
+        }
+        const currentIndex = focusables.indexOf(document.activeElement);
+        const delta = event.shiftKey ? -1 : 1;
+        const nextIndex = currentIndex >= 0
+          ? (currentIndex + delta + focusables.length) % focusables.length
+          : 0;
+        event.preventDefault();
+        focusables[nextIndex].focus();
+      }
+      return;
+    }
+
     if (!state.contextMenu.open) {
       return;
     }
