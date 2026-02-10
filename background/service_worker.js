@@ -50,25 +50,27 @@ const persistCoordinator = createPersistCoordinator({
   }
 });
 
-function getStatePayload(targetWindowId = null, changedWindowId = null) {
+function getStatePayload(targetWindowId = null, changedWindowId = null, includeWindows = true) {
   const partial = Number.isInteger(changedWindowId);
-  const windowsPayload = partial
-    ? { [changedWindowId]: state.windows[changedWindowId] || null }
-    : state.windows;
+  const windowsPayload = !includeWindows
+    ? undefined
+    : partial
+      ? { [changedWindowId]: state.windows[changedWindowId] || null }
+      : state.windows;
 
   return {
     settings: state.settings,
     windows: windowsPayload,
     focusedWindowId: targetWindowId,
-    partial,
+    partial: includeWindows ? partial : false,
     changedWindowId
   };
 }
 
-function broadcastState(windowId = null, changedWindowId = null) {
+function broadcastState(windowId = null, changedWindowId = null, includeWindows = true) {
   chrome.runtime.sendMessage({
     type: MESSAGE_TYPES.STATE_UPDATED,
-    payload: getStatePayload(windowId, changedWindowId)
+    payload: getStatePayload(windowId, changedWindowId, includeWindows)
   }).catch(() => {
     // No active side panel listener.
   });
@@ -1110,7 +1112,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     if (message?.type === MESSAGE_TYPES.PATCH_SETTINGS) {
       state.settings = await saveSettings({ ...state.settings, ...message.payload.settingsPatch });
-      broadcastState();
+      broadcastState(null, null, false);
       sendResponse({ ok: true, payload: state.settings });
       return;
     }
