@@ -295,6 +295,7 @@ const state = {
   focusedWindowId: null,
   search: "",
   searchRenderTimer: null,
+  renderRafId: null,
   visibleTabIds: [],
   draggingTabIds: [],
   draggingGroupId: null,
@@ -2736,6 +2737,16 @@ function render() {
   renderContextMenu();
 }
 
+function scheduleRender() {
+  if (state.renderRafId) {
+    return;
+  }
+  state.renderRafId = requestAnimationFrame(() => {
+    state.renderRafId = null;
+    render();
+  });
+}
+
 async function bootstrap() {
   state.panelWindowId = await resolvePanelWindowId();
   const response = await send(MESSAGE_TYPES.GET_STATE, {
@@ -3086,7 +3097,7 @@ function bindEvents() {
       replaceSelection([activeTabId], activeTabId);
     }
 
-    render();
+    scheduleRender();
   });
 
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
