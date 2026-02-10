@@ -876,17 +876,64 @@ async function renameGroup(groupId, title, windowIdHint = null) {
   }
 }
 
-async function setGroupColor(groupId, color, windowIdHint = null) {
+async function resolveGroupIdFromTabIds(tabIds = []) {
+  const uniqueTabIds = [...new Set((Array.isArray(tabIds) ? tabIds : [])
+    .filter((tabId) => Number.isInteger(tabId)))];
+  for (const tabId of uniqueTabIds) {
+    const tab = await getTab(tabId);
+    if (Number.isInteger(tab?.groupId) && tab.groupId >= 0) {
+      return tab.groupId;
+    }
+  }
+  return null;
+}
+
+async function updateGroupColorAndVerify(groupId, color) {
+  const updatedGroup = await chrome.tabGroups.update(groupId, { color });
+  if (updatedGroup?.color === color) {
+    return updatedGroup;
+  }
+  const refreshedGroup = await chrome.tabGroups.get(groupId);
+  if (refreshedGroup?.color === color) {
+    return refreshedGroup;
+  }
+  throw new Error(`Tab group ${groupId} color did not update to ${color}`);
+}
+
+async function setGroupColor(groupId, color, windowIdHint = null, tabIds = []) {
   if (!Number.isInteger(groupId) || !TAB_GROUP_COLORS.has(color)) {
     return;
   }
+
+  let effectiveGroupId = groupId;
+  let updatedGroup = null;
+  let lastError = null;
+
   try {
-    await chrome.tabGroups.update(groupId, { color });
-  } catch {
-    // Best effort.
+    updatedGroup = await updateGroupColorAndVerify(groupId, color);
+  } catch (error) {
+    lastError = error;
   }
 
-  const windowId = await resolveGroupWindowId(groupId, windowIdHint);
+  if (!updatedGroup) {
+    const fallbackGroupId = await resolveGroupIdFromTabIds(tabIds);
+    if (Number.isInteger(fallbackGroupId) && fallbackGroupId >= 0) {
+      try {
+        updatedGroup = await updateGroupColorAndVerify(fallbackGroupId, color);
+        effectiveGroupId = fallbackGroupId;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+
+  if (!updatedGroup) {
+    throw lastError || new Error(`Failed to set color ${color} for tab group ${groupId}`);
+  }
+
+  const windowId = Number.isInteger(updatedGroup?.windowId)
+    ? updatedGroup.windowId
+    : await resolveGroupWindowId(effectiveGroupId, windowIdHint);
   if (Number.isInteger(windowId)) {
     await refreshGroupMetadata(windowId);
   }
@@ -935,7 +982,7 @@ async function handleTreeAction(payload) {
   }
 
   if (type === TREE_ACTIONS.SET_GROUP_COLOR) {
-    return setGroupColor(payload.groupId, payload.color, payload.windowId ?? null);
+    return setGroupColor(payload.groupId, payload.color, payload.windowId ?? null, payload.tabIds || []);
   }
 
   if (type === TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE) {

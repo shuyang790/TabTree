@@ -1058,13 +1058,25 @@ async function submitGroupRename(event) {
 async function setGroupColor(color) {
   const groupId = state.contextMenu.groupId;
   const windowId = state.contextMenu.windowId;
+  const tree = currentWindowTree();
+  const tabIds = tree && Number.isInteger(groupId)
+    ? groupTabIds(tree, groupId)
+    : [];
   closeContextMenu();
-  await send(MESSAGE_TYPES.TREE_ACTION, {
-    type: TREE_ACTIONS.SET_GROUP_COLOR,
-    groupId,
-    windowId,
-    color
-  });
+  try {
+    const response = await send(MESSAGE_TYPES.TREE_ACTION, {
+      type: TREE_ACTIONS.SET_GROUP_COLOR,
+      groupId,
+      windowId,
+      color,
+      tabIds
+    });
+    if (response?.ok === false) {
+      throw new Error(response.error || "Unknown error");
+    }
+  } catch (error) {
+    console.warn("Failed to sync native tab group color", error);
+  }
 }
 
 function createContextMenuButton(label, action, disabled = false) {

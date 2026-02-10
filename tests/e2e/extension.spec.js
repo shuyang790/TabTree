@@ -164,6 +164,9 @@ test.describe("TabTree extension", () => {
     await colorTrigger.hover();
     await sidePanelPage.locator('.context-color-item[data-color="red"]').click();
 
+    const renamedGroupId = Number(await renamedHeader.getAttribute("data-group-id"));
+    expect(Number.isInteger(renamedGroupId)).toBeTruthy();
+
     await expect.poll(async () => {
       const colorDot = sidePanelPage
         .locator(".group-header")
@@ -172,6 +175,62 @@ test.describe("TabTree extension", () => {
         .locator(".group-color-dot");
       return colorDot.evaluate((el) => getComputedStyle(el).backgroundColor);
     }).toBe("rgb(228, 88, 88)");
+
+    await expect.poll(async () => sidePanelPage.evaluate(async (groupId) => {
+      const nativeGroup = await chrome.tabGroups.get(groupId);
+      return nativeGroup?.color ?? null;
+    }, renamedGroupId)).toBe("red");
+
+    await tabA.close().catch(() => {});
+    await tabB.close().catch(() => {});
+  });
+
+  test("set-group-color action falls back to tabIds when groupId is stale", async ({ context, sidePanelPage }) => {
+    const tabA = await createTitledTab(context, "Fallback Group A");
+    const tabB = await createTitledTab(context, "Fallback Group B");
+
+    const rowA = rowByTitle(sidePanelPage, "Fallback Group A");
+    const rowB = rowByTitle(sidePanelPage, "Fallback Group B");
+
+    await expect(rowA).toBeVisible();
+    await expect(rowB).toBeVisible();
+
+    await rowA.click();
+    await rowB.click({ modifiers: ["Shift"] });
+    await rowA.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="group-selected-new"]').click();
+
+    const groupHeader = sidePanelPage.locator(".group-section").filter({ has: rowA }).first().locator(".group-header");
+    await expect(groupHeader).toBeVisible();
+
+    const groupId = Number(await groupHeader.getAttribute("data-group-id"));
+    expect(Number.isInteger(groupId)).toBeTruthy();
+
+    const tabIds = await sidePanelPage.evaluate(async ({ firstTitle, secondTitle }) => {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      return tabs
+        .filter((tab) => tab.title === firstTitle || tab.title === secondTitle)
+        .map((tab) => tab.id)
+        .filter((tabId) => Number.isInteger(tabId));
+    }, { firstTitle: "Fallback Group A", secondTitle: "Fallback Group B" });
+    expect(tabIds.length).toBe(2);
+
+    const response = await sidePanelPage.evaluate(async ({ staleGroupId, tabIds: ids }) =>
+      chrome.runtime.sendMessage({
+        type: "TREE_ACTION",
+        payload: {
+          type: "SET_GROUP_COLOR",
+          groupId: staleGroupId,
+          color: "cyan",
+          tabIds: ids
+        }
+      }), { staleGroupId: groupId + 1000000, tabIds });
+    expect(response?.ok).toBeTruthy();
+
+    await expect.poll(async () => sidePanelPage.evaluate(async (liveGroupId) => {
+      const nativeGroup = await chrome.tabGroups.get(liveGroupId);
+      return nativeGroup?.color ?? null;
+    }, groupId)).toBe("cyan");
 
     await tabA.close().catch(() => {});
     await tabB.close().catch(() => {});
