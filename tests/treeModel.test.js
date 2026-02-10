@@ -213,3 +213,38 @@ test("buildTreeFromTabs handles large duplicate-url snapshots without self-paren
     assert.notEqual(node.parentNodeId, node.nodeId);
   }
 });
+
+test("buildTreeFromTabs falls back to title matching when urls are missing", () => {
+  const tabs = [
+    tab({ id: 1, index: 0, title: "Persist Parent", url: "" }),
+    tab({ id: 2, index: 1, title: "Persist Child", url: "" })
+  ];
+
+  const previousTree = createEmptyWindowTree(1);
+  previousTree.nodes = {
+    [nodeIdFromTabId(1)]: {
+      nodeId: nodeIdFromTabId(1),
+      tabId: 1,
+      parentNodeId: null,
+      childNodeIds: [nodeIdFromTabId(2)],
+      collapsed: false,
+      lastKnownTitle: "Persist Parent",
+      lastKnownUrl: ""
+    },
+    [nodeIdFromTabId(2)]: {
+      nodeId: nodeIdFromTabId(2),
+      tabId: 2,
+      parentNodeId: nodeIdFromTabId(1),
+      childNodeIds: [],
+      collapsed: false,
+      lastKnownTitle: "Persist Child",
+      lastKnownUrl: ""
+    }
+  };
+  previousTree.rootNodeIds = [nodeIdFromTabId(1)];
+
+  const restored = buildTreeFromTabs(tabs, previousTree);
+
+  assert.equal(restored.nodes[nodeIdFromTabId(2)].parentNodeId, nodeIdFromTabId(1));
+  assert.deepEqual(restored.nodes[nodeIdFromTabId(1)].childNodeIds, [nodeIdFromTabId(2)]);
+});

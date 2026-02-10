@@ -392,24 +392,50 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
       previousRecords.push({
         url: normalizeUrl(node.lastKnownUrl),
         parentUrl: node.parentNodeId ? normalizeUrl(previousTree.nodes[node.parentNodeId]?.lastKnownUrl) : null,
-        collapsed: !!node.collapsed
+        title: node.lastKnownTitle || "",
+        parentTitle: node.parentNodeId ? (previousTree.nodes[node.parentNodeId]?.lastKnownTitle || "") : "",
+        collapsed: !!node.collapsed,
+        consumed: false
       });
     }
   }
 
+  const takeFirstUnconsumed = (bucket) => {
+    if (!bucket) {
+      return null;
+    }
+    while (bucket.length) {
+      const candidate = bucket.shift();
+      if (!candidate || candidate.consumed) {
+        continue;
+      }
+      candidate.consumed = true;
+      return candidate;
+    }
+    return null;
+  };
+
   const previousByUrl = new Map();
+  const previousByTitle = new Map();
   for (const record of previousRecords) {
     if (!previousByUrl.has(record.url)) {
       previousByUrl.set(record.url, []);
     }
     previousByUrl.get(record.url).push(record);
+    const titleKey = typeof record.title === "string" ? record.title : "";
+    if (!previousByTitle.has(titleKey)) {
+      previousByTitle.set(titleKey, []);
+    }
+    previousByTitle.get(titleKey).push(record);
   }
 
   const matchedByTabId = new Map();
   for (const tab of sortedTabs) {
     const url = normalizeUrl(tab.url);
-    const matches = previousByUrl.get(url);
-    const match = matches?.shift() || null;
+    let match = takeFirstUnconsumed(previousByUrl.get(url));
+    if (!match && typeof tab.title === "string" && tab.title) {
+      match = takeFirstUnconsumed(previousByTitle.get(tab.title));
+    }
     if (match) {
       matchedByTabId.set(tab.id, match);
     }
@@ -417,15 +443,25 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
 
   const firstTabByUrl = new Map();
   const secondTabByUrl = new Map();
+  const firstTabByTitle = new Map();
+  const secondTabByTitle = new Map();
   for (const tab of sortedTabs) {
     const url = normalizeUrl(tab.url);
     const first = firstTabByUrl.get(url);
     if (!first) {
       firstTabByUrl.set(url, tab);
+    } else if (!secondTabByUrl.has(url) && first.id !== tab.id) {
+      secondTabByUrl.set(url, tab);
+    }
+
+    const titleKey = typeof tab.title === "string" ? tab.title : "";
+    const firstTitle = firstTabByTitle.get(titleKey);
+    if (!firstTitle) {
+      firstTabByTitle.set(titleKey, tab);
       continue;
     }
-    if (!secondTabByUrl.has(url) && first.id !== tab.id) {
-      secondTabByUrl.set(url, tab);
+    if (!secondTabByTitle.has(titleKey) && firstTitle.id !== tab.id) {
+      secondTabByTitle.set(titleKey, tab);
     }
   }
 
@@ -442,14 +478,24 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
   // First attempt: restore parent by previous URL relation.
   for (const tab of sortedTabs) {
     const match = matchedByTabId.get(tab.id);
-    if (!match?.parentUrl) {
+    if (!match?.parentUrl && !match?.parentTitle) {
       continue;
     }
-    const firstCandidate = firstTabByUrl.get(match.parentUrl) || null;
-    const secondCandidate = secondTabByUrl.get(match.parentUrl) || null;
-    const parentTab = firstCandidate?.id !== tab.id
-      ? firstCandidate
-      : secondCandidate;
+    let parentTab = null;
+    if (match.parentUrl) {
+      const firstCandidate = firstTabByUrl.get(match.parentUrl) || null;
+      const secondCandidate = secondTabByUrl.get(match.parentUrl) || null;
+      parentTab = firstCandidate?.id !== tab.id
+        ? firstCandidate
+        : secondCandidate;
+    }
+    if (!parentTab && match.parentTitle) {
+      const firstByTitle = firstTabByTitle.get(match.parentTitle) || null;
+      const secondByTitle = secondTabByTitle.get(match.parentTitle) || null;
+      parentTab = firstByTitle?.id !== tab.id
+        ? firstByTitle
+        : secondByTitle;
+    }
     if (!parentTab || parentTab.id === tab.id) {
       continue;
     }

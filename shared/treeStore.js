@@ -150,6 +150,20 @@ export async function loadWindowTree(windowId) {
   return raw[key] || null;
 }
 
+export async function loadAllWindowTrees() {
+  const raw = await chrome.storage.local.get(null);
+  const trees = [];
+  for (const [key, value] of Object.entries(raw || {})) {
+    if (!key.startsWith(LOCAL_WINDOW_PREFIX)) {
+      continue;
+    }
+    if (value && typeof value === "object" && typeof value.windowId === "number" && value.nodes) {
+      trees.push(value);
+    }
+  }
+  return trees;
+}
+
 export async function saveWindowTree(windowTree) {
   const key = `${LOCAL_WINDOW_PREFIX}${windowTree.windowId}`;
   await chrome.storage.local.set({ [key]: windowTree });

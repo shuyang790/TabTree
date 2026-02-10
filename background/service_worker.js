@@ -6,6 +6,7 @@ import {
   inferTreeFromSyncSnapshot,
   moveNode,
   normalizeGroupedTabParents,
+  normalizeUrl,
   nodeIdFromTabId,
   reconcileSelectedTabId,
   removeNodePromoteChildren,
@@ -19,6 +20,7 @@ import { shouldProcessTabUpdate } from "./tabUpdates.js";
 import { groupLiveTabIdsByWindow } from "./liveTabGrouping.js";
 import { pruneTreeAgainstLiveTabs, removeTabIdsFromTree } from "./windowTreeReconciler.js";
 import {
+  loadAllWindowTrees,
   loadSettings,
   loadSyncSnapshot,
   loadWindowTree,
@@ -311,7 +313,8 @@ async function ensureInitialized() {
   }
   state.settings = await loadSettings();
   state.syncSnapshot = await loadSyncSnapshot();
-  await hydrateAllWindows();
+  const previousTrees = await loadAllWindowTrees();
+  await hydrateAllWindows(previousTrees);
   state.initialized = true;
 
   try {
@@ -321,15 +324,73 @@ async function ensureInitialized() {
   }
 }
 
-async function hydrateAllWindows() {
+function scorePreviousTreeAgainstTabs(tree, tabs) {
+  if (!tree?.nodes || !tabs.length) {
+    return 0;
+  }
+
+  const currentUrls = new Set(
+    tabs.map((tab) => normalizeUrl(initialTabUrl(tab))).filter((url) => !!url)
+  );
+  const currentTitles = new Set(
+    tabs.map((tab) => tab.title || "").filter((title) => !!title)
+  );
+
+  if (!currentUrls.size && !currentTitles.size) {
+    return 0;
+  }
+
+  let score = 0;
+  for (const node of Object.values(tree.nodes)) {
+    const nodeUrl = normalizeUrl(node.lastKnownUrl || "");
+    if (nodeUrl && currentUrls.has(nodeUrl)) {
+      score += 2;
+      continue;
+    }
+    const nodeTitle = node.lastKnownTitle || "";
+    if (nodeTitle && currentTitles.has(nodeTitle)) {
+      score += 1;
+    }
+  }
+  return score;
+}
+
+function pickBestPreviousTreeForTabs(tabs, treePool) {
+  if (!tabs.length || !Array.isArray(treePool) || !treePool.length) {
+    return null;
+  }
+
+  let bestIndex = -1;
+  let bestScore = 0;
+  for (let i = 0; i < treePool.length; i += 1) {
+    const score = scorePreviousTreeAgainstTabs(treePool[i], tabs);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  }
+
+  if (bestIndex < 0 || bestScore <= 0) {
+    return null;
+  }
+
+  const [best] = treePool.splice(bestIndex, 1);
+  return best || null;
+}
+
+async function hydrateAllWindows(previousTrees = []) {
   const windows = await chrome.windows.getAll({ populate: true });
+  const treePool = Array.isArray(previousTrees) ? [...previousTrees] : [];
   for (const win of windows) {
-    await hydrateWindow(win.id, win.tabs || []);
+    await hydrateWindow(win.id, win.tabs || [], treePool);
   }
 }
 
-async function hydrateWindow(windowId, tabs) {
-  const previous = await loadWindowTree(windowId);
+async function hydrateWindow(windowId, tabs, treePool = []) {
+  let previous = await loadWindowTree(windowId);
+  if (!previous && tabs.length) {
+    previous = pickBestPreviousTreeForTabs(tabs, treePool);
+  }
   let tree;
 
   if (tabs.length) {
