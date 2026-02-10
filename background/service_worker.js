@@ -16,6 +16,7 @@ import {
   upsertTabNode
 } from "../shared/treeModel.js";
 import { shouldProcessTabUpdate } from "./tabUpdates.js";
+import { pruneTreeAgainstLiveTabs, removeTabIdsFromTree } from "./windowTreeReconciler.js";
 import {
   loadSettings,
   loadSyncSnapshot,
@@ -261,27 +262,11 @@ async function groupLiveTabIdsByWindow(tabIds) {
 }
 
 function removeTabIdsFromWindowTree(windowId, tabIds) {
-  const uniqueTabIds = Array.from(new Set(tabIds.filter((id) => Number.isFinite(id))));
-  if (!uniqueTabIds.length) {
-    return false;
+  const result = removeTabIdsFromTree(windowTree(windowId), tabIds);
+  if (result.changed) {
+    setWindowTree(result.tree);
   }
-
-  let next = windowTree(windowId);
-  let changed = false;
-  for (const tabId of uniqueTabIds) {
-    const staleNodeId = nodeIdFromTabId(tabId);
-    if (!next.nodes[staleNodeId]) {
-      continue;
-    }
-    next = removeNodePromoteChildren(next, staleNodeId);
-    changed = true;
-  }
-
-  if (changed) {
-    next = reconcileSelectedTabId(next);
-    setWindowTree(next);
-  }
-  return changed;
+  return result.changed;
 }
 
 async function pruneWindowTreeAgainstLiveTabs(windowId) {
@@ -292,34 +277,11 @@ async function pruneWindowTreeAgainstLiveTabs(windowId) {
     return;
   }
 
-  let next = windowTree(windowId);
   const liveTabIds = new Set(tabs.map((tab) => tab.id));
-  const staleNodeIds = Object.keys(next.nodes).filter((id) => {
-    const tabId = next.nodes[id]?.tabId;
-    return Number.isFinite(tabId) && !liveTabIds.has(tabId);
-  });
-
-  let changed = false;
-  for (const staleNodeId of staleNodeIds) {
-    if (!next.nodes[staleNodeId]) {
-      continue;
-    }
-    next = removeNodePromoteChildren(next, staleNodeId);
-    changed = true;
-  }
-
-  const selectedIsLive = Number.isFinite(next.selectedTabId) && liveTabIds.has(next.selectedTabId);
   const activeTabId = tabs.find((tab) => tab.active)?.id ?? null;
-  const reconciled = selectedIsLive
-    ? next
-    : reconcileSelectedTabId(next, activeTabId);
-  if (reconciled !== next) {
-    next = reconciled;
-    changed = true;
-  }
-
-  if (changed) {
-    setWindowTree(next);
+  const result = pruneTreeAgainstLiveTabs(windowTree(windowId), liveTabIds, activeTabId);
+  if (result.changed) {
+    setWindowTree(result.tree);
   }
 }
 
@@ -337,18 +299,8 @@ async function syncWindowOrdering(windowId) {
   for (const tab of tabs) {
     next = upsertTabNode(next, tab);
   }
-
-  const staleNodeIds = Object.keys(next.nodes).filter((id) => {
-    const tabId = next.nodes[id]?.tabId;
-    return Number.isFinite(tabId) && !liveTabIds.has(tabId);
-  });
-
-  for (const staleNodeId of staleNodeIds) {
-    if (!next.nodes[staleNodeId]) {
-      continue;
-    }
-    next = removeNodePromoteChildren(next, staleNodeId);
-  }
+  const activeTabId = tabs.find((tab) => tab.active)?.id ?? null;
+  next = pruneTreeAgainstLiveTabs(next, liveTabIds, activeTabId).tree;
 
   next = normalizeGroupedTabParents(next);
   next = sortTreeByIndex(next);
