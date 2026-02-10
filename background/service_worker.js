@@ -16,6 +16,7 @@ import {
   upsertTabNode
 } from "../shared/treeModel.js";
 import { shouldProcessTabUpdate } from "./tabUpdates.js";
+import { groupLiveTabIdsByWindow } from "./liveTabGrouping.js";
 import { pruneTreeAgainstLiveTabs, removeTabIdsFromTree } from "./windowTreeReconciler.js";
 import {
   loadSettings,
@@ -246,33 +247,6 @@ function sortNodeIdsByTabIndex(tree, nodeIds) {
   return [...nodeIds].sort((a, b) => (tree.nodes[a]?.index ?? 0) - (tree.nodes[b]?.index ?? 0));
 }
 
-async function groupLiveTabIdsByWindow(tabIds) {
-  const grouped = new Map();
-  const uniqueTabIds = Array.from(new Set(tabIds.filter((id) => Number.isFinite(id))));
-  if (!uniqueTabIds.length) {
-    return grouped;
-  }
-
-  const requested = new Set(uniqueTabIds);
-  let tabs = [];
-  try {
-    tabs = (await chrome.tabs.query({})).filter((tab) => requested.has(tab.id));
-  } catch {
-    tabs = await Promise.all(uniqueTabIds.map((tabId) => getTab(tabId)));
-  }
-
-  for (const tab of tabs) {
-    if (!tab || !requested.has(tab.id)) {
-      continue;
-    }
-    if (!grouped.has(tab.windowId)) {
-      grouped.set(tab.windowId, []);
-    }
-    grouped.get(tab.windowId).push(tab.id);
-  }
-  return grouped;
-}
-
 function removeTabIdsFromWindowTree(windowId, tabIds) {
   const result = removeTabIdsFromTree(windowTree(windowId), tabIds);
   if (result.changed) {
@@ -463,7 +437,10 @@ async function activateTab(tabId) {
 }
 
 async function batchCloseSubtrees(tabIds) {
-  const grouped = await groupLiveTabIdsByWindow(tabIds);
+  const grouped = await groupLiveTabIdsByWindow(tabIds, {
+    queryTabs: () => chrome.tabs.query({}),
+    getTab
+  });
   for (const [windowId, ids] of grouped.entries()) {
     const tree = windowTree(windowId);
     const nodeIds = ids.map((id) => nodeIdFromTabId(id)).filter((id) => !!tree.nodes[id]);
@@ -514,7 +491,10 @@ async function batchCloseTabs(tabIds) {
     }
   }
 
-  const liveByWindow = await groupLiveTabIdsByWindow(requestedIds);
+  const liveByWindow = await groupLiveTabIdsByWindow(requestedIds, {
+    queryTabs: () => chrome.tabs.query({}),
+    getTab
+  });
   const affectedWindowIds = new Set([
     ...requestedByWindow.keys(),
     ...liveByWindow.keys()
@@ -542,7 +522,10 @@ async function batchCloseTabs(tabIds) {
 }
 
 async function batchGroupNew(tabIds) {
-  const grouped = await groupLiveTabIdsByWindow(tabIds);
+  const grouped = await groupLiveTabIdsByWindow(tabIds, {
+    queryTabs: () => chrome.tabs.query({}),
+    getTab
+  });
   for (const [windowId, ids] of grouped.entries()) {
     const tabs = await Promise.all(ids.map((id) => getTab(id)));
     const groupableTabIds = tabs
@@ -576,7 +559,10 @@ async function batchGroupExisting(tabIds, groupId, windowIdHint = null) {
     return;
   }
 
-  const grouped = await groupLiveTabIdsByWindow(tabIds);
+  const grouped = await groupLiveTabIdsByWindow(tabIds, {
+    queryTabs: () => chrome.tabs.query({}),
+    getTab
+  });
   const ids = grouped.get(targetWindowId) || [];
   if (!ids.length) {
     return;
@@ -604,7 +590,10 @@ async function batchGroupExisting(tabIds, groupId, windowIdHint = null) {
 }
 
 async function batchMoveToRoot(tabIds) {
-  const grouped = await groupLiveTabIdsByWindow(tabIds);
+  const grouped = await groupLiveTabIdsByWindow(tabIds, {
+    queryTabs: () => chrome.tabs.query({}),
+    getTab
+  });
   for (const [windowId, ids] of grouped.entries()) {
     const tree = windowTree(windowId);
     const nodeIds = ids.map((id) => nodeIdFromTabId(id)).filter((id) => !!tree.nodes[id]);
