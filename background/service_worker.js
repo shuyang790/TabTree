@@ -7,6 +7,7 @@ import {
   moveNode,
   normalizeGroupedTabParents,
   nodeIdFromTabId,
+  reconcileSelectedTabId,
   removeNodePromoteChildren,
   removeSubtree,
   setActiveTab,
@@ -15,7 +16,6 @@ import {
   upsertTabNode
 } from "../shared/treeModel.js";
 import {
-  createDebouncedPersister,
   loadSettings,
   loadSyncSnapshot,
   loadWindowTree,
@@ -24,6 +24,7 @@ import {
   saveSyncSnapshot,
   saveWindowTree
 } from "../shared/treeStore.js";
+import { createPersistCoordinator } from "./persistence.js";
 
 const state = {
   settings: null,
@@ -40,23 +41,34 @@ function t(key, fallback = key) {
   return chrome.i18n.getMessage(key) || fallback;
 }
 
-const schedulePersist = createDebouncedPersister(async () => {
-  await Promise.all(Object.values(state.windows).map((tree) => saveWindowTree(tree)));
-  await saveSyncSnapshot(state.windows);
+const persistCoordinator = createPersistCoordinator({
+  saveWindowTree,
+  saveSyncSnapshot,
+  getWindowsState: () => state.windows,
+  onError: (error) => {
+    console.warn("TabTree persistence flush failed", error);
+  }
 });
 
-function getStatePayload(targetWindowId = null) {
+function getStatePayload(targetWindowId = null, changedWindowId = null) {
+  const partial = Number.isInteger(changedWindowId);
+  const windowsPayload = partial
+    ? { [changedWindowId]: state.windows[changedWindowId] || null }
+    : state.windows;
+
   return {
     settings: state.settings,
-    windows: state.windows,
-    focusedWindowId: targetWindowId
+    windows: windowsPayload,
+    focusedWindowId: targetWindowId,
+    partial,
+    changedWindowId
   };
 }
 
-function broadcastState(windowId = null) {
+function broadcastState(windowId = null, changedWindowId = null) {
   chrome.runtime.sendMessage({
     type: MESSAGE_TYPES.STATE_UPDATED,
-    payload: getStatePayload(windowId)
+    payload: getStatePayload(windowId, changedWindowId)
   }).catch(() => {
     // No active side panel listener.
   });
@@ -71,13 +83,22 @@ function windowTree(windowId) {
 
 function setWindowTree(nextTree) {
   state.windows[nextTree.windowId] = nextTree;
-  schedulePersist();
-  broadcastState(nextTree.windowId);
+  persistCoordinator.markWindowDirty(nextTree.windowId);
+  broadcastState(nextTree.windowId, nextTree.windowId);
 }
 
 async function getTab(tabId) {
   try {
     return await chrome.tabs.get(tabId);
+  } catch {
+    return null;
+  }
+}
+
+async function getWindowActiveTabId(windowId) {
+  try {
+    const tabs = await chrome.tabs.query({ windowId, active: true });
+    return tabs[0]?.id ?? null;
   } catch {
     return null;
   }
@@ -254,6 +275,7 @@ function removeTabIdsFromWindowTree(windowId, tabIds) {
   }
 
   if (changed) {
+    next = reconcileSelectedTabId(next);
     setWindowTree(next);
   }
   return changed;
@@ -285,13 +307,11 @@ async function pruneWindowTreeAgainstLiveTabs(windowId) {
 
   const selectedIsLive = Number.isFinite(next.selectedTabId) && liveTabIds.has(next.selectedTabId);
   const activeTabId = tabs.find((tab) => tab.active)?.id ?? null;
-  const desiredSelectedTabId = selectedIsLive ? next.selectedTabId : activeTabId;
-  if (next.selectedTabId !== desiredSelectedTabId) {
-    next = {
-      ...next,
-      selectedTabId: desiredSelectedTabId,
-      updatedAt: Date.now()
-    };
+  const reconciled = selectedIsLive
+    ? next
+    : reconcileSelectedTabId(next, activeTabId);
+  if (reconciled !== next) {
+    next = reconciled;
     changed = true;
   }
 
@@ -398,7 +418,7 @@ async function hydrateWindow(windowId, tabs) {
   }
 
   state.windows[windowId] = tree;
-  await saveWindowTree(tree);
+  persistCoordinator.markWindowDirty(windowId);
 }
 
 async function addChildTab(parentTabId) {
@@ -1156,7 +1176,10 @@ chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
   if (!tree.nodes[nodeId]) {
     return;
   }
-  setWindowTree(removeNodePromoteChildren(tree, nodeId));
+  let next = removeNodePromoteChildren(tree, nodeId);
+  const activeTabId = await getWindowActiveTabId(removeInfo.windowId);
+  next = reconcileSelectedTabId(next, activeTabId);
+  setWindowTree(next);
 });
 
 chrome.tabs.onAttached.addListener(async (tabId, attachInfo) => {
@@ -1176,14 +1199,17 @@ chrome.tabs.onDetached.addListener(async (tabId, detachInfo) => {
   if (!tree.nodes[nodeId]) {
     return;
   }
-  setWindowTree(removeNodePromoteChildren(tree, nodeId));
+  let next = removeNodePromoteChildren(tree, nodeId);
+  const activeTabId = await getWindowActiveTabId(detachInfo.oldWindowId);
+  next = reconcileSelectedTabId(next, activeTabId);
+  setWindowTree(next);
 });
 
 chrome.windows.onRemoved.addListener(async (windowId) => {
   await ensureInitialized();
   delete state.windows[windowId];
   await removeWindowTree(windowId);
-  schedulePersist();
+  persistCoordinator.forgetWindow(windowId);
   broadcastState();
 });
 

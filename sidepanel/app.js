@@ -1289,15 +1289,44 @@ function groupDisplay(tree, groupId) {
   };
 }
 
-function shouldRenderNode(tree, nodeKey, query) {
-  const node = tree.nodes[nodeKey];
-  if (!node) {
-    return false;
+function buildVisibilityMap(tree, query) {
+  const visibility = new Map();
+  if (!query) {
+    return visibility;
   }
-  if (matchesSearch(node, query)) {
-    return true;
+
+  const visit = (nodeKey) => {
+    if (visibility.has(nodeKey)) {
+      return visibility.get(nodeKey);
+    }
+
+    const node = tree.nodes[nodeKey];
+    if (!node) {
+      visibility.set(nodeKey, false);
+      return false;
+    }
+
+    let childVisible = false;
+    for (const childId of node.childNodeIds) {
+      childVisible = visit(childId) || childVisible;
+    }
+
+    const visible = matchesSearch(node, query) || childVisible;
+    visibility.set(nodeKey, visible);
+    return visible;
+  };
+
+  for (const rootNodeId of tree.rootNodeIds) {
+    visit(rootNodeId);
   }
-  return node.childNodeIds.some((child) => shouldRenderNode(tree, child, query));
+  return visibility;
+}
+
+function shouldRenderNode(tree, nodeKey, query, visibilityByNodeId) {
+  if (!query) {
+    return !!tree.nodes[nodeKey];
+  }
+  return visibilityByNodeId.get(nodeKey) === true;
 }
 
 function isDescendant(tree, ancestorNodeId, maybeDescendantNodeId) {
@@ -2139,8 +2168,8 @@ function createNodeRow(tree, node, options = {}) {
   return row;
 }
 
-function createNodeElement(tree, nodeKey, query, rowOptions = {}) {
-  if (!shouldRenderNode(tree, nodeKey, query)) {
+function createNodeElement(tree, nodeKey, query, visibilityByNodeId, rowOptions = {}) {
+  if (!shouldRenderNode(tree, nodeKey, query, visibilityByNodeId)) {
     return null;
   }
 
@@ -2158,7 +2187,7 @@ function createNodeElement(tree, nodeKey, query, rowOptions = {}) {
     children.className = "children";
     children.setAttribute("role", "group");
     for (const childId of node.childNodeIds) {
-      const childEl = createNodeElement(tree, childId, query, rowOptions);
+      const childEl = createNodeElement(tree, childId, query, visibilityByNodeId, rowOptions);
       if (childEl) {
         children.appendChild(childEl);
       }
@@ -2171,7 +2200,7 @@ function createNodeElement(tree, nodeKey, query, rowOptions = {}) {
   return holder;
 }
 
-function createPinnedStrip(tree, pinnedRootNodeIds, query) {
+function createPinnedStrip(tree, pinnedRootNodeIds, query, visibilityByNodeId) {
   const section = document.createElement("section");
   section.className = "pinned-strip";
 
@@ -2180,7 +2209,7 @@ function createPinnedStrip(tree, pinnedRootNodeIds, query) {
 
   let renderedCount = 0;
   for (const nodeKey of pinnedRootNodeIds) {
-    if (!shouldRenderNode(tree, nodeKey, query)) {
+    if (!shouldRenderNode(tree, nodeKey, query, visibilityByNodeId)) {
       continue;
     }
     const node = tree.nodes[nodeKey];
@@ -2200,13 +2229,13 @@ function createPinnedStrip(tree, pinnedRootNodeIds, query) {
   return { element: section, renderedCount };
 }
 
-function createGroupSection(tree, groupId, rootNodeIds, query) {
+function createGroupSection(tree, groupId, rootNodeIds, query, visibilityByNodeId) {
   const group = groupDisplay(tree, groupId);
   const queryMatch = query && group.name.toLowerCase().includes(query);
 
   const renderedChildren = [];
   for (const nodeKey of rootNodeIds) {
-    const child = createNodeElement(tree, nodeKey, query, { showGroupBadge: false });
+    const child = createNodeElement(tree, nodeKey, query, visibilityByNodeId, { showGroupBadge: false });
     if (child) {
       renderedChildren.push(child);
     }
@@ -2389,6 +2418,7 @@ function renderTree() {
   }
 
   const query = state.search.trim().toLowerCase();
+  const visibilityByNodeId = buildVisibilityMap(tree, query);
   const { pinned, blocks } = rootBuckets(tree);
 
   let renderedCount = 0;
@@ -2398,7 +2428,7 @@ function renderTree() {
     pinLabel.className = "section-title";
     pinLabel.textContent = t("sectionPinned", [], "Pinned");
     dom.treeRoot.appendChild(pinLabel);
-    const { element, renderedCount: pinnedCount } = createPinnedStrip(tree, pinned, query);
+    const { element, renderedCount: pinnedCount } = createPinnedStrip(tree, pinned, query, visibilityByNodeId);
     if (element) {
       dom.treeRoot.appendChild(element);
       renderedCount += pinnedCount;
@@ -2407,7 +2437,7 @@ function renderTree() {
 
   for (const block of blocks) {
     if (block.type === "group") {
-      const section = createGroupSection(tree, block.groupId, block.rootNodeIds, query);
+      const section = createGroupSection(tree, block.groupId, block.rootNodeIds, query, visibilityByNodeId);
       if (section) {
         dom.treeRoot.appendChild(section);
         renderedCount += 1;
@@ -2415,7 +2445,7 @@ function renderTree() {
       continue;
     }
 
-    const el = createNodeElement(tree, block.rootNodeId, query, { showGroupBadge: true });
+    const el = createNodeElement(tree, block.rootNodeId, query, visibilityByNodeId, { showGroupBadge: true });
     if (el) {
       dom.treeRoot.appendChild(el);
       renderedCount += 1;
@@ -2681,7 +2711,17 @@ function bindEvents() {
     }
     const payload = message.payload;
     state.settings = payload.settings || state.settings;
-    state.windows = payload.windows || state.windows;
+    if (payload.partial && Number.isInteger(payload.changedWindowId) && payload.windows) {
+      const next = { ...state.windows };
+      if (payload.windows[payload.changedWindowId]) {
+        next[payload.changedWindowId] = payload.windows[payload.changedWindowId];
+      } else {
+        delete next[payload.changedWindowId];
+      }
+      state.windows = next;
+    } else {
+      state.windows = payload.windows || state.windows;
+    }
     if (Number.isInteger(payload.focusedWindowId)) {
       state.focusedWindowId = payload.focusedWindowId;
       if (!Number.isInteger(state.panelWindowId)) {

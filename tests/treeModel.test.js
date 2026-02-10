@@ -7,7 +7,9 @@ import {
   moveNode,
   normalizeGroupedTabParents,
   nodeIdFromTabId,
+  reconcileSelectedTabId,
   removeNodePromoteChildren,
+  removeSubtree,
   setActiveTab,
   sortTreeByIndex,
   upsertTabNode
@@ -139,4 +141,37 @@ test("normalizeGroupedTabParents keeps grouped subtree intact after boundary det
   assert.equal(tree.nodes[nodeIdFromTabId(2)].parentNodeId, null);
   assert.equal(tree.nodes[nodeIdFromTabId(3)].parentNodeId, nodeIdFromTabId(2));
   assert.deepEqual(tree.nodes[nodeIdFromTabId(2)].childNodeIds, [nodeIdFromTabId(3)]);
+});
+
+test("removeNodePromoteChildren clears stale selected tab", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0, active: true }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1 }));
+
+  tree = removeNodePromoteChildren(tree, nodeIdFromTabId(1));
+
+  assert.equal(tree.selectedTabId, null);
+});
+
+test("removeSubtree clears selection when selected tab is removed", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0 }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1, active: true }));
+  tree = moveNode(tree, nodeIdFromTabId(2), nodeIdFromTabId(1));
+
+  const removed = removeSubtree(tree, nodeIdFromTabId(1));
+
+  assert.equal(removed.tree.selectedTabId, null);
+  assert.deepEqual(removed.removedTabIds.sort((a, b) => a - b), [1, 2]);
+});
+
+test("reconcileSelectedTabId prefers active fallback when valid", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0 }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1 }));
+  tree = setActiveTab(tree, 1);
+  tree = removeNodePromoteChildren(tree, nodeIdFromTabId(1));
+
+  const reconciled = reconcileSelectedTabId(tree, 2);
+  assert.equal(reconciled.selectedTabId, 2);
 });

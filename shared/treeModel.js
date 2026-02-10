@@ -115,6 +115,33 @@ export function getDescendantNodeIds(tree, nodeId) {
   return out;
 }
 
+function hasNodeForTabId(tree, tabId) {
+  if (!Number.isFinite(tabId)) {
+    return false;
+  }
+  const node = tree.nodes[asNodeId(tabId)];
+  return !!node && node.tabId === tabId;
+}
+
+export function reconcileSelectedTabId(tree, preferredTabId = null) {
+  const preferred = Number.isFinite(preferredTabId) && hasNodeForTabId(tree, preferredTabId)
+    ? preferredTabId
+    : null;
+  const existingSelected = Number.isFinite(tree.selectedTabId) && hasNodeForTabId(tree, tree.selectedTabId)
+    ? tree.selectedTabId
+    : null;
+  const nextSelected = preferred ?? existingSelected;
+
+  if (tree.selectedTabId === nextSelected) {
+    return tree;
+  }
+
+  const next = cloneTree(tree);
+  next.selectedTabId = nextSelected;
+  next.updatedAt = Date.now();
+  return next;
+}
+
 function sortRootsByTabIndex(tree) {
   tree.rootNodeIds.sort((a, b) => (tree.nodes[a]?.index || 0) - (tree.nodes[b]?.index || 0));
 }
@@ -257,6 +284,9 @@ export function removeNodePromoteChildren(tree, nodeId) {
   }
 
   delete next.nodes[nodeId];
+  if (next.selectedTabId === node.tabId) {
+    next.selectedTabId = null;
+  }
   next.updatedAt = Date.now();
   return next;
 }
@@ -286,6 +316,9 @@ export function removeSubtree(tree, nodeId) {
     }
   }
 
+  if (removedTabIds.includes(next.selectedTabId)) {
+    next.selectedTabId = null;
+  }
   next.updatedAt = Date.now();
   return { tree: next, removedTabIds };
 }
@@ -365,14 +398,32 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
     }
   }
 
+  const previousByUrl = new Map();
+  for (const record of previousRecords) {
+    if (!previousByUrl.has(record.url)) {
+      previousByUrl.set(record.url, []);
+    }
+    previousByUrl.get(record.url).push(record);
+  }
+
   const matchedByTabId = new Map();
   for (const tab of sortedTabs) {
     const url = normalizeUrl(tab.url);
-    const match = previousRecords.find((record) => !record.consumed && record.url === url);
+    const matches = previousByUrl.get(url);
+    const match = matches?.shift() || null;
     if (match) {
       match.consumed = true;
       matchedByTabId.set(tab.id, match);
     }
+  }
+
+  const tabsByUrl = new Map();
+  for (const tab of sortedTabs) {
+    const url = normalizeUrl(tab.url);
+    if (!tabsByUrl.has(url)) {
+      tabsByUrl.set(url, []);
+    }
+    tabsByUrl.get(url).push(tab);
   }
 
   for (const tab of sortedTabs) {
@@ -391,7 +442,8 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
     if (!match?.parentUrl) {
       continue;
     }
-    const parentTab = sortedTabs.find((candidate) => normalizeUrl(candidate.url) === match.parentUrl);
+    const parentCandidates = tabsByUrl.get(match.parentUrl) || [];
+    const parentTab = parentCandidates.find((candidate) => candidate.id !== tab.id) || null;
     if (!parentTab || parentTab.id === tab.id) {
       continue;
     }

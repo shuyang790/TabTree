@@ -1,8 +1,12 @@
 import {
   DEFAULT_SETTINGS,
+  DENSITY_OPTIONS,
   LOCAL_WINDOW_PREFIX,
+  SETTINGS_NUMERIC_RANGES,
   SETTINGS_KEY,
   STORAGE_WRITE_DEBOUNCE_MS,
+  THEME_PRESET_DARK_KEYS,
+  THEME_PRESET_LIGHT_KEYS,
   SYNC_MAX_NODES_PER_WINDOW,
   SYNC_MAX_URL_LENGTH,
   SYNC_MAX_WINDOWS,
@@ -24,8 +28,28 @@ const LEGACY_DARK_PRESETS = new Set([
   "gruvbox-dark"
 ]);
 
+const LIGHT_PRESET_KEYS = new Set(THEME_PRESET_LIGHT_KEYS);
+const DARK_PRESET_KEYS = new Set(THEME_PRESET_DARK_KEYS);
+const DENSITY_OPTION_SET = new Set(DENSITY_OPTIONS);
+
 function nonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
+}
+
+function isValidHexColor(value) {
+  return typeof value === "string" && /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(value);
+}
+
+function clampNumber(value, { min, max }, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, numeric));
+}
+
+function normalizeBoolean(value, fallback) {
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function resolveLegacyThemePresetPair(candidate) {
@@ -52,12 +76,50 @@ function resolveLegacyThemePresetPair(candidate) {
 export function normalizeSettings(candidate) {
   const normalized = resolveLegacyThemePresetPair(candidate || {});
 
-  normalized.themePresetLight = nonEmptyString(normalized.themePresetLight)
+  normalized.themePresetLight = nonEmptyString(normalized.themePresetLight) && LIGHT_PRESET_KEYS.has(normalized.themePresetLight)
     ? normalized.themePresetLight
     : DEFAULT_SETTINGS.themePresetLight;
-  normalized.themePresetDark = nonEmptyString(normalized.themePresetDark)
+  normalized.themePresetDark = nonEmptyString(normalized.themePresetDark) && DARK_PRESET_KEYS.has(normalized.themePresetDark)
     ? normalized.themePresetDark
     : DEFAULT_SETTINGS.themePresetDark;
+  normalized.accentColor = isValidHexColor(normalized.accentColor)
+    ? normalized.accentColor
+    : DEFAULT_SETTINGS.accentColor;
+  normalized.density = DENSITY_OPTION_SET.has(normalized.density)
+    ? normalized.density
+    : DEFAULT_SETTINGS.density;
+
+  normalized.fontScale = clampNumber(
+    normalized.fontScale,
+    SETTINGS_NUMERIC_RANGES.fontScale,
+    DEFAULT_SETTINGS.fontScale
+  );
+  normalized.indentPx = Math.round(clampNumber(
+    normalized.indentPx,
+    SETTINGS_NUMERIC_RANGES.indentPx,
+    DEFAULT_SETTINGS.indentPx
+  ));
+  normalized.radiusPx = Math.round(clampNumber(
+    normalized.radiusPx,
+    SETTINGS_NUMERIC_RANGES.radiusPx,
+    DEFAULT_SETTINGS.radiusPx
+  ));
+
+  normalized.showFavicons = normalizeBoolean(normalized.showFavicons, DEFAULT_SETTINGS.showFavicons);
+  normalized.showCloseButton = normalizeBoolean(normalized.showCloseButton, DEFAULT_SETTINGS.showCloseButton);
+  normalized.showGroupHeaders = normalizeBoolean(normalized.showGroupHeaders, DEFAULT_SETTINGS.showGroupHeaders);
+  normalized.shortcutHintsEnabled = normalizeBoolean(
+    normalized.shortcutHintsEnabled,
+    DEFAULT_SETTINGS.shortcutHintsEnabled
+  );
+  normalized.confirmCloseSubtree = normalizeBoolean(
+    normalized.confirmCloseSubtree,
+    DEFAULT_SETTINGS.confirmCloseSubtree
+  );
+  normalized.confirmCloseBatch = normalizeBoolean(
+    normalized.confirmCloseBatch,
+    DEFAULT_SETTINGS.confirmCloseBatch
+  );
 
   delete normalized.themeMode;
   delete normalized.themePreset;
@@ -114,7 +176,7 @@ export async function saveSyncSnapshot(windowsState) {
   return snapshot;
 }
 
-export function createDebouncedPersister(onFlush) {
+export function createDebouncedPersister(onFlush, onError = () => {}) {
   let timer = null;
   return function schedule() {
     if (timer) {
@@ -122,7 +184,11 @@ export function createDebouncedPersister(onFlush) {
     }
     timer = setTimeout(async () => {
       timer = null;
-      await onFlush();
+      try {
+        await onFlush();
+      } catch (error) {
+        onError(error);
+      }
     }, STORAGE_WRITE_DEBOUNCE_MS);
   };
 }

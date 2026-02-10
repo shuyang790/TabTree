@@ -22,6 +22,50 @@ export const DEFAULT_SETTINGS = {
   confirmCloseBatch: true
 };
 
+export const DENSITY_OPTIONS = ["compact", "comfortable", "cozy", "spacious"];
+
+export const THEME_PRESET_LIGHT_KEYS = [
+  "base-light",
+  "catppuccin-latte",
+  "catppuccin-frappe",
+  "catppuccin-macchiato",
+  "catppuccin-mocha",
+  "everforest-light",
+  "everforest-dark",
+  "gruvbox-light",
+  "gruvbox-dark",
+  "tokyonight-day",
+  "tokyonight-night",
+  "kanagawa-lotus",
+  "kanagawa-wave",
+  "one-light",
+  "one-dark"
+];
+
+export const THEME_PRESET_DARK_KEYS = [
+  "base-dark",
+  "catppuccin-latte",
+  "catppuccin-frappe",
+  "catppuccin-macchiato",
+  "catppuccin-mocha",
+  "everforest-light",
+  "everforest-dark",
+  "gruvbox-light",
+  "gruvbox-dark",
+  "tokyonight-day",
+  "tokyonight-night",
+  "kanagawa-lotus",
+  "kanagawa-wave",
+  "one-light",
+  "one-dark"
+];
+
+export const SETTINGS_NUMERIC_RANGES = {
+  fontScale: { min: 0.9, max: 1.2 },
+  indentPx: { min: 10, max: 28 },
+  radiusPx: { min: 2, max: 16 }
+};
+
 export const MESSAGE_TYPES = {
   GET_STATE: "GET_STATE",
   PATCH_SETTINGS: "PATCH_SETTINGS",
