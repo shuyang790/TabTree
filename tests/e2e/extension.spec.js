@@ -236,6 +236,109 @@ test.describe("TabTree extension", () => {
     await tabB.close().catch(() => {});
   });
 
+  test("group recolor can be changed multiple times and stays synced", async ({ context, sidePanelPage }) => {
+    const tabA = await createTitledTab(context, "Multi Color A");
+    const tabB = await createTitledTab(context, "Multi Color B");
+
+    const rowA = rowByTitle(sidePanelPage, "Multi Color A");
+    const rowB = rowByTitle(sidePanelPage, "Multi Color B");
+
+    await expect(rowA).toBeVisible();
+    await expect(rowB).toBeVisible();
+
+    await rowA.click();
+    await rowB.click({ modifiers: ["Shift"] });
+    await rowA.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="group-selected-new"]').click();
+
+    const groupHeader = sidePanelPage.locator(".group-section").filter({ has: rowA }).first().locator(".group-header");
+    await expect(groupHeader).toBeVisible();
+
+    const groupId = Number(await groupHeader.getAttribute("data-group-id"));
+    expect(Number.isInteger(groupId)).toBeTruthy();
+
+    const applyColorViaContextMenu = async (color) => {
+      await groupHeader.click({ button: "right" });
+      const colorTrigger = sidePanelPage.locator('.context-submenu-trigger[data-action="group-color"]');
+      await expect(colorTrigger).toBeVisible();
+      await colorTrigger.hover();
+      await sidePanelPage.locator(`.context-color-item[data-color="${color}"]`).click();
+    };
+
+    await applyColorViaContextMenu("blue");
+
+    await expect.poll(async () => sidePanelPage.evaluate(async (id) => {
+      const group = await chrome.tabGroups.get(id);
+      return group?.color ?? null;
+    }, groupId)).toBe("blue");
+
+    await expect.poll(async () => groupHeader.locator(".group-color-dot")
+      .evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(77, 138, 240)");
+
+    await applyColorViaContextMenu("yellow");
+
+    await expect.poll(async () => sidePanelPage.evaluate(async (id) => {
+      const group = await chrome.tabGroups.get(id);
+      return group?.color ?? null;
+    }, groupId)).toBe("yellow");
+
+    await expect.poll(async () => groupHeader.locator(".group-color-dot")
+      .evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(217, 163, 22)");
+
+    await tabA.close().catch(() => {});
+    await tabB.close().catch(() => {});
+  });
+
+  test("group color persists after side panel reload", async ({ context, sidePanelPage }) => {
+    const tabA = await createTitledTab(context, "Persist Color A");
+    const tabB = await createTitledTab(context, "Persist Color B");
+
+    const rowA = rowByTitle(sidePanelPage, "Persist Color A");
+    const rowB = rowByTitle(sidePanelPage, "Persist Color B");
+
+    await expect(rowA).toBeVisible();
+    await expect(rowB).toBeVisible();
+
+    await rowA.click();
+    await rowB.click({ modifiers: ["Shift"] });
+    await rowA.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="group-selected-new"]').click();
+
+    const groupHeader = sidePanelPage.locator(".group-section").filter({ has: rowA }).first().locator(".group-header");
+    await expect(groupHeader).toBeVisible();
+
+    const groupId = Number(await groupHeader.getAttribute("data-group-id"));
+    expect(Number.isInteger(groupId)).toBeTruthy();
+
+    await groupHeader.click({ button: "right" });
+    const colorTrigger = sidePanelPage.locator('.context-submenu-trigger[data-action="group-color"]');
+    await expect(colorTrigger).toBeVisible();
+    await colorTrigger.hover();
+    await sidePanelPage.locator('.context-color-item[data-color="orange"]').click();
+
+    await expect.poll(async () => sidePanelPage.evaluate(async (id) => {
+      const group = await chrome.tabGroups.get(id);
+      return group?.color ?? null;
+    }, groupId)).toBe("orange");
+
+    await sidePanelPage.reload();
+    await expect(rowByTitle(sidePanelPage, "Persist Color A")).toBeVisible();
+
+    const rehydratedHeader = sidePanelPage.locator(`.group-header[data-group-id="${groupId}"]`).first();
+    await expect(rehydratedHeader).toBeVisible();
+
+    await expect.poll(async () => rehydratedHeader.locator(".group-color-dot")
+      .evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(220, 125, 45)");
+
+    await expect.poll(async () => sidePanelPage.evaluate(async (id) => {
+      const group = await chrome.tabGroups.get(id);
+      return group?.color ?? null;
+    }, groupId)).toBe("orange");
+
+    await tabA.close().catch(() => {});
+    await tabB.close().catch(() => {});
+  });
+
   test("tab context menu can add selected tabs to an existing tab group via submenu", async ({ context, sidePanelPage }) => {
     const seedA = await createTitledTab(context, "Existing Group Seed A");
     const seedB = await createTitledTab(context, "Existing Group Seed B");
