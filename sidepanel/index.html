@@ -53,12 +53,39 @@
 
       <div id="batch-bar" class="batch-bar" hidden>
         <span id="batch-count" class="batch-count"></span>
+        <div class="batch-actions">
+          <button
+            id="batch-close"
+            class="btn btn-danger"
+            type="button"
+            data-i18n="closeSelectedTabsGeneric"
+          >
+            Close selected tab(s)
+          </button>
+          <button
+            id="batch-move-root"
+            class="btn btn-ghost"
+            type="button"
+            data-i18n="moveSelectedToTopLevel"
+          >
+            Move selected to top-level
+          </button>
+          <button
+            id="batch-group-new"
+            class="btn btn-ghost"
+            type="button"
+            data-i18n="addToNewTabGroup"
+          >
+            Add to new tab group
+          </button>
+        </div>
       </div>
 
       <section
         id="tree-root"
         class="tree-root"
         aria-label="Tab tree"
+        aria-multiselectable="true"
         role="tree"
         data-i18n-aria-label="tabTreeAriaLabel"
       ></section>
@@ -192,6 +219,11 @@
         <label class="checkbox">
           <input type="checkbox" name="confirmCloseSubtree" />
           <span data-i18n="confirmBeforeClosingTree">Confirm before closing tree (2+ tabs)</span>
+        </label>
+
+        <label class="checkbox">
+          <input type="checkbox" name="confirmCloseBatch" />
+          <span data-i18n="confirmBeforeClosingBatch">Confirm before closing selected tabs (2+ tabs)</span>
         </label>
       </form>
     </aside>

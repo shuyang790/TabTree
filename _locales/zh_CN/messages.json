@@ -92,6 +92,9 @@
   "confirmBeforeClosingTree": {
     "message": "关闭树前确认（2+ 个标签页）"
   },
+  "confirmBeforeClosingBatch": {
+    "message": "关闭所选标签页前确认（2+ 个标签页）"
+  },
   "closeTabsQuestion": {
     "message": "关闭标签页？"
   },

@@ -92,6 +92,9 @@
   "confirmBeforeClosingTree": {
     "message": "關閉樹狀結構前確認（2+ 個分頁）"
   },
+  "confirmBeforeClosingBatch": {
+    "message": "關閉已選分頁前確認（2+ 個分頁）"
+  },
   "closeTabsQuestion": {
     "message": "要關閉分頁嗎？"
   },

@@ -316,6 +316,7 @@ const state = {
   },
   selectedTabIds: new Set(),
   selectionAnchorTabId: null,
+  focusedTabId: null,
   pendingCloseAction: null,
   contextMenu: {
     open: false,
@@ -338,6 +339,9 @@ const dom = {
   addChildGlobal: document.getElementById("add-child-global"),
   batchBar: document.getElementById("batch-bar"),
   batchCount: document.getElementById("batch-count"),
+  batchClose: document.getElementById("batch-close"),
+  batchMoveRoot: document.getElementById("batch-move-root"),
+  batchGroupNew: document.getElementById("batch-group-new"),
   settingsPanel: document.getElementById("settings-panel"),
   openSettings: document.getElementById("open-settings"),
   closeSettings: document.getElementById("close-settings"),
@@ -444,6 +448,47 @@ function visibleTabIdsInOrder() {
   return Array.from(dom.treeRoot.querySelectorAll(".tree-row[data-tab-id]"))
     .map((row) => Number(row.dataset.tabId))
     .filter((id) => Number.isFinite(id));
+}
+
+function selectedExistingTabIds(tree = currentWindowTree()) {
+  if (!tree) {
+    return [];
+  }
+  return selectedTabIdsArray()
+    .filter((id) => Number.isFinite(id))
+    .filter((id) => !!tree.nodes[nodeId(id)]);
+}
+
+function setTreeRowTabStop(preferredTabId = null) {
+  const rows = Array.from(dom.treeRoot.querySelectorAll(".tree-row[data-tab-id]"));
+  if (!rows.length) {
+    state.focusedTabId = null;
+    return null;
+  }
+
+  const candidateIds = [
+    preferredTabId,
+    state.focusedTabId,
+    state.selectionAnchorTabId,
+    currentActiveTabId()
+  ];
+  const targetId = candidateIds.find((id) => Number.isFinite(id));
+  const target = rows.find((row) => Number(row.dataset.tabId) === targetId) || rows[0];
+  for (const row of rows) {
+    row.tabIndex = row === target ? 0 : -1;
+  }
+
+  const tabId = Number(target.dataset.tabId);
+  state.focusedTabId = Number.isFinite(tabId) ? tabId : null;
+  return target;
+}
+
+function focusTreeRow(tabId) {
+  const row = setTreeRowTabStop(tabId);
+  if (row) {
+    row.focus();
+  }
+  return row;
 }
 
 function replaceSelection(tabIds, anchorTabId = null) {
@@ -598,14 +643,36 @@ function updateShortcutHint() {
 }
 
 function updateBatchBar() {
-  const count = state.selectedTabIds.size;
+  const tree = currentWindowTree();
+  const selectedTabIds = selectedExistingTabIds(tree);
+  const count = selectedTabIds.length;
   if (count <= 1) {
     dom.batchBar.hidden = true;
     dom.batchCount.textContent = "";
+    if (dom.batchClose) {
+      dom.batchClose.disabled = true;
+    }
+    if (dom.batchMoveRoot) {
+      dom.batchMoveRoot.disabled = true;
+    }
+    if (dom.batchGroupNew) {
+      dom.batchGroupNew.disabled = true;
+    }
     return;
   }
+
+  const hasGroupedTabs = selectedTabIds.some((tabId) => tree?.nodes[nodeId(tabId)]?.groupId !== null);
   dom.batchBar.hidden = false;
   dom.batchCount.textContent = t("selectedCount", [String(count)], `${count} selected`);
+  if (dom.batchClose) {
+    dom.batchClose.disabled = false;
+  }
+  if (dom.batchMoveRoot) {
+    dom.batchMoveRoot.disabled = false;
+  }
+  if (dom.batchGroupNew) {
+    dom.batchGroupNew.disabled = hasGroupedTabs;
+  }
 }
 
 function resolveContextScopeTabIds(primaryTabId) {
@@ -1882,6 +1949,7 @@ async function dropToRoot(tree) {
 }
 
 async function onRowClicked(event, tabId) {
+  state.focusedTabId = tabId;
   const isToggle = event.metaKey || event.ctrlKey;
 
   if (event.shiftKey) {
@@ -1909,12 +1977,16 @@ async function onRowClicked(event, tabId) {
 }
 
 function createNodeRow(tree, node, options = {}) {
-  const { showGroupBadge = true } = options;
+  const { showGroupBadge = true, depth = 1 } = options;
   const row = document.createElement("div");
   row.className = "tree-row";
   row.dataset.tabId = String(node.tabId);
+  row.dataset.nodeId = nodeId(node.tabId);
   row.setAttribute("role", "treeitem");
   row.setAttribute("aria-expanded", node.childNodeIds.length ? String(!node.collapsed) : "false");
+  row.setAttribute("aria-selected", state.selectedTabIds.has(node.tabId) ? "true" : "false");
+  row.setAttribute("aria-level", String(depth));
+  row.tabIndex = -1;
   row.draggable = true;
 
   if (tree.selectedTabId === node.tabId) {
@@ -1932,6 +2004,7 @@ function createNodeRow(tree, node, options = {}) {
   twisty.className = "twisty";
   twisty.textContent = node.childNodeIds.length ? (node.collapsed ? "▸" : "▾") : "";
   twisty.title = node.childNodeIds.length ? t("toggleChildren", [], "Toggle children") : "";
+  twisty.setAttribute("aria-label", t("toggleChildren", [], "Toggle children"));
   twisty.addEventListener("click", async (event) => {
     event.stopPropagation();
     if (!node.childNodeIds.length) {
@@ -1977,6 +2050,7 @@ function createNodeRow(tree, node, options = {}) {
   addChild.className = "icon-btn";
   addChild.textContent = "+";
   addChild.title = t("addChildTab", [], "Add child tab");
+  addChild.setAttribute("aria-label", t("addChildTab", [], "Add child tab"));
   addChild.addEventListener("click", async (event) => {
     event.stopPropagation();
     await send(MESSAGE_TYPES.TREE_ACTION, {
@@ -1994,6 +2068,9 @@ function createNodeRow(tree, node, options = {}) {
     close.title = closesSubtree
       ? t("closeSubtree", [], "Close subtree")
       : t("closeTab", [], "Close tab");
+    close.setAttribute("aria-label", closesSubtree
+      ? t("closeSubtree", [], "Close subtree")
+      : t("closeTab", [], "Close tab"));
     close.addEventListener("click", async (event) => {
       event.stopPropagation();
 
@@ -2025,6 +2102,90 @@ function createNodeRow(tree, node, options = {}) {
   });
   row.addEventListener("contextmenu", (event) => {
     openTabContextMenu(event, node.tabId);
+  });
+  row.addEventListener("focus", () => {
+    state.focusedTabId = node.tabId;
+    setTreeRowTabStop(node.tabId);
+  });
+  row.addEventListener("keydown", async (event) => {
+    const ordered = visibleTabIdsInOrder();
+    const currentIndex = ordered.indexOf(node.tabId);
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (currentIndex >= 0 && currentIndex < ordered.length - 1) {
+        focusTreeRow(ordered[currentIndex + 1]);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (currentIndex > 0) {
+        focusTreeRow(ordered[currentIndex - 1]);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      const liveTree = currentWindowTree();
+      const liveNode = liveTree?.nodes[nodeId(node.tabId)];
+      if (!liveNode) {
+        return;
+      }
+      if (liveNode.childNodeIds.length && liveNode.collapsed) {
+        await send(MESSAGE_TYPES.TREE_ACTION, {
+          type: TREE_ACTIONS.TOGGLE_COLLAPSE,
+          tabId: node.tabId
+        });
+        return;
+      }
+      const firstChildNodeId = liveNode.childNodeIds[0];
+      const firstChildTabId = liveTree?.nodes[firstChildNodeId]?.tabId;
+      if (Number.isFinite(firstChildTabId)) {
+        focusTreeRow(firstChildTabId);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      const liveTree = currentWindowTree();
+      const liveNode = liveTree?.nodes[nodeId(node.tabId)];
+      if (!liveNode) {
+        return;
+      }
+      if (liveNode.childNodeIds.length && !liveNode.collapsed) {
+        await send(MESSAGE_TYPES.TREE_ACTION, {
+          type: TREE_ACTIONS.TOGGLE_COLLAPSE,
+          tabId: node.tabId
+        });
+        return;
+      }
+      const parentTabId = liveTree?.nodes[liveNode.parentNodeId]?.tabId;
+      if (Number.isFinite(parentTabId)) {
+        focusTreeRow(parentTabId);
+      }
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") {
+      event.preventDefault();
+      await onRowClicked({ metaKey: false, ctrlKey: false, shiftKey: false }, node.tabId);
+      return;
+    }
+
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      event.preventDefault();
+      const rect = row.getBoundingClientRect();
+      openTabContextMenu({
+        preventDefault() {},
+        stopPropagation() {},
+        clientX: Math.round(rect.left + Math.min(24, rect.width / 2)),
+        clientY: Math.round(rect.top + rect.height / 2)
+      }, node.tabId);
+    }
   });
 
   row.addEventListener("dragstart", (event) => {
@@ -2179,16 +2340,20 @@ function createNodeElement(tree, nodeKey, query, visibilityByNodeId, rowOptions 
     return null;
   }
 
+  const depth = Number.isFinite(rowOptions.depth) ? rowOptions.depth : 1;
   const holder = document.createElement("div");
   holder.className = "tree-node";
-  holder.appendChild(createNodeRow(tree, node, rowOptions));
+  holder.appendChild(createNodeRow(tree, node, { ...rowOptions, depth }));
 
-  if (node.childNodeIds.length && !node.collapsed) {
+  if (node.childNodeIds.length && (!node.collapsed || !!query)) {
     const children = document.createElement("div");
     children.className = "children";
     children.setAttribute("role", "group");
     for (const childId of node.childNodeIds) {
-      const childEl = createNodeElement(tree, childId, query, visibilityByNodeId, rowOptions);
+      const childEl = createNodeElement(tree, childId, query, visibilityByNodeId, {
+        ...rowOptions,
+        depth: depth + 1
+      });
       if (childEl) {
         children.appendChild(childEl);
       }
@@ -2270,7 +2435,7 @@ function createGroupSection(tree, groupId, rootNodeIds, query, visibilityByNodeI
 
   const count = document.createElement("span");
   count.className = "group-count";
-  count.textContent = String(rootNodeIds.length);
+  count.textContent = String(groupTabIds(tree, groupId).length);
 
   const toggleGroupCollapsed = async () => {
     await send(MESSAGE_TYPES.TREE_ACTION, {
@@ -2415,6 +2580,7 @@ function renderTree() {
     empty.className = "empty";
     empty.textContent = t("noTabsAvailable", [], "No tabs available.");
     dom.treeRoot.appendChild(empty);
+    state.focusedTabId = null;
     return;
   }
 
@@ -2461,6 +2627,7 @@ function renderTree() {
       : t("noTabsInWindow", [], "No tabs in this window.");
     dom.treeRoot.appendChild(empty);
   }
+  setTreeRowTabStop();
 }
 
 function render() {
@@ -2564,6 +2731,50 @@ function bindEvents() {
     });
   });
 
+  dom.batchClose?.addEventListener("click", async () => {
+    const tree = currentWindowTree();
+    const tabIds = selectedExistingTabIds(tree);
+    if (tabIds.length <= 1) {
+      return;
+    }
+    await requestClose(
+      {
+        kind: "batch-tabs",
+        tabIds
+      },
+      tabIds.length,
+      true
+    );
+  });
+
+  dom.batchMoveRoot?.addEventListener("click", async () => {
+    const tree = currentWindowTree();
+    const tabIds = selectedExistingTabIds(tree);
+    if (!tree || tabIds.length <= 1) {
+      return;
+    }
+    await send(MESSAGE_TYPES.TREE_ACTION, {
+      type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
+      tabIds
+    });
+  });
+
+  dom.batchGroupNew?.addEventListener("click", async () => {
+    const tree = currentWindowTree();
+    const tabIds = selectedExistingTabIds(tree);
+    if (!tree || tabIds.length <= 1) {
+      return;
+    }
+    const hasGroupedTabs = tabIds.some((tabId) => tree.nodes[nodeId(tabId)]?.groupId !== null);
+    if (hasGroupedTabs) {
+      return;
+    }
+    await send(MESSAGE_TYPES.TREE_ACTION, {
+      type: TREE_ACTIONS.BATCH_GROUP_NEW,
+      tabIds
+    });
+  });
+
   dom.openSettings.addEventListener("click", () => {
     dom.settingsPanel.hidden = false;
     closeContextMenu();
@@ -2586,7 +2797,7 @@ function bindEvents() {
 
     if (dom.confirmSkip.checked) {
       const patch = pending.isBatch
-        ? { confirmCloseBatch: false, confirmCloseSubtree: false }
+        ? { confirmCloseBatch: false }
         : { confirmCloseSubtree: false };
       state.settings = { ...state.settings, ...patch };
       await send(MESSAGE_TYPES.PATCH_SETTINGS, { settingsPatch: patch });
@@ -2668,6 +2879,13 @@ function bindEvents() {
 
   window.addEventListener("blur", () => {
     closeContextMenu();
+  });
+  window.addEventListener("resize", () => {
+    if (!state.contextMenu.open) {
+      return;
+    }
+    positionContextMenu();
+    updateContextSubmenuDirection();
   });
 
   dom.settingsForm.addEventListener("input", async (event) => {

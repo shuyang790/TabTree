@@ -442,6 +442,7 @@ button:focus-visible {
 }
 
 .tree-row:hover .node-actions,
+.tree-row:focus-within .node-actions,
 .tree-row.active .node-actions,
 .tree-row.selected .node-actions {
   opacity: 1;

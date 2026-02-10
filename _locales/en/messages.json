@@ -92,6 +92,9 @@
   "confirmBeforeClosingTree": {
     "message": "Confirm before closing tree (2+ tabs)"
   },
+  "confirmBeforeClosingBatch": {
+    "message": "Confirm before closing selected tabs (2+ tabs)"
+  },
   "closeTabsQuestion": {
     "message": "Close tabs?"
   },
