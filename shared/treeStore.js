@@ -4,7 +4,6 @@ import {
   LOCAL_WINDOW_PREFIX,
   SETTINGS_NUMERIC_RANGES,
   SETTINGS_KEY,
-  STORAGE_WRITE_DEBOUNCE_MS,
   THEME_PRESET_DARK_KEYS,
   THEME_PRESET_LIGHT_KEYS,
   SYNC_MAX_NODES_PER_WINDOW,
@@ -174,21 +173,4 @@ export async function saveSyncSnapshot(windowsState) {
   });
   await chrome.storage.sync.set({ [SYNC_SNAPSHOT_KEY]: snapshot });
   return snapshot;
-}
-
-export function createDebouncedPersister(onFlush, onError = () => {}) {
-  let timer = null;
-  return function schedule() {
-    if (timer) {
-      clearTimeout(timer);
-    }
-    timer = setTimeout(async () => {
-      timer = null;
-      try {
-        await onFlush();
-      } catch (error) {
-        onError(error);
-      }
-    }, STORAGE_WRITE_DEBOUNCE_MS);
-  };
 }
