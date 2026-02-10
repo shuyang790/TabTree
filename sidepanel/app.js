@@ -294,6 +294,8 @@ const state = {
   panelWindowId: null,
   focusedWindowId: null,
   search: "",
+  searchRenderTimer: null,
+  visibleTabIds: [],
   draggingTabIds: [],
   draggingGroupId: null,
   dragTarget: {
@@ -448,7 +450,11 @@ function resetContextMenuState() {
 }
 
 function visibleTabIdsInOrder() {
-  return Array.from(dom.treeRoot.querySelectorAll(".tree-row[data-tab-id]"))
+  return [...state.visibleTabIds];
+}
+
+function refreshVisibleTabIds() {
+  state.visibleTabIds = Array.from(dom.treeRoot.querySelectorAll(".tree-row[data-tab-id]"))
     .map((row) => Number(row.dataset.tabId))
     .filter((id) => Number.isFinite(id));
 }
@@ -492,6 +498,19 @@ function focusTreeRow(tabId) {
     row.focus();
   }
   return row;
+}
+
+function syncRenderedSelectionState() {
+  const tree = currentWindowTree();
+  for (const row of dom.treeRoot.querySelectorAll(".tree-row[data-tab-id]")) {
+    const tabId = Number(row.dataset.tabId);
+    const selected = Number.isFinite(tabId) && state.selectedTabIds.has(tabId);
+    const active = Number.isFinite(tabId) && tree?.selectedTabId === tabId;
+    row.classList.toggle("selected", selected);
+    row.classList.toggle("active", active);
+    row.setAttribute("aria-selected", selected ? "true" : "false");
+  }
+  setTreeRowTabStop(state.focusedTabId);
 }
 
 function replaceSelection(tabIds, anchorTabId = null) {
@@ -1972,30 +1991,30 @@ async function onRowClicked(event, tabId) {
 
   if (event.shiftKey) {
     selectRangeTo(tabId);
+    syncRenderedSelectionState();
     await send(MESSAGE_TYPES.TREE_ACTION, {
       type: TREE_ACTIONS.ACTIVATE_TAB,
       tabId
     });
-    render();
     return;
   }
 
   if (isToggle) {
     toggleSelection(tabId);
-    render();
+    syncRenderedSelectionState();
     return;
   }
 
   replaceSelection([tabId], tabId);
+  syncRenderedSelectionState();
   await send(MESSAGE_TYPES.TREE_ACTION, {
     type: TREE_ACTIONS.ACTIVATE_TAB,
     tabId
   });
-  render();
 }
 
 function createNodeRow(tree, node, options = {}) {
-  const { showGroupBadge = true, depth = 1 } = options;
+  const { showGroupBadge = true, depth = 1, siblingIndex = null, siblingCount = null } = options;
   const row = document.createElement("div");
   row.className = "tree-row";
   row.dataset.tabId = String(node.tabId);
@@ -2004,6 +2023,10 @@ function createNodeRow(tree, node, options = {}) {
   row.setAttribute("aria-expanded", node.childNodeIds.length ? String(!node.collapsed) : "false");
   row.setAttribute("aria-selected", state.selectedTabIds.has(node.tabId) ? "true" : "false");
   row.setAttribute("aria-level", String(depth));
+  if (Number.isFinite(siblingIndex) && Number.isFinite(siblingCount)) {
+    row.setAttribute("aria-posinset", String(siblingIndex + 1));
+    row.setAttribute("aria-setsize", String(siblingCount));
+  }
   row.tabIndex = -1;
   row.draggable = true;
 
@@ -2368,10 +2391,14 @@ function createNodeElement(tree, nodeKey, query, visibilityByNodeId, rowOptions 
     const children = document.createElement("div");
     children.className = "children";
     children.setAttribute("role", "group");
-    for (const childId of node.childNodeIds) {
+    const renderableChildIds = node.childNodeIds
+      .filter((childId) => shouldRenderNode(tree, childId, query, visibilityByNodeId));
+    for (const [childIndex, childId] of renderableChildIds.entries()) {
       const childEl = createNodeElement(tree, childId, query, visibilityByNodeId, {
         ...rowOptions,
-        depth: depth + 1
+        depth: depth + 1,
+        siblingIndex: childIndex,
+        siblingCount: renderableChildIds.length
       });
       if (childEl) {
         children.appendChild(childEl);
@@ -2393,15 +2420,18 @@ function createPinnedStrip(tree, pinnedRootNodeIds, query, visibilityByNodeId) {
   track.className = "pinned-track";
 
   let renderedCount = 0;
-  for (const nodeKey of pinnedRootNodeIds) {
-    if (!shouldRenderNode(tree, nodeKey, query, visibilityByNodeId)) {
-      continue;
-    }
+  const renderablePinnedIds = pinnedRootNodeIds
+    .filter((nodeKey) => shouldRenderNode(tree, nodeKey, query, visibilityByNodeId));
+  for (const [pinnedIndex, nodeKey] of renderablePinnedIds.entries()) {
     const node = tree.nodes[nodeKey];
     if (!node) {
       continue;
     }
-    const row = createNodeRow(tree, node, { showGroupBadge: true });
+    const row = createNodeRow(tree, node, {
+      showGroupBadge: true,
+      siblingIndex: pinnedIndex,
+      siblingCount: renderablePinnedIds.length
+    });
     track.appendChild(row);
     renderedCount += 1;
   }
@@ -2418,9 +2448,16 @@ function createGroupSection(tree, groupId, rootNodeIds, query, visibilityByNodeI
   const group = groupDisplay(tree, groupId);
   const queryMatch = query && group.name.toLowerCase().includes(query);
 
+  const renderableRootIds = rootNodeIds
+    .filter((nodeKey) => shouldRenderNode(tree, nodeKey, query, visibilityByNodeId));
+
   const renderedChildren = [];
-  for (const nodeKey of rootNodeIds) {
-    const child = createNodeElement(tree, nodeKey, query, visibilityByNodeId, { showGroupBadge: false });
+  for (const [groupIndex, nodeKey] of renderableRootIds.entries()) {
+    const child = createNodeElement(tree, nodeKey, query, visibilityByNodeId, {
+      showGroupBadge: false,
+      siblingIndex: groupIndex,
+      siblingCount: renderableRootIds.length
+    });
     if (child) {
       renderedChildren.push(child);
     }
@@ -2594,6 +2631,7 @@ function rootBuckets(tree) {
 function renderTree() {
   dom.treeRoot.innerHTML = "";
   dom.treeRoot.classList.toggle("hide-favicons", !state.settings?.showFavicons);
+  state.visibleTabIds = [];
   const tree = currentWindowTree();
   if (!tree) {
     const empty = document.createElement("div");
@@ -2622,6 +2660,12 @@ function renderTree() {
     }
   }
 
+  const rootNodeBlocks = blocks.filter((block) => block.type === "node");
+  const renderableRootNodeIds = rootNodeBlocks
+    .map((block) => block.rootNodeId)
+    .filter((nodeIdKey) => shouldRenderNode(tree, nodeIdKey, query, visibilityByNodeId));
+  let renderableRootNodeCursor = 0;
+
   for (const block of blocks) {
     if (block.type === "group") {
       const section = createGroupSection(tree, block.groupId, block.rootNodeIds, query, visibilityByNodeId);
@@ -2632,7 +2676,16 @@ function renderTree() {
       continue;
     }
 
-    const el = createNodeElement(tree, block.rootNodeId, query, visibilityByNodeId, { showGroupBadge: true });
+    const isRenderable = shouldRenderNode(tree, block.rootNodeId, query, visibilityByNodeId);
+    const siblingIndex = isRenderable ? renderableRootNodeCursor : null;
+    if (isRenderable) {
+      renderableRootNodeCursor += 1;
+    }
+    const el = createNodeElement(tree, block.rootNodeId, query, visibilityByNodeId, {
+      showGroupBadge: true,
+      siblingIndex,
+      siblingCount: renderableRootNodeIds.length
+    });
     if (el) {
       dom.treeRoot.appendChild(el);
       renderedCount += 1;
@@ -2647,6 +2700,7 @@ function renderTree() {
       : t("noTabsInWindow", [], "No tabs in this window.");
     dom.treeRoot.appendChild(empty);
   }
+  refreshVisibleTabIds();
   setTreeRowTabStop();
 }
 
@@ -2691,8 +2745,14 @@ function bindEvents() {
 
   dom.search.addEventListener("input", () => {
     state.search = dom.search.value;
-    renderTree();
-    renderContextMenu();
+    if (state.searchRenderTimer) {
+      clearTimeout(state.searchRenderTimer);
+    }
+    state.searchRenderTimer = setTimeout(() => {
+      state.searchRenderTimer = null;
+      renderTree();
+      renderContextMenu();
+    }, 90);
   });
 
   dom.searchWrap.addEventListener("dragover", (event) => {
