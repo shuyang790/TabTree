@@ -319,6 +319,7 @@ const state = {
   selectedTabIds: new Set(),
   selectionAnchorTabId: null,
   focusedTabId: null,
+  settingsReturnFocusEl: null,
   confirmReturnFocusEl: null,
   pendingCloseAction: null,
   contextMenu: {
@@ -1069,6 +1070,7 @@ function createContextMenuButton(label, action, disabled = false) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "context-menu-item";
+  button.setAttribute("role", "menuitem");
   button.dataset.action = action;
   button.textContent = label;
   button.disabled = disabled;
@@ -1116,19 +1118,23 @@ function buildTabContextMenu(tree) {
   const existingTrigger = document.createElement("button");
   existingTrigger.type = "button";
   existingTrigger.className = "context-menu-item context-submenu-trigger";
+  existingTrigger.setAttribute("role", "menuitem");
   existingTrigger.textContent = t("addToExistingTabGroup", [], "Add to existing tab group");
   existingTrigger.disabled = closeCount === 0 || existingGroups.length === 0;
   existingTrigger.setAttribute("aria-haspopup", "menu");
   existingTrigger.setAttribute("aria-expanded", "false");
 
   const existingPanel = document.createElement("div");
+  existingPanel.id = "context-submenu-existing";
   existingPanel.className = "context-submenu-panel";
   existingPanel.setAttribute("role", "menu");
+  existingTrigger.setAttribute("aria-controls", existingPanel.id);
 
   for (const group of existingGroups) {
     const item = document.createElement("button");
     item.type = "button";
     item.className = "context-menu-item context-group-item";
+    item.setAttribute("role", "menuitem");
     item.dataset.action = `group-selected-existing:${group.id}`;
     item.dataset.groupId = String(group.id);
 
@@ -1243,6 +1249,7 @@ function buildGroupContextMenu(tree) {
   const trigger = document.createElement("button");
   trigger.type = "button";
   trigger.className = "context-menu-item context-submenu-trigger";
+  trigger.setAttribute("role", "menuitem");
   trigger.dataset.action = "group-color";
   trigger.textContent = t("color", [], "Color");
   trigger.disabled = !groupExists;
@@ -1250,13 +1257,16 @@ function buildGroupContextMenu(tree) {
   trigger.setAttribute("aria-expanded", "false");
 
   const panel = document.createElement("div");
+  panel.id = "context-submenu-color";
   panel.className = "context-submenu-panel";
   panel.setAttribute("role", "menu");
+  trigger.setAttribute("aria-controls", panel.id);
 
   for (const option of GROUP_COLOR_OPTIONS) {
     const colorBtn = document.createElement("button");
     colorBtn.type = "button";
     colorBtn.className = "context-menu-item context-color-item";
+    colorBtn.setAttribute("role", "menuitem");
     colorBtn.dataset.color = option.value;
     if (group?.color === option.value) {
       colorBtn.classList.add("active");
@@ -1820,6 +1830,14 @@ function closeConfirmDialog() {
     state.confirmReturnFocusEl.focus();
   }
   state.confirmReturnFocusEl = null;
+}
+
+function closeSettingsPanel() {
+  dom.settingsPanel.hidden = true;
+  if (state.settingsReturnFocusEl?.isConnected) {
+    state.settingsReturnFocusEl.focus();
+  }
+  state.settingsReturnFocusEl = null;
 }
 
 function canDrop(tree, sourceTabIds, targetTabId, position) {
@@ -2856,12 +2874,19 @@ function bindEvents() {
   });
 
   dom.openSettings.addEventListener("click", () => {
+    state.settingsReturnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dom.settingsPanel.hidden = false;
+    queueMicrotask(() => {
+      const first = dom.settingsPanel.querySelector("button, input, select");
+      if (first) {
+        first.focus();
+      }
+    });
     closeContextMenu();
   });
 
   dom.closeSettings.addEventListener("click", () => {
-    dom.settingsPanel.hidden = true;
+    closeSettingsPanel();
   });
 
   dom.confirmCancel.addEventListener("click", () => {
@@ -2902,6 +2927,12 @@ function bindEvents() {
   });
 
   document.addEventListener("keydown", (event) => {
+    if (!dom.settingsPanel.hidden && event.key === "Escape") {
+      event.preventDefault();
+      closeSettingsPanel();
+      return;
+    }
+
     if (!dom.confirmOverlay.hidden) {
       if (event.key === "Escape") {
         event.preventDefault();
