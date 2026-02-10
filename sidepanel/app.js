@@ -1,4 +1,5 @@
 import { MESSAGE_TYPES, TREE_ACTIONS } from "../shared/constants.js";
+import { applyRuntimeStateUpdate } from "./statePatch.js";
 
 const GROUP_COLOR_MAP = {
   grey: "#8a909c",
@@ -2710,23 +2711,21 @@ function bindEvents() {
       return;
     }
     const payload = message.payload;
-    state.settings = payload.settings || state.settings;
-    if (payload.partial && Number.isInteger(payload.changedWindowId) && payload.windows) {
-      const next = { ...state.windows };
-      if (payload.windows[payload.changedWindowId]) {
-        next[payload.changedWindowId] = payload.windows[payload.changedWindowId];
-      } else {
-        delete next[payload.changedWindowId];
-      }
-      state.windows = next;
-    } else {
-      state.windows = payload.windows || state.windows;
+    const next = applyRuntimeStateUpdate({
+      settings: state.settings,
+      windows: state.windows,
+      panelWindowId: state.panelWindowId,
+      focusedWindowId: state.focusedWindowId
+    }, payload);
+    state.settings = next.settings;
+    state.windows = next.windows;
+    state.focusedWindowId = next.focusedWindowId;
+    if (Number.isInteger(next.focusedWindowId) && !Number.isInteger(state.panelWindowId)) {
+      state.panelWindowId = next.focusedWindowId;
     }
-    if (Number.isInteger(payload.focusedWindowId)) {
-      state.focusedWindowId = payload.focusedWindowId;
-      if (!Number.isInteger(state.panelWindowId)) {
-        state.panelWindowId = payload.focusedWindowId;
-      }
+
+    if (!next.shouldRender) {
+      return;
     }
 
     const activeTabId = currentActiveTabId();
