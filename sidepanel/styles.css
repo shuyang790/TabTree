@@ -171,31 +171,6 @@ button:focus-visible {
   pointer-events: none;
 }
 
-.batch-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-elev), var(--accent-weak) 16%);
-}
-
-.batch-count {
-  color: var(--text-muted);
-  font-size: 0.78rem;
-}
-
-.batch-actions {
-  display: inline-flex;
-  gap: 6px;
-}
-
-.batch-actions .btn {
-  height: 26px;
-  font-size: 0.78rem;
-}
-
 .tree-root {
   flex: 1;
   overflow: auto;

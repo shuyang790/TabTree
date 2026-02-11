@@ -347,11 +347,6 @@ const dom = {
   searchWrap: document.getElementById("search-wrap"),
   searchDropHint: document.getElementById("search-drop-hint"),
   addChildGlobal: document.getElementById("add-child-global"),
-  batchBar: document.getElementById("batch-bar"),
-  batchCount: document.getElementById("batch-count"),
-  batchClose: document.getElementById("batch-close"),
-  batchMoveRoot: document.getElementById("batch-move-root"),
-  batchGroupNew: document.getElementById("batch-group-new"),
   settingsPanel: document.getElementById("settings-panel"),
   openSettings: document.getElementById("open-settings"),
   closeSettings: document.getElementById("close-settings"),
@@ -522,7 +517,6 @@ function syncRenderedSelectionState() {
 function replaceSelection(tabIds, anchorTabId = null) {
   state.selectedTabIds = new Set(tabIds.filter((id) => Number.isFinite(id)));
   state.selectionAnchorTabId = anchorTabId;
-  updateBatchBar();
 }
 
 function toggleSelection(tabId) {
@@ -536,7 +530,6 @@ function toggleSelection(tabId) {
   } else if (!state.selectionAnchorTabId) {
     state.selectionAnchorTabId = tabId;
   }
-  updateBatchBar();
 }
 
 function selectRangeTo(tabId) {
@@ -668,39 +661,6 @@ function updateShortcutHint() {
     [],
     "Shift+Click selects range. Right-click for actions. Drag search bar to move to top-level."
   );
-}
-
-function updateBatchBar() {
-  const tree = currentWindowTree();
-  const selectedTabIds = selectedExistingTabIds(tree);
-  const count = selectedTabIds.length;
-  if (count <= 1) {
-    dom.batchBar.hidden = true;
-    dom.batchCount.textContent = "";
-    if (dom.batchClose) {
-      dom.batchClose.disabled = true;
-    }
-    if (dom.batchMoveRoot) {
-      dom.batchMoveRoot.disabled = true;
-    }
-    if (dom.batchGroupNew) {
-      dom.batchGroupNew.disabled = true;
-    }
-    return;
-  }
-
-  const hasGroupedTabs = selectedTabIds.some((tabId) => tree?.nodes[nodeId(tabId)]?.groupId !== null);
-  dom.batchBar.hidden = false;
-  dom.batchCount.textContent = t("selectedCount", [String(count)], `${count} selected`);
-  if (dom.batchClose) {
-    dom.batchClose.disabled = false;
-  }
-  if (dom.batchMoveRoot) {
-    dom.batchMoveRoot.disabled = false;
-  }
-  if (dom.batchGroupNew) {
-    dom.batchGroupNew.disabled = hasGroupedTabs;
-  }
 }
 
 function resolveContextScopeTabIds(primaryTabId) {
@@ -2885,7 +2845,6 @@ function render() {
   applyThemeFromSettings();
   hydrateSettingsForm();
   updateShortcutHint();
-  updateBatchBar();
   renderTree();
   renderContextMenu();
 }
@@ -3472,50 +3431,6 @@ function bindEvents() {
     await send(MESSAGE_TYPES.TREE_ACTION, {
       type: TREE_ACTIONS.ADD_CHILD_TAB,
       parentTabId: activeTabId
-    });
-  });
-
-  dom.batchClose?.addEventListener("click", async () => {
-    const tree = currentWindowTree();
-    const tabIds = selectedExistingTabIds(tree);
-    if (tabIds.length <= 1) {
-      return;
-    }
-    await requestClose(
-      {
-        kind: "batch-tabs",
-        tabIds
-      },
-      tabIds.length,
-      true
-    );
-  });
-
-  dom.batchMoveRoot?.addEventListener("click", async () => {
-    const tree = currentWindowTree();
-    const tabIds = selectedExistingTabIds(tree);
-    if (!tree || tabIds.length <= 1) {
-      return;
-    }
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
-      tabIds
-    });
-  });
-
-  dom.batchGroupNew?.addEventListener("click", async () => {
-    const tree = currentWindowTree();
-    const tabIds = selectedExistingTabIds(tree);
-    if (!tree || tabIds.length <= 1) {
-      return;
-    }
-    const hasGroupedTabs = tabIds.some((tabId) => tree.nodes[nodeId(tabId)]?.groupId !== null);
-    if (hasGroupedTabs) {
-      return;
-    }
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.BATCH_GROUP_NEW,
-      tabIds
     });
   });
 

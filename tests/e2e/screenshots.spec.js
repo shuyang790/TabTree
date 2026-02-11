@@ -246,7 +246,7 @@ test.describe("README screenshots", () => {
     await sidePanelPage.screenshot({ path: screenshotPath("02-groups-and-colors-light.png") });
   });
 
-  test("captures multi-select and batch actions in dark theme", async ({ context, sidePanelPage }) => {
+  test("captures multi-select and context menu actions in dark theme", async ({ context, sidePanelPage }) => {
     await applyTheme(sidePanelPage, {
       scheme: "dark",
       lightPreset: "everforest-light",
@@ -272,9 +272,6 @@ test.describe("README screenshots", () => {
 
     await rowA.click();
     await rowC.click({ modifiers: ["Shift"] });
-
-    await expect(sidePanelPage.locator("#batch-bar")).toBeVisible();
-    await expect(sidePanelPage.locator("#batch-count")).toContainText("3");
 
     await rowC.click({ button: "right" });
     await expect(sidePanelPage.locator("#context-menu")).toBeVisible();
