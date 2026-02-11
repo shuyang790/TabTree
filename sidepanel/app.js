@@ -26,6 +26,8 @@ const GROUP_COLOR_OPTIONS = [
 ];
 
 const CONTEXT_INLINE_GROUP_LIMIT = 5;
+const CONTEXT_GROUP_SEARCH_MIN = 7;
+const MAX_VISUAL_DEPTH = 8;
 const SETTINGS_SECTION_KEYS = {
   appearance: ["themePresetLight", "themePresetDark", "accentColor", "density", "fontScale", "indentPx", "radiusPx"],
   behavior: ["showFavicons", "showCloseButton", "showGroupHeaders", "shortcutHintsEnabled"],
@@ -414,6 +416,15 @@ localizeStaticUi();
 
 function nodeId(tabId) {
   return `tab:${tabId}`;
+}
+
+function normalizedDepth(depth) {
+  const value = Number.isFinite(depth) ? Math.trunc(depth) : 1;
+  return Math.max(1, Math.min(MAX_VISUAL_DEPTH, value));
+}
+
+function pinnedSectionLabel(count) {
+  return t("sectionPinnedWithCount", [String(count)], `Pinned · ${count}`);
 }
 
 function currentWindowTree() {
@@ -1153,6 +1164,92 @@ function createExistingGroupMenuItem(group, disabled = false) {
   return item;
 }
 
+function groupLabelForSearch(group) {
+  return group.title?.trim() || t("groupFallbackName", [String(group.id)], `Group ${group.id}`);
+}
+
+function buildSearchableExistingGroupSection(existingGroups, canAssignExistingGroup) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "context-group-search";
+
+  const input = document.createElement("input");
+  input.type = "search";
+  input.className = "context-group-search-input";
+  input.placeholder = t("searchGroupsPlaceholder", [], "Search groups");
+  input.setAttribute("aria-label", t("searchGroupsAriaLabel", [], "Search groups"));
+  input.autocomplete = "off";
+  input.disabled = !canAssignExistingGroup;
+
+  const results = document.createElement("div");
+  results.className = "context-inline-group-list context-group-search-results";
+
+  const empty = document.createElement("div");
+  empty.className = "context-group-search-empty";
+  empty.textContent = t("noMatchingGroups", [], "No matching groups");
+  empty.hidden = true;
+
+  const filteredResults = (query) => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) {
+      return existingGroups;
+    }
+
+    return existingGroups.filter((group) => {
+      const label = groupLabelForSearch(group).toLowerCase();
+      return label.includes(normalizedQuery) || `group ${group.id}`.includes(normalizedQuery);
+    });
+  };
+
+  const renderResults = (query = "") => {
+    const matches = filteredResults(query);
+    results.innerHTML = "";
+    for (const group of matches) {
+      results.appendChild(createExistingGroupMenuItem(group, !canAssignExistingGroup));
+    }
+    empty.hidden = matches.length > 0 || !canAssignExistingGroup;
+  };
+
+  input.addEventListener("input", () => {
+    renderResults(input.value);
+  });
+
+  input.addEventListener("keydown", (event) => {
+    const visibleResults = Array.from(results.querySelectorAll(".context-menu-item:not([disabled])"))
+      .filter((item) => item.getClientRects().length > 0);
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      visibleResults[0]?.focus();
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      visibleResults[visibleResults.length - 1]?.focus();
+      return;
+    }
+
+    if (event.key === "Enter") {
+      if (!visibleResults.length) {
+        return;
+      }
+      event.preventDefault();
+      visibleResults[0].click();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeContextMenu();
+    }
+  });
+
+  renderResults();
+
+  wrapper.append(input, results, empty);
+  return wrapper;
+}
+
 function buildTabContextMenu(tree) {
   const fragment = document.createDocumentFragment();
   const primaryNode = tree.nodes[nodeId(state.contextMenu.primaryTabId)];
@@ -1160,8 +1257,6 @@ function buildTabContextMenu(tree) {
   const closeCount = scopeTabIds.length;
   const hasGroupedTabs = scopeTabIds.some((tabId) => tree.nodes[nodeId(tabId)]?.groupId !== null);
   const existingGroups = orderedExistingGroups(tree);
-  const inlineGroups = existingGroups.slice(0, CONTEXT_INLINE_GROUP_LIMIT);
-  const overflowGroups = existingGroups.slice(CONTEXT_INLINE_GROUP_LIMIT);
   const canAssignExistingGroup = closeCount > 0;
   const closeLabel = closeCount === 0
     ? t("closeSelectedTabsGeneric", [], "Close selected tab(s)")
@@ -1184,66 +1279,73 @@ function buildTabContextMenu(tree) {
   if (existingGroups.length) {
     fragment.appendChild(createContextMenuSectionLabel(t("addToExistingTabGroup", [], "Add to existing tab group")));
 
-    const inlineList = document.createElement("div");
-    inlineList.className = "context-inline-group-list";
-    for (const group of inlineGroups) {
-      inlineList.appendChild(createExistingGroupMenuItem(group, !canAssignExistingGroup));
-    }
-    fragment.appendChild(inlineList);
+    if (existingGroups.length >= CONTEXT_GROUP_SEARCH_MIN) {
+      fragment.appendChild(buildSearchableExistingGroupSection(existingGroups, canAssignExistingGroup));
+    } else {
+      const inlineGroups = existingGroups.slice(0, CONTEXT_INLINE_GROUP_LIMIT);
+      const overflowGroups = existingGroups.slice(CONTEXT_INLINE_GROUP_LIMIT);
 
-    if (overflowGroups.length) {
-      const moreGroupsSubmenu = document.createElement("div");
-      moreGroupsSubmenu.className = "context-submenu context-inline-groups-more";
-
-      const moreGroupsTrigger = document.createElement("button");
-      moreGroupsTrigger.type = "button";
-      moreGroupsTrigger.className = "context-menu-item context-submenu-trigger context-more-groups-trigger";
-      moreGroupsTrigger.setAttribute("role", "menuitem");
-      moreGroupsTrigger.textContent = t("moreGroups", [], "More groups...");
-      moreGroupsTrigger.disabled = !canAssignExistingGroup;
-      moreGroupsTrigger.setAttribute("aria-haspopup", "menu");
-      moreGroupsTrigger.setAttribute("aria-expanded", "false");
-
-      const moreGroupsPanel = document.createElement("div");
-      moreGroupsPanel.id = "context-submenu-existing-more";
-      moreGroupsPanel.className = "context-submenu-panel context-inline-groups-panel";
-      moreGroupsPanel.setAttribute("role", "menu");
-      moreGroupsTrigger.setAttribute("aria-controls", moreGroupsPanel.id);
-
-      for (const group of overflowGroups) {
-        moreGroupsPanel.appendChild(createExistingGroupMenuItem(group, !canAssignExistingGroup));
+      const inlineList = document.createElement("div");
+      inlineList.className = "context-inline-group-list";
+      for (const group of inlineGroups) {
+        inlineList.appendChild(createExistingGroupMenuItem(group, !canAssignExistingGroup));
       }
+      fragment.appendChild(inlineList);
 
-      const openMoreGroups = () => {
-        moreGroupsSubmenu.classList.add("open");
-        moreGroupsTrigger.setAttribute("aria-expanded", "true");
-        const first = moreGroupsPanel.querySelector(".context-menu-item:not([disabled])");
-        if (first) {
-          first.focus();
+      if (overflowGroups.length) {
+        const moreGroupsSubmenu = document.createElement("div");
+        moreGroupsSubmenu.className = "context-submenu context-inline-groups-more";
+
+        const moreGroupsTrigger = document.createElement("button");
+        moreGroupsTrigger.type = "button";
+        moreGroupsTrigger.className = "context-menu-item context-submenu-trigger context-more-groups-trigger";
+        moreGroupsTrigger.setAttribute("role", "menuitem");
+        moreGroupsTrigger.textContent = t("moreGroups", [], "More groups...");
+        moreGroupsTrigger.disabled = !canAssignExistingGroup;
+        moreGroupsTrigger.setAttribute("aria-haspopup", "menu");
+        moreGroupsTrigger.setAttribute("aria-expanded", "false");
+
+        const moreGroupsPanel = document.createElement("div");
+        moreGroupsPanel.id = "context-submenu-existing-more";
+        moreGroupsPanel.className = "context-submenu-panel context-inline-groups-panel";
+        moreGroupsPanel.setAttribute("role", "menu");
+        moreGroupsTrigger.setAttribute("aria-controls", moreGroupsPanel.id);
+
+        for (const group of overflowGroups) {
+          moreGroupsPanel.appendChild(createExistingGroupMenuItem(group, !canAssignExistingGroup));
         }
-      };
 
-      moreGroupsTrigger.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (moreGroupsSubmenu.classList.contains("open")) {
-          moreGroupsSubmenu.classList.remove("open");
-          moreGroupsTrigger.setAttribute("aria-expanded", "false");
-          return;
-        }
-        openMoreGroups();
-      });
+        const openMoreGroups = () => {
+          moreGroupsSubmenu.classList.add("open");
+          moreGroupsTrigger.setAttribute("aria-expanded", "true");
+          const first = moreGroupsPanel.querySelector(".context-menu-item:not([disabled])");
+          if (first) {
+            first.focus();
+          }
+        };
 
-      moreGroupsTrigger.addEventListener("keydown", (event) => {
-        if (event.key !== "ArrowRight") {
-          return;
-        }
-        event.preventDefault();
-        openMoreGroups();
-      });
+        moreGroupsTrigger.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (moreGroupsSubmenu.classList.contains("open")) {
+            moreGroupsSubmenu.classList.remove("open");
+            moreGroupsTrigger.setAttribute("aria-expanded", "false");
+            return;
+          }
+          openMoreGroups();
+        });
 
-      moreGroupsSubmenu.append(moreGroupsTrigger, moreGroupsPanel);
-      fragment.appendChild(moreGroupsSubmenu);
+        moreGroupsTrigger.addEventListener("keydown", (event) => {
+          if (event.key !== "ArrowRight") {
+            return;
+          }
+          event.preventDefault();
+          openMoreGroups();
+        });
+
+        moreGroupsSubmenu.append(moreGroupsTrigger, moreGroupsPanel);
+        fragment.appendChild(moreGroupsSubmenu);
+      }
     }
   } else {
     fragment.appendChild(
@@ -2062,14 +2164,16 @@ async function onRowClicked(event, tabId) {
 
 function createNodeRow(tree, node, options = {}) {
   const { showGroupBadge = true, depth = 1, siblingIndex = null, siblingCount = null } = options;
+  const visualDepth = normalizedDepth(depth);
   const row = document.createElement("div");
   row.className = "tree-row";
   row.dataset.tabId = String(node.tabId);
   row.dataset.nodeId = nodeId(node.tabId);
+  row.dataset.depth = String(visualDepth);
   row.setAttribute("role", "treeitem");
   row.setAttribute("aria-expanded", node.childNodeIds.length ? String(!node.collapsed) : "false");
   row.setAttribute("aria-selected", state.selectedTabIds.has(node.tabId) ? "true" : "false");
-  row.setAttribute("aria-level", String(depth));
+  row.setAttribute("aria-level", String(visualDepth));
   if (Number.isFinite(siblingIndex) && Number.isFinite(siblingCount)) {
     row.setAttribute("aria-posinset", String(siblingIndex + 1));
     row.setAttribute("aria-setsize", String(siblingCount));
@@ -2083,9 +2187,16 @@ function createNodeRow(tree, node, options = {}) {
   if (state.selectedTabIds.has(node.tabId)) {
     row.classList.add("selected");
   }
+
+  const rowStateIndicator = document.createElement("span");
+  rowStateIndicator.className = "row-state-indicator";
+  rowStateIndicator.setAttribute("aria-hidden", "true");
+
   if (node.pinned) {
+    const pinnedTitle = node.lastKnownTitle || t("pinnedTabTitle", [], "Pinned tab");
     row.classList.add("pinned-row");
-    row.title = node.lastKnownTitle || t("pinnedTabTitle", [], "Pinned tab");
+    row.title = pinnedTitle;
+    row.dataset.pinnedTitle = pinnedTitle;
   }
 
   const twisty = document.createElement("button");
@@ -2158,7 +2269,7 @@ function createNodeRow(tree, node, options = {}) {
     actions.appendChild(close);
   }
 
-  row.append(twisty, favicon, titleWrap, actions);
+  row.append(rowStateIndicator, twisty, favicon, titleWrap, actions);
   return row;
 }
 
@@ -2176,11 +2287,13 @@ function createNodeElement(tree, nodeKey, query, visibilityByNodeId, rowOptions 
   const holder = document.createElement("div");
   holder.className = "tree-node";
   holder.dataset.treeKey = `node:${node.tabId}`;
+  holder.dataset.depth = String(normalizedDepth(depth));
   holder.appendChild(createNodeRow(tree, node, { ...rowOptions, depth }));
 
   if (node.childNodeIds.length && (!node.collapsed || !!query)) {
     const children = document.createElement("div");
     children.className = "children";
+    children.dataset.depth = String(normalizedDepth(depth + 1));
     children.setAttribute("role", "group");
     const renderableChildIds = node.childNodeIds
       .filter((childId) => shouldRenderNode(tree, childId, query, visibilityByNodeId));
@@ -2347,15 +2460,24 @@ function safeFaviconUrl(node) {
 
 function patchNodeRow(row, tree, node, options = {}) {
   const { showGroupBadge = true, depth = 1, siblingIndex = null, siblingCount = null } = options;
+  const visualDepth = normalizedDepth(depth);
 
   row.classList.toggle("active", tree.selectedTabId === node.tabId);
   row.classList.toggle("selected", state.selectedTabIds.has(node.tabId));
+  row.classList.toggle("pinned-row", !!node.pinned);
+  row.dataset.depth = String(visualDepth);
   row.setAttribute("aria-expanded", node.childNodeIds.length ? String(!node.collapsed) : "false");
   row.setAttribute("aria-selected", state.selectedTabIds.has(node.tabId) ? "true" : "false");
-  row.setAttribute("aria-level", String(depth));
+  row.setAttribute("aria-level", String(visualDepth));
   if (Number.isFinite(siblingIndex) && Number.isFinite(siblingCount)) {
     row.setAttribute("aria-posinset", String(siblingIndex + 1));
     row.setAttribute("aria-setsize", String(siblingCount));
+  }
+  if (!row.querySelector(".row-state-indicator")) {
+    const rowStateIndicator = document.createElement("span");
+    rowStateIndicator.className = "row-state-indicator";
+    rowStateIndicator.setAttribute("aria-hidden", "true");
+    row.prepend(rowStateIndicator);
   }
 
   const twisty = row.querySelector(".twisty");
@@ -2390,7 +2512,14 @@ function patchNodeRow(row, tree, node, options = {}) {
   }
 
   if (node.pinned) {
-    row.title = node.lastKnownTitle || t("pinnedTabTitle", [], "Pinned tab");
+    const pinnedTitle = node.lastKnownTitle || t("pinnedTabTitle", [], "Pinned tab");
+    row.title = pinnedTitle;
+    row.dataset.pinnedTitle = pinnedTitle;
+    row.querySelector(".pinned-label-peek")?.remove();
+  } else {
+    row.removeAttribute("title");
+    delete row.dataset.pinnedTitle;
+    row.querySelector(".pinned-label-peek")?.remove();
   }
 
   const badges = row.querySelector(".badges");
@@ -2423,6 +2552,7 @@ function patchNodeElement(existingHolder, tree, nodeKey, query, visibilityByNode
   }
 
   const depth = Number.isFinite(rowOptions.depth) ? rowOptions.depth : 1;
+  existingHolder.dataset.depth = String(normalizedDepth(depth));
   const row = existingHolder.querySelector(":scope > .tree-row");
   if (row) {
     patchNodeRow(row, tree, node, { ...rowOptions, depth });
@@ -2454,6 +2584,7 @@ function patchNodeElement(existingHolder, tree, nodeKey, query, visibilityByNode
     container.setAttribute("role", "group");
     existingHolder.appendChild(container);
   }
+  container.dataset.depth = String(normalizedDepth(depth + 1));
 
   reconcileChildren(container, tree, renderableChildIds, query, visibilityByNodeId, {
     ...rowOptions,
@@ -2658,7 +2789,7 @@ function fullRebuildTree() {
     const pinLabel = document.createElement("div");
     pinLabel.className = "section-title";
     pinLabel.dataset.treeKey = "pinned-label";
-    pinLabel.textContent = t("sectionPinned", [], "Pinned");
+    pinLabel.textContent = pinnedSectionLabel(pinned.length);
     dom.treeRoot.appendChild(pinLabel);
     const { element, renderedCount: pinnedCount } = createPinnedStrip(tree, pinned, query, visibilityByNodeId);
     if (element) {
@@ -2749,12 +2880,13 @@ function patchTree() {
     desiredKeys.push(labelKey);
     const existingLabel = existingByKey.get(labelKey);
     if (existingLabel) {
+      existingLabel.textContent = pinnedSectionLabel(pinned.length);
       desiredElements.set(labelKey, existingLabel);
     } else {
       const pinLabel = document.createElement("div");
       pinLabel.className = "section-title";
       pinLabel.dataset.treeKey = labelKey;
-      pinLabel.textContent = t("sectionPinned", [], "Pinned");
+      pinLabel.textContent = pinnedSectionLabel(pinned.length);
       desiredElements.set(labelKey, pinLabel);
     }
 

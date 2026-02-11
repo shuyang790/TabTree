@@ -14,6 +14,13 @@ function rowByTitle(sidePanelPage, title) {
     .first();
 }
 
+async function tabIdByTitle(sidePanelPage, title) {
+  return sidePanelPage.evaluate(async (tabTitle) => {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    return tabs.find((tab) => tab.title === tabTitle)?.id ?? null;
+  }, title);
+}
+
 test.describe("TabTree extension", () => {
   test("loads side panel app shell", async ({ sidePanelPage }) => {
     await expect(sidePanelPage.locator("#search")).toBeVisible();
@@ -63,6 +70,106 @@ test.describe("TabTree extension", () => {
     await expect
       .poll(() => context.pages().length, { message: "Expected add-child to create a new tab" })
       .toBeGreaterThan(beforeCount);
+  });
+
+  test("pinned strip shows count and exposes native pinned title tooltip", async ({ context, sidePanelPage }) => {
+    const page = await createTitledTab(context, "Pinned Peek Tab");
+    const tabId = await tabIdByTitle(sidePanelPage, "Pinned Peek Tab");
+    expect(Number.isInteger(tabId)).toBeTruthy();
+
+    await sidePanelPage.evaluate(async (id) => {
+      await chrome.tabs.update(id, { pinned: true });
+    }, tabId);
+
+    const pinnedRow = sidePanelPage.locator('.pinned-track .tree-row[title="Pinned Peek Tab"]').first();
+    await expect(pinnedRow).toBeVisible();
+    await expect(sidePanelPage.locator(".section-title").filter({ hasText: "Pinned ·" }).first()).toBeVisible();
+    await expect(pinnedRow).toHaveAttribute("title", "Pinned Peek Tab");
+    await expect(pinnedRow.locator(".pinned-label-peek")).toHaveCount(0);
+
+    await page.close().catch(() => {});
+  });
+
+  test("context menu uses searchable existing-group picker for many groups", async ({ context, sidePanelPage }) => {
+    const seedTitles = Array.from({ length: 9 }, (_, index) => `Picker Seed ${index + 1}`);
+    const pages = [];
+    for (const title of seedTitles) {
+      pages.push(await createTitledTab(context, title));
+    }
+    const targetTitle = "Picker Ungrouped";
+    pages.push(await createTitledTab(context, targetTitle));
+
+    const grouped = await sidePanelPage.evaluate(async ({ seedTitles, targetTitle }) => {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const groupIdsByTitle = {};
+
+      for (const [index, title] of seedTitles.entries()) {
+        const tab = tabs.find((candidate) => candidate.title === title);
+        if (!Number.isInteger(tab?.id)) {
+          continue;
+        }
+        const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
+        const groupTitle = `Picker Group ${index + 1}`;
+        await chrome.tabGroups.update(groupId, { title: groupTitle });
+        groupIdsByTitle[groupTitle] = groupId;
+      }
+
+      const targetTabId = tabs.find((candidate) => candidate.title === targetTitle)?.id ?? null;
+      return { groupIdsByTitle, targetTabId };
+    }, { seedTitles, targetTitle });
+
+    expect(Number.isInteger(grouped.targetTabId)).toBeTruthy();
+    const targetGroupTitle = "Picker Group 3";
+    const targetGroupId = grouped.groupIdsByTitle[targetGroupTitle];
+    expect(Number.isInteger(targetGroupId)).toBeTruthy();
+
+    await expect.poll(async () => {
+      const count = await sidePanelPage.locator(".group-header").count();
+      return count >= 7;
+    }).toBeTruthy();
+
+    const row = rowByTitle(sidePanelPage, targetTitle);
+    await expect(row).toBeVisible();
+
+    const groupSearchInput = sidePanelPage.locator(".context-group-search-input");
+    let inputVisible = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await row.click({ button: "right" });
+      if (await groupSearchInput.first().isVisible().catch(() => false)) {
+        inputVisible = true;
+        break;
+      }
+      await sidePanelPage.keyboard.press("Escape");
+      await sidePanelPage.waitForTimeout(120);
+    }
+
+    expect(inputVisible).toBeTruthy();
+    await groupSearchInput.fill(targetGroupTitle);
+
+    const targetGroupItem = sidePanelPage.locator(".context-group-item")
+      .filter({ has: sidePanelPage.locator(".context-group-label", { hasText: targetGroupTitle }) })
+      .first();
+    await expect(targetGroupItem).toBeVisible();
+
+    await expect.poll(async () => sidePanelPage.evaluate((groupId) =>
+      !!document.querySelector(`.context-group-item[data-group-id="${groupId}"]`), targetGroupId)).toBeTruthy();
+
+    await sidePanelPage.evaluate((groupId) => {
+      const target = document.querySelector(`.context-group-item[data-group-id="${groupId}"]`);
+      if (!(target instanceof HTMLElement)) {
+        throw new Error("target group item not found");
+      }
+      target.click();
+    }, targetGroupId);
+
+    await expect.poll(async () => sidePanelPage.evaluate(async (tabId) => {
+      const tab = await chrome.tabs.get(tabId);
+      return tab.groupId;
+    }, grouped.targetTabId)).toBe(targetGroupId);
+
+    for (const page of pages) {
+      await page.close().catch(() => {});
+    }
   });
 
   test("tab-row context menu can close selected tabs", async ({ context, sidePanelPage }) => {

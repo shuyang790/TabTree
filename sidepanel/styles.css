@@ -251,17 +251,49 @@ button:focus-visible {
 }
 
 .tree-row.active {
-  background: var(--row-active);
-  border-color: color-mix(in srgb, var(--accent), transparent 65%);
+  background: color-mix(in srgb, var(--row-active), var(--bg-elev) 34%);
+  border-color: color-mix(in srgb, var(--accent), transparent 78%);
 }
 
 .tree-row.selected {
-  border-color: color-mix(in srgb, var(--accent), transparent 45%);
-  background: color-mix(in srgb, var(--accent), transparent 88%);
+  border-color: color-mix(in srgb, var(--accent), transparent 52%);
+  background: color-mix(in srgb, var(--accent), transparent 92%);
 }
 
 .tree-row.active.selected {
-  background: color-mix(in srgb, var(--accent), transparent 78%);
+  background: color-mix(in srgb, var(--accent), transparent 86%);
+}
+
+.row-state-indicator {
+  position: absolute;
+  left: 1px;
+  top: 3px;
+  bottom: 3px;
+  width: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent), var(--text) 10%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tree-row.active .row-state-indicator {
+  opacity: 0.95;
+}
+
+.tree-row.selected .row-state-indicator::after {
+  content: "✓";
+  position: absolute;
+  left: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: color-mix(in srgb, var(--accent), var(--text) 26%);
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.tree-row.pinned-row .row-state-indicator {
+  display: none;
 }
 
 .tree-row.dragging {
@@ -455,9 +487,55 @@ button:focus-visible {
 }
 
 .children {
+  --depth-tint-alpha: 100%;
+  position: relative;
   margin-left: var(--indent);
-  border-left: 1px dashed color-mix(in srgb, var(--border), transparent 20%);
+  border-left: 1px solid color-mix(in srgb, var(--border), transparent 36%);
+  background: color-mix(in srgb, var(--accent), transparent var(--depth-tint-alpha));
+  border-radius: calc(var(--radius) - 3px);
   padding-left: var(--child-pad);
+}
+
+.children > .tree-node {
+  position: relative;
+}
+
+.children > .tree-node::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--child-pad) * -1);
+  top: calc(var(--row-height) / 2);
+  width: calc(var(--child-pad) - 2px);
+  border-top: 1px solid color-mix(in srgb, var(--border), transparent 36%);
+  pointer-events: none;
+}
+
+.children[data-depth="2"] {
+  --depth-tint-alpha: 97%;
+}
+
+.children[data-depth="3"] {
+  --depth-tint-alpha: 96%;
+}
+
+.children[data-depth="4"] {
+  --depth-tint-alpha: 95%;
+}
+
+.children[data-depth="5"] {
+  --depth-tint-alpha: 94%;
+}
+
+.children[data-depth="6"] {
+  --depth-tint-alpha: 93%;
+}
+
+.children[data-depth="7"] {
+  --depth-tint-alpha: 92%;
+}
+
+.children[data-depth="8"] {
+  --depth-tint-alpha: 91%;
 }
 
 .group-section {
@@ -828,6 +906,37 @@ button:focus-visible {
 .context-inline-group-list {
   display: grid;
   gap: 1px;
+}
+
+.context-group-search {
+  display: grid;
+  gap: 4px;
+  padding: 2px;
+}
+
+.context-group-search-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.context-group-search-input:disabled {
+  opacity: 0.55;
+}
+
+.context-group-search-results {
+  max-height: min(34vh, 190px);
+  overflow-y: auto;
+}
+
+.context-group-search-empty {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  padding: 2px 7px 6px;
 }
 
 .context-group-item {
