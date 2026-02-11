@@ -292,6 +292,24 @@ async function syncWindowOrdering(windowId) {
 
   next = normalizeGroupedTabParents(next);
   next = sortTreeByIndex(next);
+
+  let groups = [];
+  try {
+    groups = await chrome.tabGroups.query({ windowId });
+  } catch {
+    groups = [];
+  }
+  const groupMap = {};
+  for (const group of groups) {
+    groupMap[group.id] = {
+      id: group.id,
+      title: group.title || t("unnamedGroup", "Unnamed group"),
+      color: group.color,
+      collapsed: !!group.collapsed
+    };
+  }
+  next = { ...next, groups: groupMap };
+
   setWindowTree(next);
 }
 
@@ -1289,13 +1307,11 @@ chrome.tabGroups.onCreated.addListener(async (group) => {
 chrome.tabGroups.onUpdated.addListener(async (group) => {
   await ensureInitialized();
   scheduleWindowOrderingSync(group.windowId);
-  await refreshGroupMetadata(group.windowId);
 });
 
 chrome.tabGroups.onMoved.addListener(async (group) => {
   await ensureInitialized();
   scheduleWindowOrderingSync(group.windowId);
-  await refreshGroupMetadata(group.windowId);
 });
 
 chrome.tabGroups.onRemoved.addListener(async (group) => {

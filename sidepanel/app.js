@@ -334,7 +334,11 @@ const state = {
     windowId: null,
     renameOpen: false,
     returnTabId: null
-  }
+  },
+  lastRenderedWindowId: null,
+  lastRenderedShowGroupHeaders: null,
+  lastRenderedShowFavicons: null,
+  lastRenderedShowCloseButton: null
 };
 
 const dom = {
@@ -2077,23 +2081,23 @@ function createNodeRow(tree, node, options = {}) {
   twisty.textContent = node.childNodeIds.length ? (node.collapsed ? "▸" : "▾") : "";
   twisty.title = node.childNodeIds.length ? t("toggleChildren", [], "Toggle children") : "";
   twisty.setAttribute("aria-label", t("toggleChildren", [], "Toggle children"));
-  twisty.addEventListener("click", async (event) => {
-    event.stopPropagation();
-    if (!node.childNodeIds.length) {
-      return;
-    }
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.TOGGLE_COLLAPSE,
-      tabId: node.tabId
-    });
-  });
+  twisty.dataset.action = "toggle-collapse";
 
   const favicon = document.createElement("img");
   favicon.className = "favicon";
   favicon.alt = "";
   const shouldShowFavicon = node.pinned || state.settings?.showFavicons;
-  favicon.src = shouldShowFavicon ? node.favIconUrl || "" : "";
-  favicon.style.visibility = favicon.src ? "visible" : "hidden";
+  const rawUrl = shouldShowFavicon ? node.favIconUrl || "" : "";
+  const safeUrl = rawUrl && !rawUrl.startsWith("chrome://") && !rawUrl.startsWith("chrome-extension://")
+    ? rawUrl : "";
+  favicon.src = safeUrl;
+  favicon.style.visibility = safeUrl ? "visible" : "hidden";
+  if (safeUrl) {
+    favicon.addEventListener("error", () => {
+      favicon.style.visibility = "hidden";
+      favicon.removeAttribute("src");
+    }, { once: true });
+  }
 
   const titleWrap = document.createElement("div");
   titleWrap.className = "title-wrap";
@@ -2124,13 +2128,7 @@ function createNodeRow(tree, node, options = {}) {
   addChild.textContent = "+";
   addChild.title = t("addChildTab", [], "Add child tab");
   addChild.setAttribute("aria-label", t("addChildTab", [], "Add child tab"));
-  addChild.addEventListener("click", async (event) => {
-    event.stopPropagation();
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.ADD_CHILD_TAB,
-      parentTabId: node.tabId
-    });
-  });
+  addChild.dataset.action = "add-child";
   actions.appendChild(addChild);
 
   if (state.settings?.showCloseButton) {
@@ -2144,260 +2142,9 @@ function createNodeRow(tree, node, options = {}) {
     close.setAttribute("aria-label", closesSubtree
       ? t("closeSubtree", [], "Close subtree")
       : t("closeTab", [], "Close tab"));
-    close.addEventListener("click", async (event) => {
-      event.stopPropagation();
-
-      if (!closesSubtree) {
-        await requestClose({
-          kind: "single",
-          tabId: node.tabId,
-          includeDescendants: false
-        }, 1, false);
-        return;
-      }
-
-      const plan = buildClosePlan(tree, [node.tabId]);
-      if (!plan.rootTabIds.length) {
-        return;
-      }
-
-      await requestClose({
-        kind: "single",
-        tabId: plan.rootTabIds[0],
-        includeDescendants: true
-      }, plan.totalTabs, false);
-    });
+    close.dataset.action = "close-tab";
     actions.appendChild(close);
   }
-
-  row.addEventListener("click", async (event) => {
-    await onRowClicked(event, node.tabId);
-  });
-  row.addEventListener("contextmenu", (event) => {
-    openTabContextMenu(event, node.tabId);
-  });
-  row.addEventListener("focus", () => {
-    state.focusedTabId = node.tabId;
-    setTreeRowTabStop(node.tabId);
-  });
-  row.addEventListener("keydown", async (event) => {
-    const ordered = visibleTabIdsInOrder();
-    const currentIndex = ordered.indexOf(node.tabId);
-
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      if (currentIndex >= 0 && currentIndex < ordered.length - 1) {
-        focusTreeRow(ordered[currentIndex + 1]);
-      }
-      return;
-    }
-
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      if (currentIndex > 0) {
-        focusTreeRow(ordered[currentIndex - 1]);
-      }
-      return;
-    }
-
-    if (event.key === "ArrowRight") {
-      event.preventDefault();
-      const liveTree = currentWindowTree();
-      const liveNode = liveTree?.nodes[nodeId(node.tabId)];
-      if (!liveNode) {
-        return;
-      }
-      if (liveNode.childNodeIds.length && liveNode.collapsed) {
-        await send(MESSAGE_TYPES.TREE_ACTION, {
-          type: TREE_ACTIONS.TOGGLE_COLLAPSE,
-          tabId: node.tabId
-        });
-        return;
-      }
-      const firstChildNodeId = liveNode.childNodeIds[0];
-      const firstChildTabId = liveTree?.nodes[firstChildNodeId]?.tabId;
-      if (Number.isFinite(firstChildTabId)) {
-        focusTreeRow(firstChildTabId);
-      }
-      return;
-    }
-
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      const liveTree = currentWindowTree();
-      const liveNode = liveTree?.nodes[nodeId(node.tabId)];
-      if (!liveNode) {
-        return;
-      }
-      if (liveNode.childNodeIds.length && !liveNode.collapsed) {
-        await send(MESSAGE_TYPES.TREE_ACTION, {
-          type: TREE_ACTIONS.TOGGLE_COLLAPSE,
-          tabId: node.tabId
-        });
-        return;
-      }
-      const parentTabId = liveTree?.nodes[liveNode.parentNodeId]?.tabId;
-      if (Number.isFinite(parentTabId)) {
-        focusTreeRow(parentTabId);
-      }
-      return;
-    }
-
-    if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") {
-      event.preventDefault();
-      await onRowClicked({ metaKey: false, ctrlKey: false, shiftKey: false }, node.tabId);
-      return;
-    }
-
-    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
-      event.preventDefault();
-      const rect = row.getBoundingClientRect();
-      openTabContextMenu({
-        preventDefault() {},
-        stopPropagation() {},
-        clientX: Math.round(rect.left + Math.min(24, rect.width / 2)),
-        clientY: Math.round(rect.top + rect.height / 2)
-      }, node.tabId);
-    }
-  });
-
-  row.addEventListener("dragstart", (event) => {
-    if (state.draggingGroupId) {
-      event.preventDefault();
-      return;
-    }
-
-    const selection = state.selectedTabIds.has(node.tabId) && state.selectedTabIds.size > 1
-      ? selectedTabIdsArray()
-      : [node.tabId];
-
-    state.draggingTabIds = selection;
-    resetInsideDropHover();
-    stopAutoScroll();
-    setDragTarget(null, null);
-
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.dropEffect = "move";
-      event.dataTransfer.setData("text/plain", selection.join(","));
-    }
-    row.classList.add("dragging");
-    updateSearchDropAffordance();
-  });
-
-  row.addEventListener("dragend", () => {
-    state.draggingTabIds = [];
-    resetInsideDropHover();
-    stopAutoScroll();
-    row.classList.remove("dragging");
-    clearDropClasses();
-  });
-
-  row.addEventListener("dragover", (event) => {
-    if (!state.draggingTabIds.length && !Number.isInteger(state.draggingGroupId)) {
-      return;
-    }
-    event.preventDefault();
-    maybeAutoScroll(event.clientY);
-
-    if (Number.isInteger(state.draggingGroupId)) {
-      resetInsideDropHover();
-      const position = getDropPosition(event, row, { allowInside: false });
-      const valid = canDropGroup(tree, state.draggingGroupId, { targetGroupId: node.groupId, targetTabId: node.tabId });
-      setDragTarget({
-        kind: "tab",
-        tabId: node.tabId,
-        position,
-        valid
-      }, row);
-      if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = valid ? "move" : "none";
-      }
-      return;
-    }
-
-    if (!state.draggingTabIds.length) {
-      return;
-    }
-
-    if (state.draggingTabIds.includes(node.tabId)) {
-      resetInsideDropHover();
-      const position = getDropPosition(event, row, { allowInside: true });
-      setDragTarget({
-        kind: "tab",
-        tabId: node.tabId,
-        position,
-        valid: false
-      }, row);
-      if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = "none";
-      }
-      return;
-    }
-
-    const intent = resolveTabDropIntent(tree, row, node.tabId, event);
-    setDragTarget({
-      kind: "tab",
-      tabId: node.tabId,
-      position: intent.position,
-      valid: intent.valid
-    }, row);
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = intent.valid ? "move" : "none";
-    }
-  });
-
-  row.addEventListener("drop", async (event) => {
-    if (!state.draggingTabIds.length && !Number.isInteger(state.draggingGroupId)) {
-      return;
-    }
-    event.preventDefault();
-    stopAutoScroll();
-
-    if (Number.isInteger(state.draggingGroupId)) {
-      resetInsideDropHover();
-      const position = getDropPosition(event, row, { allowInside: false });
-      const valid = canDropGroup(tree, state.draggingGroupId, { targetGroupId: node.groupId, targetTabId: node.tabId });
-      setDragTarget({
-        kind: "tab",
-        tabId: node.tabId,
-        position,
-        valid
-      }, row);
-      if (!valid) {
-        return;
-      }
-      await moveGroupBlockToTarget(tree, { kind: "tab", tabId: node.tabId }, position);
-      state.draggingGroupId = null;
-      clearDropClasses();
-      return;
-    }
-
-    if (!state.draggingTabIds.length || state.draggingTabIds.includes(node.tabId)) {
-      return;
-    }
-
-    const intent = resolveTabDropIntent(tree, row, node.tabId, event);
-    setDragTarget({
-      kind: "tab",
-      tabId: node.tabId,
-      position: intent.position,
-      valid: intent.valid
-    }, row);
-    if (!intent.valid) {
-      return;
-    }
-
-    const payload = buildDropPayload(tree, state.draggingTabIds, node.tabId, intent.position);
-    if (!payload) {
-      return;
-    }
-
-    await send(MESSAGE_TYPES.TREE_ACTION, payload);
-    state.draggingTabIds = [];
-    resetInsideDropHover();
-    clearDropClasses();
-  });
 
   row.append(twisty, favicon, titleWrap, actions);
   return row;
@@ -2416,6 +2163,7 @@ function createNodeElement(tree, nodeKey, query, visibilityByNodeId, rowOptions 
   const depth = Number.isFinite(rowOptions.depth) ? rowOptions.depth : 1;
   const holder = document.createElement("div");
   holder.className = "tree-node";
+  holder.dataset.treeKey = `node:${node.tabId}`;
   holder.appendChild(createNodeRow(tree, node, { ...rowOptions, depth }));
 
   if (node.childNodeIds.length && (!node.collapsed || !!query)) {
@@ -2500,11 +2248,13 @@ function createGroupSection(tree, groupId, rootNodeIds, query, visibilityByNodeI
 
   const section = document.createElement("section");
   section.className = "group-section";
+  section.dataset.treeKey = `group:${groupId}`;
   section.style.setProperty("--group-color", group.color);
 
   const header = document.createElement("div");
   header.className = "group-header";
   header.dataset.groupId = String(groupId);
+  header.dataset.windowId = String(tree.windowId);
   header.setAttribute("role", "button");
   header.setAttribute("tabindex", "0");
   header.setAttribute("aria-expanded", String(!group.collapsed));
@@ -2523,89 +2273,6 @@ function createGroupSection(tree, groupId, rootNodeIds, query, visibilityByNodeI
   const count = document.createElement("span");
   count.className = "group-count";
   count.textContent = String(groupTabIds(tree, groupId).length);
-
-  const toggleGroupCollapsed = async () => {
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE,
-      groupId,
-      windowId: tree.windowId
-    });
-  };
-
-  header.addEventListener("click", async () => {
-    await toggleGroupCollapsed();
-  });
-
-  header.addEventListener("keydown", async (event) => {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-    event.preventDefault();
-    await toggleGroupCollapsed();
-  });
-  header.addEventListener("contextmenu", (event) => {
-    openGroupContextMenu(event, groupId, tree.windowId);
-  });
-  header.addEventListener("dragstart", (event) => {
-    state.draggingGroupId = groupId;
-    state.draggingTabIds = [];
-    resetInsideDropHover();
-    stopAutoScroll();
-    setDragTarget(null, null);
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.dropEffect = "move";
-      event.dataTransfer.setData("text/plain", `group:${groupId}`);
-    }
-    header.classList.add("dragging");
-    updateSearchDropAffordance();
-  });
-  header.addEventListener("dragend", () => {
-    state.draggingGroupId = null;
-    resetInsideDropHover();
-    stopAutoScroll();
-    header.classList.remove("dragging");
-    clearDropClasses();
-  });
-  header.addEventListener("dragover", (event) => {
-    if (!Number.isInteger(state.draggingGroupId)) {
-      return;
-    }
-    event.preventDefault();
-    maybeAutoScroll(event.clientY);
-    const position = getDropPosition(event, header, { allowInside: false });
-    const valid = canDropGroup(tree, state.draggingGroupId, { targetGroupId: groupId });
-    setDragTarget({
-      kind: "group",
-      groupId,
-      position,
-      valid
-    }, header);
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = valid ? "move" : "none";
-    }
-  });
-  header.addEventListener("drop", async (event) => {
-    if (!Number.isInteger(state.draggingGroupId)) {
-      return;
-    }
-    event.preventDefault();
-    stopAutoScroll();
-    const position = getDropPosition(event, header, { allowInside: false });
-    const valid = canDropGroup(tree, state.draggingGroupId, { targetGroupId: groupId });
-    setDragTarget({
-      kind: "group",
-      groupId,
-      position,
-      valid
-    }, header);
-    if (!valid) {
-      return;
-    }
-    await moveGroupBlockToTarget(tree, { kind: "group", groupId }, position);
-    state.draggingGroupId = null;
-    clearDropClasses();
-  });
 
   header.append(colorDot, name, count);
   section.appendChild(header);
@@ -2659,7 +2326,250 @@ function rootBuckets(tree) {
   return { pinned, blocks };
 }
 
-function renderTree() {
+function safeFaviconUrl(node) {
+  const shouldShow = node.pinned || state.settings?.showFavicons;
+  const rawUrl = shouldShow ? node.favIconUrl || "" : "";
+  return rawUrl && !rawUrl.startsWith("chrome://") && !rawUrl.startsWith("chrome-extension://")
+    ? rawUrl : "";
+}
+
+function patchNodeRow(row, tree, node, options = {}) {
+  const { showGroupBadge = true, depth = 1, siblingIndex = null, siblingCount = null } = options;
+
+  row.classList.toggle("active", tree.selectedTabId === node.tabId);
+  row.classList.toggle("selected", state.selectedTabIds.has(node.tabId));
+  row.setAttribute("aria-expanded", node.childNodeIds.length ? String(!node.collapsed) : "false");
+  row.setAttribute("aria-selected", state.selectedTabIds.has(node.tabId) ? "true" : "false");
+  row.setAttribute("aria-level", String(depth));
+  if (Number.isFinite(siblingIndex) && Number.isFinite(siblingCount)) {
+    row.setAttribute("aria-posinset", String(siblingIndex + 1));
+    row.setAttribute("aria-setsize", String(siblingCount));
+  }
+
+  const twisty = row.querySelector(".twisty");
+  if (twisty) {
+    const twistyText = node.childNodeIds.length ? (node.collapsed ? "▸" : "▾") : "";
+    if (twisty.textContent !== twistyText) {
+      twisty.textContent = twistyText;
+    }
+  }
+
+  const favicon = row.querySelector(".favicon");
+  if (favicon) {
+    const safeUrl = safeFaviconUrl(node);
+    if (favicon.getAttribute("src") !== safeUrl) {
+      favicon.src = safeUrl;
+      favicon.style.visibility = safeUrl ? "visible" : "hidden";
+      if (safeUrl) {
+        favicon.addEventListener("error", () => {
+          favicon.style.visibility = "hidden";
+          favicon.removeAttribute("src");
+        }, { once: true });
+      }
+    }
+  }
+
+  const title = row.querySelector(".title");
+  if (title) {
+    const titleText = node.lastKnownTitle || t("untitledTab", [], "Untitled tab");
+    if (title.textContent !== titleText) {
+      title.textContent = titleText;
+    }
+  }
+
+  if (node.pinned) {
+    row.title = node.lastKnownTitle || t("pinnedTabTitle", [], "Pinned tab");
+  }
+
+  const badges = row.querySelector(".badges");
+  if (badges && !node.pinned) {
+    badges.innerHTML = "";
+    if (showGroupBadge && node.groupId !== null) {
+      const group = groupDisplay(tree, node.groupId);
+      const groupBadge = document.createElement("span");
+      groupBadge.className = "badge badge-group";
+      groupBadge.style.setProperty("--group-color", group.color);
+      groupBadge.textContent = group.name;
+      badges.appendChild(groupBadge);
+    }
+  }
+
+  const closeBtn = row.querySelector("[data-action='close-tab']");
+  if (closeBtn) {
+    const closesSubtree = node.childNodeIds.length > 0 && !!node.collapsed;
+    closeBtn.title = closesSubtree
+      ? t("closeSubtree", [], "Close subtree")
+      : t("closeTab", [], "Close tab");
+    closeBtn.setAttribute("aria-label", closeBtn.title);
+  }
+}
+
+function patchNodeElement(existingHolder, tree, nodeKey, query, visibilityByNodeId, rowOptions = {}) {
+  const node = tree.nodes[nodeKey];
+  if (!node) {
+    return;
+  }
+
+  const depth = Number.isFinite(rowOptions.depth) ? rowOptions.depth : 1;
+  const row = existingHolder.querySelector(":scope > .tree-row");
+  if (row) {
+    patchNodeRow(row, tree, node, { ...rowOptions, depth });
+  }
+
+  const childContainer = existingHolder.querySelector(":scope > .children");
+  const shouldShowChildren = node.childNodeIds.length && (!node.collapsed || !!query);
+
+  if (!shouldShowChildren) {
+    if (childContainer) {
+      childContainer.remove();
+    }
+    return;
+  }
+
+  const renderableChildIds = node.childNodeIds
+    .filter((childId) => shouldRenderNode(tree, childId, query, visibilityByNodeId));
+
+  if (!renderableChildIds.length) {
+    if (childContainer) {
+      childContainer.remove();
+    }
+    return;
+  }
+
+  const container = childContainer || document.createElement("div");
+  if (!childContainer) {
+    container.className = "children";
+    container.setAttribute("role", "group");
+    existingHolder.appendChild(container);
+  }
+
+  reconcileChildren(container, tree, renderableChildIds, query, visibilityByNodeId, {
+    ...rowOptions,
+    depth: depth + 1,
+    siblingCount: renderableChildIds.length
+  });
+}
+
+function reconcileChildren(container, tree, desiredNodeKeys, query, visibilityByNodeId, rowOptions) {
+  const existingByKey = new Map();
+  for (const child of Array.from(container.children)) {
+    const key = child.dataset.treeKey;
+    if (key) {
+      existingByKey.set(key, child);
+    }
+  }
+
+  const desiredKeys = new Set();
+  const orderedElements = [];
+
+  for (const [index, nodeKey] of desiredNodeKeys.entries()) {
+    const node = tree.nodes[nodeKey];
+    if (!node) {
+      continue;
+    }
+    const key = `node:${node.tabId}`;
+    desiredKeys.add(key);
+
+    const existing = existingByKey.get(key);
+    if (existing) {
+      patchNodeElement(existing, tree, nodeKey, query, visibilityByNodeId, {
+        ...rowOptions,
+        siblingIndex: index
+      });
+      orderedElements.push(existing);
+    } else {
+      const newEl = createNodeElement(tree, nodeKey, query, visibilityByNodeId, {
+        ...rowOptions,
+        siblingIndex: index
+      });
+      if (newEl) {
+        orderedElements.push(newEl);
+      }
+    }
+  }
+
+  for (const [key, el] of existingByKey) {
+    if (!desiredKeys.has(key)) {
+      el.remove();
+    }
+  }
+
+  for (let i = 0; i < orderedElements.length; i++) {
+    const el = orderedElements[i];
+    if (container.children[i] !== el) {
+      container.insertBefore(el, container.children[i] || null);
+    }
+  }
+}
+
+function patchGroupSection(existingSection, tree, groupId, rootNodeIds, query, visibilityByNodeId) {
+  const group = groupDisplay(tree, groupId);
+  existingSection.style.setProperty("--group-color", group.color);
+
+  const header = existingSection.querySelector(":scope > .group-header");
+  if (header) {
+    header.setAttribute("aria-expanded", String(!group.collapsed));
+    header.title = group.collapsed
+      ? t("expandGroup", [], "Expand group")
+      : t("collapseGroup", [], "Collapse group");
+    header.dataset.windowId = String(tree.windowId);
+
+    const nameEl = header.querySelector(".group-name");
+    if (nameEl && nameEl.textContent !== group.name) {
+      nameEl.textContent = group.name;
+    }
+
+    const countEl = header.querySelector(".group-count");
+    const countText = String(groupTabIds(tree, groupId).length);
+    if (countEl && countEl.textContent !== countText) {
+      countEl.textContent = countText;
+    }
+  }
+
+  const subtree = existingSection.querySelector(":scope > .group-children");
+  if (subtree) {
+    subtree.hidden = group.collapsed && !query;
+
+    const renderableRootIds = rootNodeIds
+      .filter((nodeKey) => shouldRenderNode(tree, nodeKey, query, visibilityByNodeId));
+
+    reconcileChildren(subtree, tree, renderableRootIds, query, visibilityByNodeId, {
+      showGroupBadge: false,
+      siblingCount: renderableRootIds.length
+    });
+  }
+}
+
+function shouldFullRebuild(tree) {
+  if (!tree) {
+    return true;
+  }
+  if (dom.treeRoot.children.length === 0) {
+    return true;
+  }
+  if (state.lastRenderedWindowId !== tree.windowId) {
+    return true;
+  }
+  if (state.lastRenderedShowGroupHeaders !== !!state.settings?.showGroupHeaders) {
+    return true;
+  }
+  if (state.lastRenderedShowFavicons !== !!state.settings?.showFavicons) {
+    return true;
+  }
+  if (state.lastRenderedShowCloseButton !== !!state.settings?.showCloseButton) {
+    return true;
+  }
+  return false;
+}
+
+function updateLastRenderedState(tree) {
+  state.lastRenderedWindowId = tree ? tree.windowId : null;
+  state.lastRenderedShowGroupHeaders = !!state.settings?.showGroupHeaders;
+  state.lastRenderedShowFavicons = !!state.settings?.showFavicons;
+  state.lastRenderedShowCloseButton = !!state.settings?.showCloseButton;
+}
+
+function fullRebuildTree() {
   dom.treeRoot.innerHTML = "";
   dom.treeRoot.classList.toggle("hide-favicons", !state.settings?.showFavicons);
   state.visibleTabIds = [];
@@ -2670,6 +2580,7 @@ function renderTree() {
     empty.textContent = t("noTabsAvailable", [], "No tabs available.");
     dom.treeRoot.appendChild(empty);
     state.focusedTabId = null;
+    updateLastRenderedState(null);
     return;
   }
 
@@ -2682,10 +2593,12 @@ function renderTree() {
   if (pinned.length) {
     const pinLabel = document.createElement("div");
     pinLabel.className = "section-title";
+    pinLabel.dataset.treeKey = "pinned-label";
     pinLabel.textContent = t("sectionPinned", [], "Pinned");
     dom.treeRoot.appendChild(pinLabel);
     const { element, renderedCount: pinnedCount } = createPinnedStrip(tree, pinned, query, visibilityByNodeId);
     if (element) {
+      element.dataset.treeKey = "pinned-strip";
       dom.treeRoot.appendChild(element);
       renderedCount += pinnedCount;
     }
@@ -2731,8 +2644,187 @@ function renderTree() {
       : t("noTabsInWindow", [], "No tabs in this window.");
     dom.treeRoot.appendChild(empty);
   }
+
+  updateLastRenderedState(tree);
   refreshVisibleTabIds();
   setTreeRowTabStop();
+}
+
+function patchTree() {
+  const tree = currentWindowTree();
+  dom.treeRoot.classList.toggle("hide-favicons", !state.settings?.showFavicons);
+
+  if (!tree) {
+    dom.treeRoot.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = t("noTabsAvailable", [], "No tabs available.");
+    dom.treeRoot.appendChild(empty);
+    state.focusedTabId = null;
+    updateLastRenderedState(null);
+    return;
+  }
+
+  const query = state.search.trim().toLowerCase();
+  const visibilityByNodeId = buildVisibilityMap(tree, query);
+  const { pinned, blocks } = rootBuckets(tree);
+
+  const existingByKey = new Map();
+  for (const child of Array.from(dom.treeRoot.children)) {
+    const key = child.dataset?.treeKey;
+    if (key) {
+      existingByKey.set(key, child);
+    }
+  }
+
+  const desiredKeys = [];
+  const desiredElements = new Map();
+
+  if (pinned.length) {
+    const labelKey = "pinned-label";
+    desiredKeys.push(labelKey);
+    const existingLabel = existingByKey.get(labelKey);
+    if (existingLabel) {
+      desiredElements.set(labelKey, existingLabel);
+    } else {
+      const pinLabel = document.createElement("div");
+      pinLabel.className = "section-title";
+      pinLabel.dataset.treeKey = labelKey;
+      pinLabel.textContent = t("sectionPinned", [], "Pinned");
+      desiredElements.set(labelKey, pinLabel);
+    }
+
+    const stripKey = "pinned-strip";
+    desiredKeys.push(stripKey);
+    const existingStrip = existingByKey.get(stripKey);
+    if (existingStrip) {
+      const track = existingStrip.querySelector(".pinned-track");
+      if (track) {
+        const renderablePinnedIds = pinned
+          .filter((nodeKey) => shouldRenderNode(tree, nodeKey, query, visibilityByNodeId));
+        reconcileChildren(track, tree, renderablePinnedIds, query, visibilityByNodeId, {
+          showGroupBadge: true,
+          siblingCount: renderablePinnedIds.length
+        });
+      }
+      desiredElements.set(stripKey, existingStrip);
+    } else {
+      const { element } = createPinnedStrip(tree, pinned, query, visibilityByNodeId);
+      if (element) {
+        element.dataset.treeKey = stripKey;
+        desiredElements.set(stripKey, element);
+      }
+    }
+  }
+
+  const rootNodeBlocks = blocks.filter((block) => block.type === "node");
+  const renderableRootNodeIds = rootNodeBlocks
+    .map((block) => block.rootNodeId)
+    .filter((nodeIdKey) => shouldRenderNode(tree, nodeIdKey, query, visibilityByNodeId));
+  let renderableRootNodeCursor = 0;
+
+  for (const block of blocks) {
+    if (block.type === "group") {
+      const key = `group:${block.groupId}`;
+      desiredKeys.push(key);
+      const existing = existingByKey.get(key);
+      if (existing) {
+        patchGroupSection(existing, tree, block.groupId, block.rootNodeIds, query, visibilityByNodeId);
+        desiredElements.set(key, existing);
+      } else {
+        const section = createGroupSection(tree, block.groupId, block.rootNodeIds, query, visibilityByNodeId);
+        if (section) {
+          desiredElements.set(key, section);
+        }
+      }
+      continue;
+    }
+
+    const nodeKey = block.rootNodeId;
+    const node = tree.nodes[nodeKey];
+    if (!node) {
+      continue;
+    }
+
+    const isRenderable = shouldRenderNode(tree, nodeKey, query, visibilityByNodeId);
+    if (!isRenderable) {
+      continue;
+    }
+
+    const siblingIndex = renderableRootNodeCursor;
+    renderableRootNodeCursor += 1;
+
+    const key = `node:${node.tabId}`;
+    desiredKeys.push(key);
+    const existing = existingByKey.get(key);
+    if (existing) {
+      patchNodeElement(existing, tree, nodeKey, query, visibilityByNodeId, {
+        showGroupBadge: true,
+        siblingIndex,
+        siblingCount: renderableRootNodeIds.length
+      });
+      desiredElements.set(key, existing);
+    } else {
+      const el = createNodeElement(tree, nodeKey, query, visibilityByNodeId, {
+        showGroupBadge: true,
+        siblingIndex,
+        siblingCount: renderableRootNodeIds.length
+      });
+      if (el) {
+        desiredElements.set(key, el);
+      }
+    }
+  }
+
+  const desiredKeySet = new Set(desiredKeys);
+  for (const [key, el] of existingByKey) {
+    if (!desiredKeySet.has(key)) {
+      el.remove();
+    }
+  }
+
+  // Also remove non-keyed children like .empty placeholders
+  for (const child of Array.from(dom.treeRoot.children)) {
+    if (!child.dataset?.treeKey && child.classList.contains("empty")) {
+      child.remove();
+    }
+  }
+
+  const orderedElements = desiredKeys
+    .map((key) => desiredElements.get(key))
+    .filter(Boolean);
+
+  if (!orderedElements.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = query
+      ? t("noTabsMatchSearch", [], "No tabs match your search.")
+      : t("noTabsInWindow", [], "No tabs in this window.");
+    dom.treeRoot.appendChild(empty);
+  } else {
+    for (let i = 0; i < orderedElements.length; i++) {
+      const el = orderedElements[i];
+      if (dom.treeRoot.children[i] !== el) {
+        dom.treeRoot.insertBefore(el, dom.treeRoot.children[i] || null);
+      }
+    }
+    // Remove trailing orphans
+    while (dom.treeRoot.children.length > orderedElements.length) {
+      dom.treeRoot.lastChild.remove();
+    }
+  }
+
+  updateLastRenderedState(tree);
+  refreshVisibleTabIds();
+  setTreeRowTabStop();
+}
+
+function renderTree() {
+  if (shouldFullRebuild(currentWindowTree())) {
+    fullRebuildTree();
+  } else {
+    patchTree();
+  }
 }
 
 function render() {
@@ -2840,6 +2932,488 @@ function bindEvents() {
     }
     stopAutoScroll();
   });
+
+  // --- Delegated tree-root event handlers ---
+
+  dom.treeRoot.addEventListener("click", async (event) => {
+    const actionEl = event.target.closest("[data-action]");
+    if (actionEl) {
+      event.stopPropagation();
+      const row = actionEl.closest(".tree-row[data-tab-id]");
+      const tabId = row ? Number(row.dataset.tabId) : null;
+      if (!Number.isFinite(tabId)) {
+        return;
+      }
+      const action = actionEl.dataset.action;
+      if (action === "toggle-collapse") {
+        await send(MESSAGE_TYPES.TREE_ACTION, {
+          type: TREE_ACTIONS.TOGGLE_COLLAPSE,
+          tabId
+        });
+        return;
+      }
+      if (action === "add-child") {
+        await send(MESSAGE_TYPES.TREE_ACTION, {
+          type: TREE_ACTIONS.ADD_CHILD_TAB,
+          parentTabId: tabId
+        });
+        return;
+      }
+      if (action === "close-tab") {
+        const tree = currentWindowTree();
+        if (!tree) {
+          return;
+        }
+        const nId = nodeId(tabId);
+        const node = tree.nodes[nId];
+        if (!node) {
+          return;
+        }
+        const closesSubtree = node.childNodeIds.length > 0 && !!node.collapsed;
+        if (!closesSubtree) {
+          await requestClose({
+            kind: "single",
+            tabId,
+            includeDescendants: false
+          }, 1, false);
+          return;
+        }
+        const plan = buildClosePlan(tree, [tabId]);
+        if (!plan.rootTabIds.length) {
+          return;
+        }
+        await requestClose({
+          kind: "single",
+          tabId: plan.rootTabIds[0],
+          includeDescendants: true
+        }, plan.totalTabs, false);
+        return;
+      }
+      return;
+    }
+
+    const header = event.target.closest(".group-header[data-group-id]");
+    if (header) {
+      const groupId = Number(header.dataset.groupId);
+      const windowId = Number(header.dataset.windowId);
+      if (Number.isInteger(groupId)) {
+        await send(MESSAGE_TYPES.TREE_ACTION, {
+          type: TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE,
+          groupId,
+          windowId: Number.isInteger(windowId) ? windowId : currentWindowTree()?.windowId
+        });
+      }
+      return;
+    }
+
+    const row = event.target.closest(".tree-row[data-tab-id]");
+    if (row) {
+      const tabId = Number(row.dataset.tabId);
+      if (Number.isFinite(tabId)) {
+        await onRowClicked(event, tabId);
+      }
+    }
+  });
+
+  dom.treeRoot.addEventListener("contextmenu", (event) => {
+    const header = event.target.closest(".group-header[data-group-id]");
+    if (header) {
+      const groupId = Number(header.dataset.groupId);
+      const windowId = Number(header.dataset.windowId);
+      openGroupContextMenu(event, groupId, Number.isInteger(windowId) ? windowId : currentWindowTree()?.windowId);
+      return;
+    }
+    const row = event.target.closest(".tree-row[data-tab-id]");
+    if (row) {
+      const tabId = Number(row.dataset.tabId);
+      if (Number.isFinite(tabId)) {
+        openTabContextMenu(event, tabId);
+      }
+    }
+  });
+
+  dom.treeRoot.addEventListener("focusin", (event) => {
+    const row = event.target.closest(".tree-row[data-tab-id]");
+    if (row) {
+      const tabId = Number(row.dataset.tabId);
+      if (Number.isFinite(tabId)) {
+        state.focusedTabId = tabId;
+        setTreeRowTabStop(tabId);
+      }
+    }
+  });
+
+  dom.treeRoot.addEventListener("keydown", async (event) => {
+    const header = event.target.closest(".group-header[data-group-id]");
+    if (header) {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      event.preventDefault();
+      const groupId = Number(header.dataset.groupId);
+      const windowId = Number(header.dataset.windowId);
+      if (Number.isInteger(groupId)) {
+        await send(MESSAGE_TYPES.TREE_ACTION, {
+          type: TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE,
+          groupId,
+          windowId: Number.isInteger(windowId) ? windowId : currentWindowTree()?.windowId
+        });
+      }
+      return;
+    }
+
+    const row = event.target.closest(".tree-row[data-tab-id]");
+    if (!row) {
+      return;
+    }
+    const tabId = Number(row.dataset.tabId);
+    if (!Number.isFinite(tabId)) {
+      return;
+    }
+
+    const ordered = visibleTabIdsInOrder();
+    const currentIndex = ordered.indexOf(tabId);
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (currentIndex >= 0 && currentIndex < ordered.length - 1) {
+        focusTreeRow(ordered[currentIndex + 1]);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (currentIndex > 0) {
+        focusTreeRow(ordered[currentIndex - 1]);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      const liveTree = currentWindowTree();
+      const liveNode = liveTree?.nodes[nodeId(tabId)];
+      if (!liveNode) {
+        return;
+      }
+      if (liveNode.childNodeIds.length && liveNode.collapsed) {
+        await send(MESSAGE_TYPES.TREE_ACTION, {
+          type: TREE_ACTIONS.TOGGLE_COLLAPSE,
+          tabId
+        });
+        return;
+      }
+      const firstChildNodeId = liveNode.childNodeIds[0];
+      const firstChildTabId = liveTree?.nodes[firstChildNodeId]?.tabId;
+      if (Number.isFinite(firstChildTabId)) {
+        focusTreeRow(firstChildTabId);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      const liveTree = currentWindowTree();
+      const liveNode = liveTree?.nodes[nodeId(tabId)];
+      if (!liveNode) {
+        return;
+      }
+      if (liveNode.childNodeIds.length && !liveNode.collapsed) {
+        await send(MESSAGE_TYPES.TREE_ACTION, {
+          type: TREE_ACTIONS.TOGGLE_COLLAPSE,
+          tabId
+        });
+        return;
+      }
+      const parentTabId = liveTree?.nodes[liveNode.parentNodeId]?.tabId;
+      if (Number.isFinite(parentTabId)) {
+        focusTreeRow(parentTabId);
+      }
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") {
+      event.preventDefault();
+      await onRowClicked({ metaKey: false, ctrlKey: false, shiftKey: false }, tabId);
+      return;
+    }
+
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      event.preventDefault();
+      const rect = row.getBoundingClientRect();
+      openTabContextMenu({
+        preventDefault() {},
+        stopPropagation() {},
+        clientX: Math.round(rect.left + Math.min(24, rect.width / 2)),
+        clientY: Math.round(rect.top + rect.height / 2)
+      }, tabId);
+    }
+  });
+
+  dom.treeRoot.addEventListener("dragstart", (event) => {
+    const header = event.target.closest(".group-header[data-group-id]");
+    if (header) {
+      const groupId = Number(header.dataset.groupId);
+      state.draggingGroupId = groupId;
+      state.draggingTabIds = [];
+      resetInsideDropHover();
+      stopAutoScroll();
+      setDragTarget(null, null);
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.dropEffect = "move";
+        event.dataTransfer.setData("text/plain", `group:${groupId}`);
+      }
+      header.classList.add("dragging");
+      updateSearchDropAffordance();
+      return;
+    }
+
+    const row = event.target.closest(".tree-row[data-tab-id]");
+    if (!row) {
+      return;
+    }
+    const tabId = Number(row.dataset.tabId);
+    if (!Number.isFinite(tabId)) {
+      return;
+    }
+    if (state.draggingGroupId) {
+      event.preventDefault();
+      return;
+    }
+
+    const selection = state.selectedTabIds.has(tabId) && state.selectedTabIds.size > 1
+      ? selectedTabIdsArray()
+      : [tabId];
+
+    state.draggingTabIds = selection;
+    resetInsideDropHover();
+    stopAutoScroll();
+    setDragTarget(null, null);
+
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.dropEffect = "move";
+      event.dataTransfer.setData("text/plain", selection.join(","));
+    }
+    row.classList.add("dragging");
+    updateSearchDropAffordance();
+  });
+
+  dom.treeRoot.addEventListener("dragend", (event) => {
+    const header = event.target.closest(".group-header[data-group-id]");
+    if (header) {
+      state.draggingGroupId = null;
+      resetInsideDropHover();
+      stopAutoScroll();
+      header.classList.remove("dragging");
+      clearDropClasses();
+      return;
+    }
+
+    const row = event.target.closest(".tree-row[data-tab-id]");
+    if (row) {
+      state.draggingTabIds = [];
+      resetInsideDropHover();
+      stopAutoScroll();
+      row.classList.remove("dragging");
+      clearDropClasses();
+    }
+  });
+
+  dom.treeRoot.addEventListener("dragover", (event) => {
+    const tree = currentWindowTree();
+    if (!tree) {
+      return;
+    }
+
+    const header = event.target.closest(".group-header[data-group-id]");
+    if (header) {
+      if (!Number.isInteger(state.draggingGroupId)) {
+        return;
+      }
+      event.preventDefault();
+      maybeAutoScroll(event.clientY);
+      const groupId = Number(header.dataset.groupId);
+      const position = getDropPosition(event, header, { allowInside: false });
+      const valid = canDropGroup(tree, state.draggingGroupId, { targetGroupId: groupId });
+      setDragTarget({
+        kind: "group",
+        groupId,
+        position,
+        valid
+      }, header);
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = valid ? "move" : "none";
+      }
+      return;
+    }
+
+    const row = event.target.closest(".tree-row[data-tab-id]");
+    if (!row) {
+      return;
+    }
+
+    if (!state.draggingTabIds.length && !Number.isInteger(state.draggingGroupId)) {
+      return;
+    }
+    event.preventDefault();
+    maybeAutoScroll(event.clientY);
+
+    const tabId = Number(row.dataset.tabId);
+    if (!Number.isFinite(tabId)) {
+      return;
+    }
+    const node = tree.nodes[nodeId(tabId)];
+    if (!node) {
+      return;
+    }
+
+    if (Number.isInteger(state.draggingGroupId)) {
+      resetInsideDropHover();
+      const position = getDropPosition(event, row, { allowInside: false });
+      const valid = canDropGroup(tree, state.draggingGroupId, { targetGroupId: node.groupId, targetTabId: tabId });
+      setDragTarget({
+        kind: "tab",
+        tabId,
+        position,
+        valid
+      }, row);
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = valid ? "move" : "none";
+      }
+      return;
+    }
+
+    if (!state.draggingTabIds.length) {
+      return;
+    }
+
+    if (state.draggingTabIds.includes(tabId)) {
+      resetInsideDropHover();
+      const position = getDropPosition(event, row, { allowInside: true });
+      setDragTarget({
+        kind: "tab",
+        tabId,
+        position,
+        valid: false
+      }, row);
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "none";
+      }
+      return;
+    }
+
+    const intent = resolveTabDropIntent(tree, row, tabId, event);
+    setDragTarget({
+      kind: "tab",
+      tabId,
+      position: intent.position,
+      valid: intent.valid
+    }, row);
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = intent.valid ? "move" : "none";
+    }
+  });
+
+  dom.treeRoot.addEventListener("drop", async (event) => {
+    const tree = currentWindowTree();
+    if (!tree) {
+      return;
+    }
+
+    const header = event.target.closest(".group-header[data-group-id]");
+    if (header) {
+      if (!Number.isInteger(state.draggingGroupId)) {
+        return;
+      }
+      event.preventDefault();
+      stopAutoScroll();
+      const groupId = Number(header.dataset.groupId);
+      const position = getDropPosition(event, header, { allowInside: false });
+      const valid = canDropGroup(tree, state.draggingGroupId, { targetGroupId: groupId });
+      setDragTarget({
+        kind: "group",
+        groupId,
+        position,
+        valid
+      }, header);
+      if (!valid) {
+        return;
+      }
+      await moveGroupBlockToTarget(tree, { kind: "group", groupId }, position);
+      state.draggingGroupId = null;
+      clearDropClasses();
+      return;
+    }
+
+    const row = event.target.closest(".tree-row[data-tab-id]");
+    if (!row) {
+      return;
+    }
+
+    if (!state.draggingTabIds.length && !Number.isInteger(state.draggingGroupId)) {
+      return;
+    }
+    event.preventDefault();
+    stopAutoScroll();
+
+    const tabId = Number(row.dataset.tabId);
+    if (!Number.isFinite(tabId)) {
+      return;
+    }
+    const node = tree.nodes[nodeId(tabId)];
+    if (!node) {
+      return;
+    }
+
+    if (Number.isInteger(state.draggingGroupId)) {
+      resetInsideDropHover();
+      const position = getDropPosition(event, row, { allowInside: false });
+      const valid = canDropGroup(tree, state.draggingGroupId, { targetGroupId: node.groupId, targetTabId: tabId });
+      setDragTarget({
+        kind: "tab",
+        tabId,
+        position,
+        valid
+      }, row);
+      if (!valid) {
+        return;
+      }
+      await moveGroupBlockToTarget(tree, { kind: "tab", tabId }, position);
+      state.draggingGroupId = null;
+      clearDropClasses();
+      return;
+    }
+
+    if (!state.draggingTabIds.length || state.draggingTabIds.includes(tabId)) {
+      return;
+    }
+
+    const intent = resolveTabDropIntent(tree, row, tabId, event);
+    setDragTarget({
+      kind: "tab",
+      tabId,
+      position: intent.position,
+      valid: intent.valid
+    }, row);
+    if (!intent.valid) {
+      return;
+    }
+
+    const payload = buildDropPayload(tree, state.draggingTabIds, tabId, intent.position);
+    if (!payload) {
+      return;
+    }
+
+    await send(MESSAGE_TYPES.TREE_ACTION, payload);
+    state.draggingTabIds = [];
+    resetInsideDropHover();
+    clearDropClasses();
+  });
+
+  // --- End delegated tree-root event handlers ---
 
   dom.addChildGlobal.addEventListener("click", async () => {
     const activeTabId = currentActiveTabId();
