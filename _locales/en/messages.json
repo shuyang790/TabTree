@@ -41,6 +41,36 @@
   "settingsPanelTitle": {
     "message": "Appearance & Behavior"
   },
+  "settingsAppearanceTitle": {
+    "message": "Appearance"
+  },
+  "settingsAppearanceDescription": {
+    "message": "Theme, spacing, and typography."
+  },
+  "resetAppearance": {
+    "message": "Reset Appearance"
+  },
+  "advancedAppearance": {
+    "message": "Advanced appearance"
+  },
+  "settingsBehaviorTitle": {
+    "message": "Behavior"
+  },
+  "settingsBehaviorDescription": {
+    "message": "Adjust what is shown and how you interact."
+  },
+  "resetBehavior": {
+    "message": "Reset Behavior"
+  },
+  "settingsSafetyTitle": {
+    "message": "Safety"
+  },
+  "settingsSafetyDescription": {
+    "message": "Control confirmation prompts before destructive actions."
+  },
+  "resetSafety": {
+    "message": "Reset Safety"
+  },
   "close": {
     "message": "Close"
   },
@@ -131,6 +161,9 @@
   "addToExistingTabGroup": {
     "message": "Add to existing tab group"
   },
+  "moreGroups": {
+    "message": "More groups..."
+  },
   "moveSelectedToTopLevel": {
     "message": "Move selected to top-level"
   },
@@ -184,6 +217,9 @@
   },
   "colorOrange": {
     "message": "Orange"
+  },
+  "setGroupColorTo": {
+    "message": "Set group color to $1"
   },
   "confirmCloseMessage": {
     "message": "This will close $1 tabs. Continue?"

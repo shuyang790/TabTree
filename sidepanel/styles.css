@@ -569,7 +569,41 @@ button:focus-visible {
 
 .settings-form {
   display: grid;
+  gap: 12px;
+}
+
+.settings-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-elev), var(--bg) 18%);
+  padding: 10px;
+  display: grid;
   gap: 10px;
+}
+
+.settings-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.settings-card-head h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.settings-card-head p {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.settings-reset-btn {
+  height: 26px;
+  font-size: 0.74rem;
+  white-space: nowrap;
 }
 
 .settings-form label {
@@ -603,6 +637,37 @@ button:focus-visible {
 .settings-form .checkbox input {
   width: 14px;
   height: 14px;
+}
+
+.settings-advanced {
+  border: 1px dashed color-mix(in srgb, var(--border), var(--accent) 24%);
+  border-radius: calc(var(--radius) - 2px);
+  background: color-mix(in srgb, var(--bg-elev), var(--bg) 30%);
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.settings-advanced > summary {
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  list-style: none;
+}
+
+.settings-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-advanced > summary::after {
+  content: "▸";
+  margin-left: 6px;
+  color: var(--text-muted);
+}
+
+.settings-advanced[open] > summary::after {
+  content: "▾";
 }
 
 .confirm-overlay {
@@ -663,8 +728,8 @@ button:focus-visible {
 }
 
 .context-menu.context-menu-group {
-  min-width: 124px;
-  max-width: 146px;
+  min-width: 192px;
+  max-width: min(240px, calc(100vw - 18px));
 }
 
 .context-menu[hidden] {
@@ -748,14 +813,21 @@ button:focus-visible {
   min-width: 120px;
 }
 
-.context-submenu:hover .context-submenu-panel,
-.context-submenu:focus-within .context-submenu-panel,
 .context-submenu.open .context-submenu-panel {
   display: grid;
 }
 
-.context-color-item {
-  gap: 8px;
+.context-menu-section-label {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 7px 2px;
+}
+
+.context-inline-group-list {
+  display: grid;
+  gap: 1px;
 }
 
 .context-group-item {
@@ -786,9 +858,40 @@ button:focus-visible {
   background: var(--group-color);
 }
 
-.context-color-item.active::after {
+.context-more-groups-trigger {
+  font-size: 0.8rem;
+}
+
+.context-color-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 2px;
+}
+
+.context-color-swatch {
+  min-height: 30px;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.context-color-label {
+  font-size: 0.72rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-color-swatch.active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent), transparent 42%);
+  background: color-mix(in srgb, var(--accent), transparent 88%);
+}
+
+.context-color-swatch.active::after {
   content: "✓";
-  margin-left: auto;
+  margin-left: 2px;
   color: var(--accent);
 }
 

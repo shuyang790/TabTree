@@ -294,6 +294,9 @@ test.describe("README screenshots", () => {
     await sidePanelPage.locator('select[name="themePresetLight"]').selectOption("everforest-light");
     await sidePanelPage.locator('select[name="themePresetDark"]').selectOption("catppuccin-mocha");
     await sidePanelPage.locator('select[name="density"]').selectOption("cozy");
+    await sidePanelPage.locator("#appearance-advanced").evaluate((details) => {
+      details.open = true;
+    });
     await sidePanelPage.locator('input[name="fontScale"]').fill("1.1");
 
     await expect(sidePanelPage.locator('select[name="density"]')).toHaveValue("cozy");

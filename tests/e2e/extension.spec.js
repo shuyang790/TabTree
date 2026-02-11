@@ -34,6 +34,27 @@ test.describe("TabTree extension", () => {
     await expect(sidePanelPage.locator('select[name="density"]')).toHaveValue("compact");
   });
 
+  test("settings section reset buttons restore defaults for their section", async ({ sidePanelPage }) => {
+    await sidePanelPage.locator("#open-settings").click();
+
+    const densitySelect = sidePanelPage.locator('select[name="density"]');
+    const showFavicons = sidePanelPage.locator('input[name="showFavicons"]');
+    const confirmCloseBatch = sidePanelPage.locator('input[name="confirmCloseBatch"]');
+
+    await densitySelect.selectOption("compact");
+    await showFavicons.uncheck();
+    await confirmCloseBatch.uncheck();
+
+    await sidePanelPage.locator("#reset-appearance-settings").click();
+    await expect(densitySelect).toHaveValue("comfortable");
+
+    await sidePanelPage.locator("#reset-behavior-settings").click();
+    await expect(showFavicons).toBeChecked();
+
+    await sidePanelPage.locator("#reset-safety-settings").click();
+    await expect(confirmCloseBatch).toBeChecked();
+  });
+
   test("add child action opens a new tab", async ({ context, sidePanelPage }) => {
     const beforeCount = context.pages().length;
 
@@ -159,10 +180,9 @@ test.describe("TabTree extension", () => {
     await expect(renamedHeader).toBeVisible();
 
     await renamedHeader.click({ button: "right" });
-    const colorTrigger = sidePanelPage.locator('.context-submenu-trigger[data-action="group-color"]');
-    await expect(colorTrigger).toBeVisible();
-    await colorTrigger.hover();
-    await sidePanelPage.locator('.context-color-item[data-color="red"]').click();
+    const redColor = sidePanelPage.locator('.context-color-swatch[data-color="red"]');
+    await expect(redColor).toBeVisible();
+    await redColor.click();
 
     const renamedGroupId = Number(await renamedHeader.getAttribute("data-group-id"));
     expect(Number.isInteger(renamedGroupId)).toBeTruthy();
@@ -259,10 +279,9 @@ test.describe("TabTree extension", () => {
 
     const applyColorViaContextMenu = async (color) => {
       await groupHeader.click({ button: "right" });
-      const colorTrigger = sidePanelPage.locator('.context-submenu-trigger[data-action="group-color"]');
-      await expect(colorTrigger).toBeVisible();
-      await colorTrigger.hover();
-      await sidePanelPage.locator(`.context-color-item[data-color="${color}"]`).click();
+      const colorButton = sidePanelPage.locator(`.context-color-swatch[data-color="${color}"]`);
+      await expect(colorButton).toBeVisible();
+      await colorButton.click();
     };
 
     await applyColorViaContextMenu("blue");
@@ -311,10 +330,9 @@ test.describe("TabTree extension", () => {
     expect(Number.isInteger(groupId)).toBeTruthy();
 
     await groupHeader.click({ button: "right" });
-    const colorTrigger = sidePanelPage.locator('.context-submenu-trigger[data-action="group-color"]');
-    await expect(colorTrigger).toBeVisible();
-    await colorTrigger.hover();
-    await sidePanelPage.locator('.context-color-item[data-color="orange"]').click();
+    const orangeColor = sidePanelPage.locator('.context-color-swatch[data-color="orange"]');
+    await expect(orangeColor).toBeVisible();
+    await orangeColor.click();
 
     await expect.poll(async () => sidePanelPage.evaluate(async (id) => {
       const group = await chrome.tabGroups.get(id);
@@ -339,7 +357,7 @@ test.describe("TabTree extension", () => {
     await tabB.close().catch(() => {});
   });
 
-  test("tab context menu can add selected tabs to an existing tab group via submenu", async ({ context, sidePanelPage }) => {
+  test("tab context menu can add selected tabs to an existing tab group via inline list", async ({ context, sidePanelPage }) => {
     const seedA = await createTitledTab(context, "Existing Group Seed A");
     const seedB = await createTitledTab(context, "Existing Group Seed B");
     const moveA = await createTitledTab(context, "Move To Existing A");
@@ -377,19 +395,8 @@ test.describe("TabTree extension", () => {
     await expect(contextMenu).toBeVisible();
     await expect(sidePanelPage.locator('.context-menu-item[data-action="group-selected-new"]')).toHaveText("Add to new tab group");
 
-    const existingTrigger = sidePanelPage
-      .locator(".context-submenu-trigger")
-      .filter({ hasText: "Add to existing tab group" })
-      .first();
-    await expect(existingTrigger).toBeVisible();
-    await existingTrigger.click();
-
-    const existingSubmenu = existingTrigger.locator("xpath=ancestor::div[contains(@class,'context-submenu')][1]");
-    const existingPanel = existingSubmenu.locator(".context-submenu-panel");
     await expect(contextMenu).toBeVisible();
-    await expect(existingPanel).toBeVisible();
-
-    await existingPanel.locator(`.context-group-item[data-group-id="${targetGroupId}"]`).click();
+    await sidePanelPage.locator(`.context-group-item[data-group-id="${targetGroupId}"]`).first().click();
 
     const windowId = await sidePanelPage.evaluate(async () => (await chrome.windows.getCurrent()).id);
     await expect.poll(async () => {

@@ -70,131 +70,186 @@
       </div>
 
       <form id="settings-form" class="settings-form">
-        <label>
-          <span data-i18n="lightAppearance">Light Appearance</span>
-          <select name="themePresetLight">
-            <option value="base-light">Base Light</option>
-            <optgroup label="Catppuccin">
-              <option value="catppuccin-latte">Catppuccin — Latte</option>
-              <option value="catppuccin-frappe">Catppuccin — Frappe</option>
-              <option value="catppuccin-macchiato">Catppuccin — Macchiato</option>
-              <option value="catppuccin-mocha">Catppuccin — Mocha</option>
-            </optgroup>
-            <optgroup label="Everforest">
-              <option value="everforest-light">Everforest — Light</option>
-              <option value="everforest-dark">Everforest — Dark</option>
-            </optgroup>
-            <optgroup label="Gruvbox">
-              <option value="gruvbox-light">Gruvbox — Light</option>
-              <option value="gruvbox-dark">Gruvbox — Dark</option>
-            </optgroup>
-            <optgroup label="Tokyo Night">
-              <option value="tokyonight-day">Tokyo Night — Day</option>
-              <option value="tokyonight-night">Tokyo Night — Night</option>
-            </optgroup>
-            <optgroup label="Kanagawa">
-              <option value="kanagawa-lotus">Kanagawa — Lotus</option>
-              <option value="kanagawa-wave">Kanagawa — Wave</option>
-            </optgroup>
-            <optgroup label="One">
-              <option value="one-light">One — Light</option>
-              <option value="one-dark">One — Dark</option>
-            </optgroup>
-          </select>
-        </label>
+        <section class="settings-card" data-settings-section="appearance">
+          <header class="settings-card-head">
+            <div>
+              <h3 data-i18n="settingsAppearanceTitle">Appearance</h3>
+              <p data-i18n="settingsAppearanceDescription">Theme, spacing, and typography.</p>
+            </div>
+            <button
+              id="reset-appearance-settings"
+              class="btn btn-ghost settings-reset-btn"
+              type="button"
+              data-i18n="resetAppearance"
+            >
+              Reset Appearance
+            </button>
+          </header>
 
-        <label>
-          <span data-i18n="darkAppearance">Dark Appearance</span>
-          <select name="themePresetDark">
-            <option value="base-dark">Base Dark</option>
-            <optgroup label="Catppuccin">
-              <option value="catppuccin-latte">Catppuccin — Latte</option>
-              <option value="catppuccin-frappe">Catppuccin — Frappe</option>
-              <option value="catppuccin-macchiato">Catppuccin — Macchiato</option>
-              <option value="catppuccin-mocha">Catppuccin — Mocha</option>
-            </optgroup>
-            <optgroup label="Everforest">
-              <option value="everforest-light">Everforest — Light</option>
-              <option value="everforest-dark">Everforest — Dark</option>
-            </optgroup>
-            <optgroup label="Gruvbox">
-              <option value="gruvbox-light">Gruvbox — Light</option>
-              <option value="gruvbox-dark">Gruvbox — Dark</option>
-            </optgroup>
-            <optgroup label="Tokyo Night">
-              <option value="tokyonight-day">Tokyo Night — Day</option>
-              <option value="tokyonight-night">Tokyo Night — Night</option>
-            </optgroup>
-            <optgroup label="Kanagawa">
-              <option value="kanagawa-lotus">Kanagawa — Lotus</option>
-              <option value="kanagawa-wave">Kanagawa — Wave</option>
-            </optgroup>
-            <optgroup label="One">
-              <option value="one-light">One — Light</option>
-              <option value="one-dark">One — Dark</option>
-            </optgroup>
-          </select>
-        </label>
+          <label>
+            <span data-i18n="lightAppearance">Light Appearance</span>
+            <select name="themePresetLight">
+              <option value="base-light">Base Light</option>
+              <optgroup label="Catppuccin">
+                <option value="catppuccin-latte">Catppuccin — Latte</option>
+                <option value="catppuccin-frappe">Catppuccin — Frappe</option>
+                <option value="catppuccin-macchiato">Catppuccin — Macchiato</option>
+                <option value="catppuccin-mocha">Catppuccin — Mocha</option>
+              </optgroup>
+              <optgroup label="Everforest">
+                <option value="everforest-light">Everforest — Light</option>
+                <option value="everforest-dark">Everforest — Dark</option>
+              </optgroup>
+              <optgroup label="Gruvbox">
+                <option value="gruvbox-light">Gruvbox — Light</option>
+                <option value="gruvbox-dark">Gruvbox — Dark</option>
+              </optgroup>
+              <optgroup label="Tokyo Night">
+                <option value="tokyonight-day">Tokyo Night — Day</option>
+                <option value="tokyonight-night">Tokyo Night — Night</option>
+              </optgroup>
+              <optgroup label="Kanagawa">
+                <option value="kanagawa-lotus">Kanagawa — Lotus</option>
+                <option value="kanagawa-wave">Kanagawa — Wave</option>
+              </optgroup>
+              <optgroup label="One">
+                <option value="one-light">One — Light</option>
+                <option value="one-dark">One — Dark</option>
+              </optgroup>
+            </select>
+          </label>
 
-        <label>
-          <span data-i18n="accentColor">Accent Color</span>
-          <input type="color" name="accentColor" />
-        </label>
+          <label>
+            <span data-i18n="darkAppearance">Dark Appearance</span>
+            <select name="themePresetDark">
+              <option value="base-dark">Base Dark</option>
+              <optgroup label="Catppuccin">
+                <option value="catppuccin-latte">Catppuccin — Latte</option>
+                <option value="catppuccin-frappe">Catppuccin — Frappe</option>
+                <option value="catppuccin-macchiato">Catppuccin — Macchiato</option>
+                <option value="catppuccin-mocha">Catppuccin — Mocha</option>
+              </optgroup>
+              <optgroup label="Everforest">
+                <option value="everforest-light">Everforest — Light</option>
+                <option value="everforest-dark">Everforest — Dark</option>
+              </optgroup>
+              <optgroup label="Gruvbox">
+                <option value="gruvbox-light">Gruvbox — Light</option>
+                <option value="gruvbox-dark">Gruvbox — Dark</option>
+              </optgroup>
+              <optgroup label="Tokyo Night">
+                <option value="tokyonight-day">Tokyo Night — Day</option>
+                <option value="tokyonight-night">Tokyo Night — Night</option>
+              </optgroup>
+              <optgroup label="Kanagawa">
+                <option value="kanagawa-lotus">Kanagawa — Lotus</option>
+                <option value="kanagawa-wave">Kanagawa — Wave</option>
+              </optgroup>
+              <optgroup label="One">
+                <option value="one-light">One — Light</option>
+                <option value="one-dark">One — Dark</option>
+              </optgroup>
+            </select>
+          </label>
 
-        <label>
-          <span data-i18n="density">Density</span>
-          <select name="density">
-            <option value="compact" data-i18n="densityCompact">Compact</option>
-            <option value="comfortable" data-i18n="densityComfortable">Comfortable</option>
-            <option value="cozy" data-i18n="densityCozy">Cozy</option>
-            <option value="spacious" data-i18n="densitySpacious">Spacious</option>
-          </select>
-        </label>
+          <label>
+            <span data-i18n="accentColor">Accent Color</span>
+            <input type="color" name="accentColor" />
+          </label>
 
-        <label>
-          <span data-i18n="fontScale">Font Scale</span>
-          <input type="range" name="fontScale" min="0.9" max="1.2" step="0.05" />
-        </label>
+          <label>
+            <span data-i18n="density">Density</span>
+            <select name="density">
+              <option value="compact" data-i18n="densityCompact">Compact</option>
+              <option value="comfortable" data-i18n="densityComfortable">Comfortable</option>
+              <option value="cozy" data-i18n="densityCozy">Cozy</option>
+              <option value="spacious" data-i18n="densitySpacious">Spacious</option>
+            </select>
+          </label>
 
-        <label>
-          <span data-i18n="indentWidth">Indent Width</span>
-          <input type="range" name="indentPx" min="10" max="28" step="1" />
-        </label>
+          <details class="settings-advanced" id="appearance-advanced">
+            <summary data-i18n="advancedAppearance">Advanced appearance</summary>
 
-        <label>
-          <span data-i18n="cornerRadius">Corner Radius</span>
-          <input type="range" name="radiusPx" min="2" max="16" step="1" />
-        </label>
+            <label>
+              <span data-i18n="fontScale">Font Scale</span>
+              <input type="range" name="fontScale" min="0.9" max="1.2" step="0.05" />
+            </label>
 
-        <label class="checkbox">
-          <input type="checkbox" name="showFavicons" />
-          <span data-i18n="showFavicons">Show favicons</span>
-        </label>
+            <label>
+              <span data-i18n="indentWidth">Indent Width</span>
+              <input type="range" name="indentPx" min="10" max="28" step="1" />
+            </label>
 
-        <label class="checkbox">
-          <input type="checkbox" name="showCloseButton" />
-          <span data-i18n="showCloseButtons">Show close buttons</span>
-        </label>
+            <label>
+              <span data-i18n="cornerRadius">Corner Radius</span>
+              <input type="range" name="radiusPx" min="2" max="16" step="1" />
+            </label>
+          </details>
+        </section>
 
-        <label class="checkbox">
-          <input type="checkbox" name="showGroupHeaders" />
-          <span data-i18n="showGroupSubtrees">Show group subtrees</span>
-        </label>
+        <section class="settings-card" data-settings-section="behavior">
+          <header class="settings-card-head">
+            <div>
+              <h3 data-i18n="settingsBehaviorTitle">Behavior</h3>
+              <p data-i18n="settingsBehaviorDescription">Adjust what is shown and how you interact.</p>
+            </div>
+            <button
+              id="reset-behavior-settings"
+              class="btn btn-ghost settings-reset-btn"
+              type="button"
+              data-i18n="resetBehavior"
+            >
+              Reset Behavior
+            </button>
+          </header>
 
-        <label class="checkbox">
-          <input type="checkbox" name="shortcutHintsEnabled" />
-          <span data-i18n="showShortcutHints">Show shortcut hints</span>
-        </label>
+          <label class="checkbox">
+            <input type="checkbox" name="showFavicons" />
+            <span data-i18n="showFavicons">Show favicons</span>
+          </label>
 
-        <label class="checkbox">
-          <input type="checkbox" name="confirmCloseSubtree" />
-          <span data-i18n="confirmBeforeClosingTree">Confirm before closing tree (2+ tabs)</span>
-        </label>
+          <label class="checkbox">
+            <input type="checkbox" name="showCloseButton" />
+            <span data-i18n="showCloseButtons">Show close buttons</span>
+          </label>
 
-        <label class="checkbox">
-          <input type="checkbox" name="confirmCloseBatch" />
-          <span data-i18n="confirmBeforeClosingBatch">Confirm before closing selected tabs (2+ tabs)</span>
-        </label>
+          <label class="checkbox">
+            <input type="checkbox" name="showGroupHeaders" />
+            <span data-i18n="showGroupSubtrees">Show group subtrees</span>
+          </label>
+
+          <label class="checkbox">
+            <input type="checkbox" name="shortcutHintsEnabled" />
+            <span data-i18n="showShortcutHints">Show shortcut hints</span>
+          </label>
+        </section>
+
+        <section class="settings-card" data-settings-section="safety">
+          <header class="settings-card-head">
+            <div>
+              <h3 data-i18n="settingsSafetyTitle">Safety</h3>
+              <p data-i18n="settingsSafetyDescription">Control confirmation prompts before destructive actions.</p>
+            </div>
+            <button
+              id="reset-safety-settings"
+              class="btn btn-ghost settings-reset-btn"
+              type="button"
+              data-i18n="resetSafety"
+            >
+              Reset Safety
+            </button>
+          </header>
+
+          <label class="checkbox">
+            <input type="checkbox" name="confirmCloseSubtree" />
+            <span data-i18n="confirmBeforeClosingTree">Confirm before closing tree (2+ tabs)</span>
+          </label>
+
+          <label class="checkbox">
+            <input type="checkbox" name="confirmCloseBatch" />
+            <span data-i18n="confirmBeforeClosingBatch">Confirm before closing selected tabs (2+ tabs)</span>
+          </label>
+        </section>
       </form>
     </aside>
 

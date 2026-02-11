@@ -41,6 +41,36 @@
   "settingsPanelTitle": {
     "message": "外觀與行為"
   },
+  "settingsAppearanceTitle": {
+    "message": "外觀"
+  },
+  "settingsAppearanceDescription": {
+    "message": "主題、間距與排版。"
+  },
+  "resetAppearance": {
+    "message": "重設外觀"
+  },
+  "advancedAppearance": {
+    "message": "進階外觀"
+  },
+  "settingsBehaviorTitle": {
+    "message": "行為"
+  },
+  "settingsBehaviorDescription": {
+    "message": "調整顯示內容與互動方式。"
+  },
+  "resetBehavior": {
+    "message": "重設行為"
+  },
+  "settingsSafetyTitle": {
+    "message": "安全"
+  },
+  "settingsSafetyDescription": {
+    "message": "控制破壞性操作前的確認提示。"
+  },
+  "resetSafety": {
+    "message": "重設安全"
+  },
   "close": {
     "message": "關閉"
   },
@@ -131,6 +161,9 @@
   "addToExistingTabGroup": {
     "message": "加入現有分頁群組"
   },
+  "moreGroups": {
+    "message": "更多分頁群組..."
+  },
   "moveSelectedToTopLevel": {
     "message": "將已選項目移到頂層"
   },
@@ -184,6 +217,9 @@
   },
   "colorOrange": {
     "message": "橘色"
+  },
+  "setGroupColorTo": {
+    "message": "將分頁群組顏色設為 $1"
   },
   "confirmCloseMessage": {
     "message": "這將關閉 $1 個分頁。要繼續嗎？"

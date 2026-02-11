@@ -1,4 +1,4 @@
-import { MESSAGE_TYPES, TREE_ACTIONS } from "../shared/constants.js";
+import { DEFAULT_SETTINGS, MESSAGE_TYPES, TREE_ACTIONS } from "../shared/constants.js";
 import { applyRuntimeStateUpdate } from "./statePatch.js";
 
 const GROUP_COLOR_MAP = {
@@ -24,6 +24,13 @@ const GROUP_COLOR_OPTIONS = [
   { value: "cyan", labelKey: "colorCyan" },
   { value: "orange", labelKey: "colorOrange" }
 ];
+
+const CONTEXT_INLINE_GROUP_LIMIT = 5;
+const SETTINGS_SECTION_KEYS = {
+  appearance: ["themePresetLight", "themePresetDark", "accentColor", "density", "fontScale", "indentPx", "radiusPx"],
+  behavior: ["showFavicons", "showCloseButton", "showGroupHeaders", "shortcutHintsEnabled"],
+  safety: ["confirmCloseSubtree", "confirmCloseBatch"]
+};
 
 const BASE_THEME_TOKENS = {
   light: {
@@ -350,6 +357,9 @@ const dom = {
   settingsPanel: document.getElementById("settings-panel"),
   openSettings: document.getElementById("open-settings"),
   closeSettings: document.getElementById("close-settings"),
+  resetAppearanceSettings: document.getElementById("reset-appearance-settings"),
+  resetBehaviorSettings: document.getElementById("reset-behavior-settings"),
+  resetSafetySettings: document.getElementById("reset-safety-settings"),
   settingsForm: document.getElementById("settings-form"),
   hintBar: document.getElementById("hint-bar"),
   confirmOverlay: document.getElementById("confirm-overlay"),
@@ -649,6 +659,44 @@ function hydrateSettingsForm() {
       element.value = String(state.settings[element.name]);
     }
   }
+}
+
+async function applySettingsPatch(patch) {
+  if (!state.settings || !patch || typeof patch !== "object") {
+    return;
+  }
+
+  state.settings = {
+    ...state.settings,
+    ...patch
+  };
+  render();
+
+  await send(MESSAGE_TYPES.PATCH_SETTINGS, {
+    settingsPatch: patch
+  });
+}
+
+async function resetSettingsSection(section) {
+  const keys = SETTINGS_SECTION_KEYS[section];
+  if (!Array.isArray(keys) || !state.settings) {
+    return;
+  }
+
+  const patch = {};
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, key)) {
+      continue;
+    }
+    if (state.settings[key] !== DEFAULT_SETTINGS[key]) {
+      patch[key] = DEFAULT_SETTINGS[key];
+    }
+  }
+
+  if (!Object.keys(patch).length) {
+    return;
+  }
+  await applySettingsPatch(patch);
 }
 
 function updateShortcutHint() {
@@ -1065,6 +1113,46 @@ function createContextMenuSeparator() {
   return separator;
 }
 
+function createContextMenuSectionLabel(label) {
+  const section = document.createElement("div");
+  section.className = "context-menu-section-label";
+  section.textContent = label;
+  return section;
+}
+
+function createExistingGroupMenuItem(group, disabled = false) {
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = "context-menu-item context-group-item";
+  item.setAttribute("role", "menuitem");
+  item.dataset.action = `group-selected-existing:${group.id}`;
+  item.dataset.groupId = String(group.id);
+  item.disabled = !!disabled;
+
+  const dot = document.createElement("span");
+  dot.className = "context-color-dot context-group-dot";
+  dot.style.setProperty("--group-color", GROUP_COLOR_MAP[group.color] || GROUP_COLOR_MAP.grey);
+
+  const label = document.createElement("span");
+  label.className = "context-group-label";
+  label.textContent = group.title?.trim() || t("groupFallbackName", [String(group.id)], `Group ${group.id}`);
+
+  const count = document.createElement("span");
+  count.className = "context-group-count";
+  count.textContent = String(group.tabCount);
+
+  item.append(dot, label, count);
+  item.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (item.disabled) {
+      return;
+    }
+    await executeContextMenuAction(item.dataset.action);
+  });
+
+  return item;
+}
+
 function buildTabContextMenu(tree) {
   const fragment = document.createDocumentFragment();
   const primaryNode = tree.nodes[nodeId(state.contextMenu.primaryTabId)];
@@ -1072,6 +1160,9 @@ function buildTabContextMenu(tree) {
   const closeCount = scopeTabIds.length;
   const hasGroupedTabs = scopeTabIds.some((tabId) => tree.nodes[nodeId(tabId)]?.groupId !== null);
   const existingGroups = orderedExistingGroups(tree);
+  const inlineGroups = existingGroups.slice(0, CONTEXT_INLINE_GROUP_LIMIT);
+  const overflowGroups = existingGroups.slice(CONTEXT_INLINE_GROUP_LIMIT);
+  const canAssignExistingGroup = closeCount > 0;
   const closeLabel = closeCount === 0
     ? t("closeSelectedTabsGeneric", [], "Close selected tab(s)")
     : closeCount === 1
@@ -1089,81 +1180,77 @@ function buildTabContextMenu(tree) {
       closeCount === 0 || hasGroupedTabs
     )
   );
-  const existingSubmenu = document.createElement("div");
-  existingSubmenu.className = "context-submenu";
 
-  const existingTrigger = document.createElement("button");
-  existingTrigger.type = "button";
-  existingTrigger.className = "context-menu-item context-submenu-trigger";
-  existingTrigger.setAttribute("role", "menuitem");
-  existingTrigger.textContent = t("addToExistingTabGroup", [], "Add to existing tab group");
-  existingTrigger.disabled = closeCount === 0 || existingGroups.length === 0;
-  existingTrigger.setAttribute("aria-haspopup", "menu");
-  existingTrigger.setAttribute("aria-expanded", "false");
+  if (existingGroups.length) {
+    fragment.appendChild(createContextMenuSectionLabel(t("addToExistingTabGroup", [], "Add to existing tab group")));
 
-  const existingPanel = document.createElement("div");
-  existingPanel.id = "context-submenu-existing";
-  existingPanel.className = "context-submenu-panel";
-  existingPanel.setAttribute("role", "menu");
-  existingTrigger.setAttribute("aria-controls", existingPanel.id);
+    const inlineList = document.createElement("div");
+    inlineList.className = "context-inline-group-list";
+    for (const group of inlineGroups) {
+      inlineList.appendChild(createExistingGroupMenuItem(group, !canAssignExistingGroup));
+    }
+    fragment.appendChild(inlineList);
 
-  for (const group of existingGroups) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "context-menu-item context-group-item";
-    item.setAttribute("role", "menuitem");
-    item.dataset.action = `group-selected-existing:${group.id}`;
-    item.dataset.groupId = String(group.id);
+    if (overflowGroups.length) {
+      const moreGroupsSubmenu = document.createElement("div");
+      moreGroupsSubmenu.className = "context-submenu context-inline-groups-more";
 
-    const dot = document.createElement("span");
-    dot.className = "context-color-dot context-group-dot";
-    dot.style.setProperty("--group-color", GROUP_COLOR_MAP[group.color] || GROUP_COLOR_MAP.grey);
+      const moreGroupsTrigger = document.createElement("button");
+      moreGroupsTrigger.type = "button";
+      moreGroupsTrigger.className = "context-menu-item context-submenu-trigger context-more-groups-trigger";
+      moreGroupsTrigger.setAttribute("role", "menuitem");
+      moreGroupsTrigger.textContent = t("moreGroups", [], "More groups...");
+      moreGroupsTrigger.disabled = !canAssignExistingGroup;
+      moreGroupsTrigger.setAttribute("aria-haspopup", "menu");
+      moreGroupsTrigger.setAttribute("aria-expanded", "false");
 
-    const label = document.createElement("span");
-    label.className = "context-group-label";
-    label.textContent = group.title?.trim() || t("groupFallbackName", [String(group.id)], `Group ${group.id}`);
+      const moreGroupsPanel = document.createElement("div");
+      moreGroupsPanel.id = "context-submenu-existing-more";
+      moreGroupsPanel.className = "context-submenu-panel context-inline-groups-panel";
+      moreGroupsPanel.setAttribute("role", "menu");
+      moreGroupsTrigger.setAttribute("aria-controls", moreGroupsPanel.id);
 
-    const count = document.createElement("span");
-    count.className = "context-group-count";
-    count.textContent = String(group.tabCount);
+      for (const group of overflowGroups) {
+        moreGroupsPanel.appendChild(createExistingGroupMenuItem(group, !canAssignExistingGroup));
+      }
 
-    item.append(dot, label, count);
-    item.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      await executeContextMenuAction(item.dataset.action);
-    });
-    existingPanel.appendChild(item);
+      const openMoreGroups = () => {
+        moreGroupsSubmenu.classList.add("open");
+        moreGroupsTrigger.setAttribute("aria-expanded", "true");
+        const first = moreGroupsPanel.querySelector(".context-menu-item:not([disabled])");
+        if (first) {
+          first.focus();
+        }
+      };
+
+      moreGroupsTrigger.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (moreGroupsSubmenu.classList.contains("open")) {
+          moreGroupsSubmenu.classList.remove("open");
+          moreGroupsTrigger.setAttribute("aria-expanded", "false");
+          return;
+        }
+        openMoreGroups();
+      });
+
+      moreGroupsTrigger.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowRight") {
+          return;
+        }
+        event.preventDefault();
+        openMoreGroups();
+      });
+
+      moreGroupsSubmenu.append(moreGroupsTrigger, moreGroupsPanel);
+      fragment.appendChild(moreGroupsSubmenu);
+    }
+  } else {
+    fragment.appendChild(
+      createContextMenuButton(t("addToExistingTabGroup", [], "Add to existing tab group"), "noop", true)
+    );
   }
 
-  existingTrigger.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const willOpen = !existingSubmenu.classList.contains("open");
-    existingSubmenu.classList.toggle("open", willOpen);
-    existingTrigger.setAttribute("aria-expanded", String(willOpen));
-    if (willOpen) {
-      const first = existingPanel.querySelector(".context-menu-item:not([disabled])");
-      if (first) {
-        first.focus();
-      }
-    }
-  });
-
-  existingTrigger.addEventListener("keydown", (event) => {
-    if (event.key !== "ArrowRight") {
-      return;
-    }
-    event.preventDefault();
-    existingSubmenu.classList.add("open");
-    existingTrigger.setAttribute("aria-expanded", "true");
-    const first = existingPanel.querySelector(".context-menu-item:not([disabled])");
-    if (first) {
-      first.focus();
-    }
-  });
-
-  existingSubmenu.append(existingTrigger, existingPanel);
-  fragment.appendChild(existingSubmenu);
   fragment.appendChild(createContextMenuSeparator());
   fragment.appendChild(
     createContextMenuButton(t("addChildTab", [], "Add child tab"), "add-child", !primaryNode)
@@ -1220,79 +1307,44 @@ function buildGroupContextMenu(tree) {
     fragment.appendChild(form);
   }
 
-  const submenu = document.createElement("div");
-  submenu.className = "context-submenu";
+  if (groupExists) {
+    fragment.appendChild(createContextMenuSectionLabel(t("color", [], "Color")));
+    const colorGrid = document.createElement("div");
+    colorGrid.className = "context-color-grid";
+    colorGrid.setAttribute("role", "group");
+    colorGrid.setAttribute("aria-label", t("color", [], "Color"));
 
-  const trigger = document.createElement("button");
-  trigger.type = "button";
-  trigger.className = "context-menu-item context-submenu-trigger";
-  trigger.setAttribute("role", "menuitem");
-  trigger.dataset.action = "group-color";
-  trigger.textContent = t("color", [], "Color");
-  trigger.disabled = !groupExists;
-  trigger.setAttribute("aria-haspopup", "menu");
-  trigger.setAttribute("aria-expanded", "false");
+    for (const option of GROUP_COLOR_OPTIONS) {
+      const colorBtn = document.createElement("button");
+      colorBtn.type = "button";
+      colorBtn.className = "context-menu-item context-color-swatch";
+      colorBtn.setAttribute("role", "menuitem");
+      colorBtn.dataset.color = option.value;
+      const label = t(option.labelKey, [], option.value);
+      colorBtn.setAttribute("aria-label", t("setGroupColorTo", [label], `Set group color to ${label}`));
+      colorBtn.title = t("setGroupColorTo", [label], `Set group color to ${label}`);
+      if (group?.color === option.value) {
+        colorBtn.classList.add("active");
+      }
+      colorBtn.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        await setGroupColor(option.value);
+      });
 
-  const panel = document.createElement("div");
-  panel.id = "context-submenu-color";
-  panel.className = "context-submenu-panel";
-  panel.setAttribute("role", "menu");
-  trigger.setAttribute("aria-controls", panel.id);
+      const dot = document.createElement("span");
+      dot.className = "context-color-dot";
+      dot.style.setProperty("--group-color", GROUP_COLOR_MAP[option.value]);
 
-  for (const option of GROUP_COLOR_OPTIONS) {
-    const colorBtn = document.createElement("button");
-    colorBtn.type = "button";
-    colorBtn.className = "context-menu-item context-color-item";
-    colorBtn.setAttribute("role", "menuitem");
-    colorBtn.dataset.color = option.value;
-    if (group?.color === option.value) {
-      colorBtn.classList.add("active");
+      const text = document.createElement("span");
+      text.className = "context-color-label";
+      text.textContent = label;
+
+      colorBtn.append(dot, text);
+      colorGrid.appendChild(colorBtn);
     }
-    colorBtn.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      await setGroupColor(option.value);
-    });
-
-    const dot = document.createElement("span");
-    dot.className = "context-color-dot";
-    dot.style.setProperty("--group-color", GROUP_COLOR_MAP[option.value]);
-
-    const label = document.createElement("span");
-    label.textContent = t(option.labelKey, [], option.value);
-
-    colorBtn.append(dot, label);
-    panel.appendChild(colorBtn);
+    fragment.appendChild(colorGrid);
   }
 
-  trigger.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const willOpen = !submenu.classList.contains("open");
-    submenu.classList.toggle("open", willOpen);
-    trigger.setAttribute("aria-expanded", String(willOpen));
-    if (willOpen) {
-      const first = panel.querySelector(".context-menu-item:not([disabled])");
-      if (first) {
-        first.focus();
-      }
-    }
-  });
-
-  trigger.addEventListener("keydown", (event) => {
-    if (event.key !== "ArrowRight") {
-      return;
-    }
-    event.preventDefault();
-    submenu.classList.add("open");
-    trigger.setAttribute("aria-expanded", "true");
-    const first = panel.querySelector(".context-menu-item:not([disabled])");
-    if (first) {
-      first.focus();
-    }
-  });
-
-  submenu.append(trigger, panel);
-  fragment.appendChild(submenu);
   fragment.appendChild(createContextMenuSeparator());
   fragment.appendChild(
     createContextMenuButton(closeLabel, "close-group", !groupExists || closeTabIds.length === 0)
@@ -3450,6 +3502,18 @@ function bindEvents() {
     closeSettingsPanel();
   });
 
+  dom.resetAppearanceSettings?.addEventListener("click", async () => {
+    await resetSettingsSection("appearance");
+  });
+
+  dom.resetBehaviorSettings?.addEventListener("click", async () => {
+    await resetSettingsSection("behavior");
+  });
+
+  dom.resetSafetySettings?.addEventListener("click", async () => {
+    await resetSettingsSection("safety");
+  });
+
   dom.confirmCancel.addEventListener("click", () => {
     closeConfirmDialog();
   });
@@ -3609,15 +3673,7 @@ function bindEvents() {
       }
     }
 
-    state.settings = {
-      ...state.settings,
-      ...patch
-    };
-    render();
-
-    await send(MESSAGE_TYPES.PATCH_SETTINGS, {
-      settingsPatch: patch
-    });
+    await applySettingsPatch(patch);
   });
 
   chrome.runtime.onMessage.addListener((message) => {

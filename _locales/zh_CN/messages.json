@@ -41,6 +41,36 @@
   "settingsPanelTitle": {
     "message": "外观与行为"
   },
+  "settingsAppearanceTitle": {
+    "message": "外观"
+  },
+  "settingsAppearanceDescription": {
+    "message": "主题、间距与排版。"
+  },
+  "resetAppearance": {
+    "message": "重置外观"
+  },
+  "advancedAppearance": {
+    "message": "高级外观"
+  },
+  "settingsBehaviorTitle": {
+    "message": "行为"
+  },
+  "settingsBehaviorDescription": {
+    "message": "调整显示内容与交互方式。"
+  },
+  "resetBehavior": {
+    "message": "重置行为"
+  },
+  "settingsSafetyTitle": {
+    "message": "安全"
+  },
+  "settingsSafetyDescription": {
+    "message": "控制破坏性操作前的确认提示。"
+  },
+  "resetSafety": {
+    "message": "重置安全"
+  },
   "close": {
     "message": "关闭"
   },
@@ -131,6 +161,9 @@
   "addToExistingTabGroup": {
     "message": "添加到现有标签组"
   },
+  "moreGroups": {
+    "message": "更多标签组..."
+  },
   "moveSelectedToTopLevel": {
     "message": "将所选项移动到顶层"
   },
@@ -184,6 +217,9 @@
   },
   "colorOrange": {
     "message": "橙色"
+  },
+  "setGroupColorTo": {
+    "message": "将标签组颜色设为 $1"
   },
   "confirmCloseMessage": {
     "message": "这将关闭 $1 个标签页。是否继续？"
