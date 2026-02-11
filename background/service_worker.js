@@ -245,8 +245,56 @@ function dedupeRootNodeIds(tree, nodeIds) {
   });
 }
 
-function sortNodeIdsByTabIndex(tree, nodeIds) {
-  return [...nodeIds].sort((a, b) => (tree.nodes[a]?.index ?? 0) - (tree.nodes[b]?.index ?? 0));
+function uniqueFiniteTabIdsInOrder(tabIds) {
+  return Array.from(new Set((tabIds || []).filter((id) => Number.isFinite(id))));
+}
+
+async function groupLiveTabIdsByWindowInRequestOrder(tabIds) {
+  const grouped = new Map();
+  const uniqueTabIds = uniqueFiniteTabIdsInOrder(tabIds);
+  if (!uniqueTabIds.length) {
+    return grouped;
+  }
+
+  const liveTabs = await Promise.all(uniqueTabIds.map((tabId) => getTab(tabId)));
+  for (const tab of liveTabs) {
+    if (!tab || !Number.isInteger(tab.windowId)) {
+      continue;
+    }
+    if (!grouped.has(tab.windowId)) {
+      grouped.set(tab.windowId, []);
+    }
+    grouped.get(tab.windowId).push(tab.id);
+  }
+  return grouped;
+}
+
+function browserInsertionIndexForRelativePlacement(tabs, movingTabIds, targetTabId, placement) {
+  if (!Array.isArray(tabs) || !Array.isArray(movingTabIds)) {
+    return -1;
+  }
+  if (!Number.isFinite(targetTabId) || (placement !== "before" && placement !== "after")) {
+    return -1;
+  }
+
+  const ordered = [...tabs].sort((a, b) => a.index - b.index);
+  const movingSet = new Set(movingTabIds);
+  const remaining = ordered.filter((tab) => !movingSet.has(tab.id));
+  if (!remaining.length) {
+    return 0;
+  }
+
+  const targetPos = remaining.findIndex((tab) => tab.id === targetTabId);
+  if (targetPos < 0) {
+    return -1;
+  }
+
+  const insertionPos = placement === "after" ? targetPos + 1 : targetPos;
+  if (insertionPos >= remaining.length) {
+    return -1;
+  }
+
+  return insertionPos;
 }
 
 function removeTabIdsFromWindowTree(windowId, tabIds) {
@@ -668,30 +716,87 @@ async function batchGroupExisting(tabIds, groupId, windowIdHint = null) {
   await refreshGroupMetadata(targetWindowId);
 }
 
-async function batchMoveToRoot(tabIds) {
-  const grouped = await groupLiveTabIdsByWindow(tabIds, {
-    queryTabs: () => chrome.tabs.query({}),
-    getTab
-  });
-  for (const [windowId, ids] of grouped.entries()) {
+async function batchMoveToRoot(tabIds, options = {}) {
+  const placement = options.placement === "before" || options.placement === "after"
+    ? options.placement
+    : null;
+  const targetTabId = Number.isFinite(options.targetTabId) ? options.targetTabId : null;
+
+  const grouped = await groupLiveTabIdsByWindowInRequestOrder(tabIds);
+  for (const [windowId, orderedTabIds] of grouped.entries()) {
     const tree = windowTree(windowId);
-    const nodeIds = ids.map((id) => nodeIdFromTabId(id)).filter((id) => !!tree.nodes[id]);
-    const orderedNodeIds = sortNodeIdsByTabIndex(tree, Array.from(new Set(nodeIds)));
+    let orderedNodeIds = orderedTabIds
+      .map((id) => nodeIdFromTabId(id))
+      .filter((nodeId) => !!tree.nodes[nodeId]);
+    if (!orderedNodeIds.length) {
+      continue;
+    }
+
+    let targetNodeId = null;
+    let hasRelativePlacement = false;
+    let browserMoveIndex = -1;
+    if (placement && Number.isFinite(targetTabId)) {
+      targetNodeId = nodeIdFromTabId(targetTabId);
+      const targetNode = tree.nodes[targetNodeId];
+      if (targetNode && !targetNode.parentNodeId) {
+        orderedNodeIds = orderedNodeIds.filter((nodeId) =>
+          nodeId !== targetNodeId && !!tree.nodes[nodeId] && !!tree.nodes[nodeId].pinned === !!targetNode.pinned
+        );
+        hasRelativePlacement = true;
+
+        let windowTabs = [];
+        try {
+          windowTabs = await chrome.tabs.query({ windowId });
+        } catch {
+          windowTabs = [];
+        }
+        const moveTabIds = orderedNodeIds
+          .map((nodeId) => tree.nodes[nodeId]?.tabId)
+          .filter((id) => Number.isFinite(id));
+        browserMoveIndex = browserInsertionIndexForRelativePlacement(
+          windowTabs,
+          moveTabIds,
+          targetTabId,
+          placement
+        );
+      }
+    }
+
     if (!orderedNodeIds.length) {
       continue;
     }
 
     let next = tree;
-    for (const id of orderedNodeIds) {
-      next = moveNode(next, id, null, null);
+    for (const nodeId of orderedNodeIds) {
+      if (hasRelativePlacement && targetNodeId) {
+        const siblings = next.rootNodeIds;
+        const anchorIndex = siblings.indexOf(targetNodeId);
+        if (anchorIndex < 0) {
+          next = moveNode(next, nodeId, null, null);
+          if (placement === "after") {
+            targetNodeId = nodeId;
+          }
+          continue;
+        }
+        let newIndex = placement === "after" ? anchorIndex + 1 : anchorIndex;
+        const oldIndex = siblings.indexOf(nodeId);
+        if (oldIndex >= 0 && oldIndex < newIndex) {
+          newIndex -= 1;
+        }
+        next = moveNode(next, nodeId, null, newIndex);
+        if (placement === "after") {
+          targetNodeId = nodeId;
+        }
+      } else {
+        next = moveNode(next, nodeId, null, null);
+      }
     }
-    next = sortTreeByIndex(next);
     setWindowTree(next);
 
-    const orderedTabIds = orderedNodeIds.map((id) => next.nodes[id]?.tabId).filter((id) => Number.isFinite(id));
-    if (orderedTabIds.length) {
+    const moveTabIds = orderedNodeIds.map((nodeId) => next.nodes[nodeId]?.tabId).filter((id) => Number.isFinite(id));
+    if (moveTabIds.length) {
       try {
-        await chrome.tabs.move(orderedTabIds, { index: -1 });
+        await chrome.tabs.move(moveTabIds, { index: browserMoveIndex });
       } catch {
         // Best effort in mixed pin/group states.
       }
@@ -699,7 +804,7 @@ async function batchMoveToRoot(tabIds) {
   }
 }
 
-async function batchReparent(tabIds, newParentTabId) {
+async function batchReparent(tabIds, newParentTabId, options = {}) {
   const parentTab = await getTab(newParentTabId);
   if (!parentTab) {
     return;
@@ -711,36 +816,94 @@ async function batchReparent(tabIds, newParentTabId) {
     return;
   }
 
-  const tabs = await Promise.all(tabIds.map((tabId) => getTab(tabId)));
+  const uniqueRequestedTabIds = uniqueFiniteTabIdsInOrder(tabIds);
+  const tabs = await Promise.all(uniqueRequestedTabIds.map((tabId) => getTab(tabId)));
   const sameWindowTabIds = tabs
     .filter((tab) => tab && tab.windowId === parentTab.windowId && tab.id !== newParentTabId)
     .map((tab) => tab.id);
 
-  const sourceNodeIds = sameWindowTabIds
+  let orderedNodeIds = sameWindowTabIds
     .map((id) => nodeIdFromTabId(id))
     .filter((id) => !!tree.nodes[id]);
-
-  const orderedNodeIds = sortNodeIdsByTabIndex(tree, Array.from(new Set(sourceNodeIds)));
   if (!orderedNodeIds.length) {
     return;
   }
 
-  let next = tree;
-  for (const sourceNodeId of orderedNodeIds) {
-    if (!canReparent(next, sourceNodeId, parentNodeId)) {
-      continue;
-    }
-    next = moveNode(next, sourceNodeId, parentNodeId, null);
+  const targetTabId = Number.isFinite(options.targetTabId) ? options.targetTabId : null;
+  const placement = options.placement === "inside" || options.placement === "before" || options.placement === "after"
+    ? options.placement
+    : null;
+
+  const reparentableNodeIds = orderedNodeIds.filter((nodeId) => canReparent(tree, nodeId, parentNodeId));
+  if (!reparentableNodeIds.length) {
+    return;
   }
 
-  next = sortTreeByIndex(next);
+  let browserMoveIndex = childInsertIndex(tree, parentNodeId, parentTab.index + 1);
+  let targetNodeId = null;
+  let hasRelativePlacement = false;
+
+  if (placement === "inside") {
+    // Default append behavior is kept for inside moves.
+  } else if ((placement === "before" || placement === "after") && Number.isFinite(targetTabId)) {
+    targetNodeId = nodeIdFromTabId(targetTabId);
+    const targetNode = tree.nodes[targetNodeId];
+    const targetIsSibling = !!targetNode
+      && targetNode.parentNodeId === parentNodeId
+      && !reparentableNodeIds.includes(targetNodeId);
+
+    if (targetIsSibling) {
+      hasRelativePlacement = true;
+
+      let windowTabs = [];
+      try {
+        windowTabs = await chrome.tabs.query({ windowId: parentTab.windowId });
+      } catch {
+        windowTabs = [];
+      }
+      const moveTabIds = reparentableNodeIds
+        .map((nodeId) => tree.nodes[nodeId]?.tabId)
+        .filter((id) => Number.isFinite(id));
+      browserMoveIndex = browserInsertionIndexForRelativePlacement(
+        windowTabs,
+        moveTabIds,
+        targetTabId,
+        placement
+      );
+    }
+  }
+
+  let next = tree;
+  for (const sourceNodeId of reparentableNodeIds) {
+    if (hasRelativePlacement && targetNodeId) {
+      const siblings = next.nodes[parentNodeId]?.childNodeIds || [];
+      const anchorIndex = siblings.indexOf(targetNodeId);
+      if (anchorIndex < 0) {
+        next = moveNode(next, sourceNodeId, parentNodeId, null);
+        if (placement === "after") {
+          targetNodeId = sourceNodeId;
+        }
+        continue;
+      }
+      let newIndex = placement === "after" ? anchorIndex + 1 : anchorIndex;
+      const oldIndex = siblings.indexOf(sourceNodeId);
+      if (oldIndex >= 0 && oldIndex < newIndex) {
+        newIndex -= 1;
+      }
+      next = moveNode(next, sourceNodeId, parentNodeId, newIndex);
+      if (placement === "after") {
+        targetNodeId = sourceNodeId;
+      }
+    } else {
+      next = moveNode(next, sourceNodeId, parentNodeId, null);
+    }
+  }
   setWindowTree(next);
 
-  const moveTabIds = orderedNodeIds.map((id) => next.nodes[id]?.tabId).filter((id) => Number.isFinite(id));
+  const moveTabIds = reparentableNodeIds.map((id) => next.nodes[id]?.tabId).filter((id) => Number.isFinite(id));
   if (moveTabIds.length) {
     try {
-      const insertIndex = childInsertIndex(next, parentNodeId, parentTab.index + 1);
-      await chrome.tabs.move(moveTabIds, { index: insertIndex });
+      await chrome.tabs.move(moveTabIds, { index: browserMoveIndex });
     } catch {
       // Best effort.
     }
@@ -984,11 +1147,17 @@ async function handleTreeAction(payload) {
   }
 
   if (type === TREE_ACTIONS.BATCH_MOVE_TO_ROOT) {
-    return batchMoveToRoot(payload.tabIds || []);
+    return batchMoveToRoot(payload.tabIds || [], {
+      placement: payload.placement,
+      targetTabId: payload.targetTabId
+    });
   }
 
   if (type === TREE_ACTIONS.BATCH_REPARENT) {
-    return batchReparent(payload.tabIds || [], payload.newParentTabId);
+    return batchReparent(payload.tabIds || [], payload.newParentTabId, {
+      placement: payload.placement,
+      targetTabId: payload.targetTabId
+    });
   }
 
   if (type === TREE_ACTIONS.MOVE_GROUP_BLOCK) {

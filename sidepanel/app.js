@@ -2027,19 +2027,25 @@ function buildDropPayload(tree, sourceTabIds, targetTabId, position) {
       return {
         type: TREE_ACTIONS.BATCH_REPARENT,
         tabIds: sourceTabIds,
-        newParentTabId: target.tabId
+        newParentTabId: target.tabId,
+        targetTabId: target.tabId,
+        placement: "inside"
       };
     }
     if (target.parentNodeId) {
       return {
         type: TREE_ACTIONS.BATCH_REPARENT,
         tabIds: sourceTabIds,
-        newParentTabId: tree.nodes[target.parentNodeId]?.tabId || null
+        newParentTabId: tree.nodes[target.parentNodeId]?.tabId || null,
+        targetTabId: target.tabId,
+        placement: position
       };
     }
     return {
       type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
-      tabIds: sourceTabIds
+      tabIds: sourceTabIds,
+      targetTabId: target.tabId,
+      placement: position
     };
   }
 

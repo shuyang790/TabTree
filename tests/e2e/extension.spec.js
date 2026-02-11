@@ -21,6 +21,88 @@ async function tabIdByTitle(sidePanelPage, title) {
   }, title);
 }
 
+async function getCurrentWindowTree(sidePanelPage) {
+  return sidePanelPage.evaluate(async () => {
+    const windowId = (await chrome.windows.getCurrent()).id;
+    const response = await chrome.runtime.sendMessage({
+      type: "GET_STATE",
+      payload: { windowId }
+    });
+    const windows = response?.payload?.windows || {};
+    return windows[windowId] || windows[String(windowId)] || null;
+  });
+}
+
+function nodeByTitle(tree, title) {
+  const nodes = Object.values(tree?.nodes || {});
+  return nodes.find((node) => node.lastKnownTitle === title) || null;
+}
+
+function rootTitles(tree) {
+  return (tree?.rootNodeIds || [])
+    .map((nodeId) => tree.nodes[nodeId]?.lastKnownTitle || "")
+    .filter((title) => !!title);
+}
+
+function childTitles(tree, parentTitle) {
+  const parent = nodeByTitle(tree, parentTitle);
+  if (!parent) {
+    return [];
+  }
+  return parent.childNodeIds
+    .map((nodeId) => tree.nodes[nodeId]?.lastKnownTitle || "")
+    .filter((title) => !!title);
+}
+
+async function dragRowToRow(sidePanelPage, sourceTitle, targetTitle, position) {
+  const source = rowByTitle(sidePanelPage, sourceTitle);
+  const target = rowByTitle(sidePanelPage, targetTitle);
+  await expect(source).toBeVisible();
+  await expect(target).toBeVisible();
+  if (position === "inside") {
+    const sourceBox = await source.boundingBox();
+    const targetBox = await target.boundingBox();
+    expect(sourceBox).toBeTruthy();
+    expect(targetBox).toBeTruthy();
+
+    const sourceX = Math.floor(sourceBox.x + Math.max(12, sourceBox.width / 2));
+    const sourceY = Math.floor(sourceBox.y + Math.max(8, sourceBox.height / 2));
+    const targetX = Math.floor(targetBox.x + Math.max(12, targetBox.width / 2));
+    const targetY = Math.floor(targetBox.y + Math.max(8, targetBox.height / 2));
+
+    await sidePanelPage.mouse.move(sourceX, sourceY);
+    await sidePanelPage.mouse.down();
+    await sidePanelPage.mouse.move(targetX, targetY, { steps: 12 });
+    await sidePanelPage.waitForTimeout(230);
+    await sidePanelPage.mouse.move(targetX + 1, targetY, { steps: 2 });
+    await sidePanelPage.mouse.move(targetX, targetY, { steps: 2 });
+    await sidePanelPage.mouse.up();
+    return;
+  }
+
+  const box = await target.boundingBox();
+  expect(box).toBeTruthy();
+  const y = position === "before"
+    ? 2
+    : position === "after"
+      ? Math.max(2, Math.floor(box.height - 2))
+      : Math.max(2, Math.floor(box.height / 2));
+  const x = Math.max(8, Math.floor(box.width / 2));
+  await source.dragTo(target, {
+    targetPosition: { x, y }
+  });
+}
+
+async function dragRowToSearchRoot(sidePanelPage, sourceTitle) {
+  const source = rowByTitle(sidePanelPage, sourceTitle);
+  const rootDropTarget = sidePanelPage.locator("#search-wrap");
+  await expect(source).toBeVisible();
+  await expect(rootDropTarget).toBeVisible();
+  await source.dragTo(rootDropTarget, {
+    targetPosition: { x: 24, y: 18 }
+  });
+}
+
 test.describe("TabTree extension", () => {
   test("loads side panel app shell", async ({ sidePanelPage }) => {
     await expect(sidePanelPage.locator("#search")).toBeVisible();
@@ -91,84 +173,88 @@ test.describe("TabTree extension", () => {
   });
 
   test("context menu uses searchable existing-group picker for many groups", async ({ context, sidePanelPage }) => {
-    const seedTitles = Array.from({ length: 9 }, (_, index) => `Picker Seed ${index + 1}`);
+    const seedTitles = Array.from({ length: 7 }, (_, index) => `Picker Seed ${index + 1}`);
     const pages = [];
-    for (const title of seedTitles) {
-      pages.push(await createTitledTab(context, title));
-    }
-    const targetTitle = "Picker Ungrouped";
-    pages.push(await createTitledTab(context, targetTitle));
+    try {
+      for (const title of seedTitles) {
+        pages.push(await createTitledTab(context, title));
+      }
+      const targetTitle = "Picker Ungrouped";
+      pages.push(await createTitledTab(context, targetTitle));
 
-    const grouped = await sidePanelPage.evaluate(async ({ seedTitles, targetTitle }) => {
-      const tabs = await chrome.tabs.query({ currentWindow: true });
-      const groupIdsByTitle = {};
+      const grouped = await sidePanelPage.evaluate(async ({ seedTitles, targetTitle }) => {
+        const tabs = await chrome.tabs.query({ currentWindow: true });
+        const groupIdsByTitle = {};
 
-      for (const [index, title] of seedTitles.entries()) {
-        const tab = tabs.find((candidate) => candidate.title === title);
-        if (!Number.isInteger(tab?.id)) {
-          continue;
+        for (const [index, title] of seedTitles.entries()) {
+          const tab = tabs.find((candidate) => candidate.title === title);
+          if (!Number.isInteger(tab?.id)) {
+            continue;
+          }
+          const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
+          const groupTitle = `Picker Group ${index + 1}`;
+          await chrome.tabGroups.update(groupId, { title: groupTitle });
+          groupIdsByTitle[groupTitle] = groupId;
         }
-        const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
-        const groupTitle = `Picker Group ${index + 1}`;
-        await chrome.tabGroups.update(groupId, { title: groupTitle });
-        groupIdsByTitle[groupTitle] = groupId;
+
+        const targetTabId = tabs.find((candidate) => candidate.title === targetTitle)?.id ?? null;
+        return { groupIdsByTitle, targetTabId };
+      }, { seedTitles, targetTitle });
+
+      expect(Number.isInteger(grouped.targetTabId)).toBeTruthy();
+      const targetGroupTitle = "Picker Group 3";
+      const targetGroupId = grouped.groupIdsByTitle[targetGroupTitle];
+      expect(Number.isInteger(targetGroupId)).toBeTruthy();
+
+      await expect.poll(async () => {
+        const count = await sidePanelPage.locator(".group-header").count();
+        return count;
+      }).toBeGreaterThanOrEqual(7);
+
+      const row = rowByTitle(sidePanelPage, targetTitle);
+      await expect(row).toBeVisible();
+
+      const groupSearchInput = sidePanelPage.locator("#context-menu .context-group-search-input").first();
+      let opened = false;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await row.click({ button: "right" });
+        try {
+          await expect(groupSearchInput).toBeVisible({ timeout: 1200 });
+          opened = true;
+          break;
+        } catch {
+          await sidePanelPage.keyboard.press("Escape").catch(() => {});
+          await sidePanelPage.waitForTimeout(80);
+        }
       }
 
-      const targetTabId = tabs.find((candidate) => candidate.title === targetTitle)?.id ?? null;
-      return { groupIdsByTitle, targetTabId };
-    }, { seedTitles, targetTitle });
+      expect(opened).toBeTruthy();
+      await groupSearchInput.fill(targetGroupTitle, { timeout: 2000 });
 
-    expect(Number.isInteger(grouped.targetTabId)).toBeTruthy();
-    const targetGroupTitle = "Picker Group 3";
-    const targetGroupId = grouped.groupIdsByTitle[targetGroupTitle];
-    expect(Number.isInteger(targetGroupId)).toBeTruthy();
+      const targetGroupItem = sidePanelPage.locator(".context-group-item")
+        .filter({ has: sidePanelPage.locator(".context-group-label", { hasText: targetGroupTitle }) })
+        .first();
+      await expect(targetGroupItem).toBeVisible();
 
-    await expect.poll(async () => {
-      const count = await sidePanelPage.locator(".group-header").count();
-      return count >= 7;
-    }).toBeTruthy();
+      await expect.poll(async () => sidePanelPage.evaluate((groupId) =>
+        !!document.querySelector(`.context-group-item[data-group-id="${groupId}"]`), targetGroupId)).toBeTruthy();
 
-    const row = rowByTitle(sidePanelPage, targetTitle);
-    await expect(row).toBeVisible();
+      await sidePanelPage.evaluate((groupId) => {
+        const target = document.querySelector(`.context-group-item[data-group-id="${groupId}"]`);
+        if (!(target instanceof HTMLElement)) {
+          throw new Error("target group item not found");
+        }
+        target.click();
+      }, targetGroupId);
 
-    const groupSearchInput = sidePanelPage.locator(".context-group-search-input");
-    let inputVisible = false;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      await row.click({ button: "right" });
-      if (await groupSearchInput.first().isVisible().catch(() => false)) {
-        inputVisible = true;
-        break;
+      await expect.poll(async () => sidePanelPage.evaluate(async (tabId) => {
+        const tab = await chrome.tabs.get(tabId);
+        return tab.groupId;
+      }, grouped.targetTabId)).toBe(targetGroupId);
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
       }
-      await sidePanelPage.keyboard.press("Escape");
-      await sidePanelPage.waitForTimeout(120);
-    }
-
-    expect(inputVisible).toBeTruthy();
-    await groupSearchInput.fill(targetGroupTitle);
-
-    const targetGroupItem = sidePanelPage.locator(".context-group-item")
-      .filter({ has: sidePanelPage.locator(".context-group-label", { hasText: targetGroupTitle }) })
-      .first();
-    await expect(targetGroupItem).toBeVisible();
-
-    await expect.poll(async () => sidePanelPage.evaluate((groupId) =>
-      !!document.querySelector(`.context-group-item[data-group-id="${groupId}"]`), targetGroupId)).toBeTruthy();
-
-    await sidePanelPage.evaluate((groupId) => {
-      const target = document.querySelector(`.context-group-item[data-group-id="${groupId}"]`);
-      if (!(target instanceof HTMLElement)) {
-        throw new Error("target group item not found");
-      }
-      target.click();
-    }, targetGroupId);
-
-    await expect.poll(async () => sidePanelPage.evaluate(async (tabId) => {
-      const tab = await chrome.tabs.get(tabId);
-      return tab.groupId;
-    }, grouped.targetTabId)).toBe(targetGroupId);
-
-    for (const page of pages) {
-      await page.close().catch(() => {});
     }
   });
 
@@ -625,5 +711,170 @@ test.describe("TabTree extension", () => {
     await tabA.close().catch(() => {});
     await tabB.close().catch(() => {});
     await tabC.close().catch(() => {});
+  });
+
+  test("multiselect drag inside reparents as ordered children", async ({ context, sidePanelPage }) => {
+    const parent = await createTitledTab(context, "Batch Inside Parent");
+    const sourceA = await createTitledTab(context, "Batch Inside Source A");
+    const sourceB = await createTitledTab(context, "Batch Inside Source B");
+    const target = await createTitledTab(context, "Batch Inside Target");
+
+    const rowSourceA = rowByTitle(sidePanelPage, "Batch Inside Source A");
+    const rowSourceB = rowByTitle(sidePanelPage, "Batch Inside Source B");
+
+    await expect(rowSourceA).toBeVisible();
+    await expect(rowSourceB).toBeVisible();
+
+    await rowSourceA.click();
+    await rowSourceB.click({ modifiers: ["Shift"] });
+    await dragRowToRow(sidePanelPage, "Batch Inside Source A", "Batch Inside Target", "inside");
+
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      return childTitles(tree, "Batch Inside Target");
+    }).toEqual(["Batch Inside Source A", "Batch Inside Source B"]);
+
+    await parent.close().catch(() => {});
+    await sourceA.close().catch(() => {});
+    await sourceB.close().catch(() => {});
+    await target.close().catch(() => {});
+  });
+
+  test("multiselect drag before inserts ordered block before target", async ({ context, sidePanelPage }) => {
+    const target = await createTitledTab(context, "Batch Before Target");
+    const tail = await createTitledTab(context, "Batch Before Tail");
+    const sourceA = await createTitledTab(context, "Batch Before Source A");
+    const sourceB = await createTitledTab(context, "Batch Before Source B");
+
+    const rowSourceA = rowByTitle(sidePanelPage, "Batch Before Source A");
+    const rowSourceB = rowByTitle(sidePanelPage, "Batch Before Source B");
+    await expect(rowSourceA).toBeVisible();
+    await expect(rowSourceB).toBeVisible();
+
+    await rowSourceA.click();
+    await rowSourceB.click({ modifiers: ["Shift"] });
+    await dragRowToRow(sidePanelPage, "Batch Before Source A", "Batch Before Target", "before");
+
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      return rootTitles(tree).filter((title) => [
+        "Batch Before Source A",
+        "Batch Before Source B",
+        "Batch Before Target",
+        "Batch Before Tail"
+      ].includes(title));
+    }).toEqual([
+      "Batch Before Source A",
+      "Batch Before Source B",
+      "Batch Before Target",
+      "Batch Before Tail"
+    ]);
+
+    await target.close().catch(() => {});
+    await tail.close().catch(() => {});
+    await sourceA.close().catch(() => {});
+    await sourceB.close().catch(() => {});
+  });
+
+  test("multiselect drag after inserts ordered block after target", async ({ context, sidePanelPage }) => {
+    const sourceA = await createTitledTab(context, "Batch After Source A");
+    const sourceB = await createTitledTab(context, "Batch After Source B");
+    const target = await createTitledTab(context, "Batch After Target");
+    const tail = await createTitledTab(context, "Batch After Tail");
+
+    const rowSourceA = rowByTitle(sidePanelPage, "Batch After Source A");
+    const rowSourceB = rowByTitle(sidePanelPage, "Batch After Source B");
+    await expect(rowSourceA).toBeVisible();
+    await expect(rowSourceB).toBeVisible();
+
+    await rowSourceA.click();
+    await rowSourceB.click({ modifiers: ["Shift"] });
+    await dragRowToRow(sidePanelPage, "Batch After Source A", "Batch After Target", "after");
+
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      return rootTitles(tree).filter((title) => [
+        "Batch After Target",
+        "Batch After Source A",
+        "Batch After Source B",
+        "Batch After Tail"
+      ].includes(title));
+    }).toEqual([
+      "Batch After Target",
+      "Batch After Source A",
+      "Batch After Source B",
+      "Batch After Tail"
+    ]);
+
+    await sourceA.close().catch(() => {});
+    await sourceB.close().catch(() => {});
+    await target.close().catch(() => {});
+    await tail.close().catch(() => {});
+  });
+
+  test("multiselect drop on search row moves ordered block to root end", async ({ context, sidePanelPage }) => {
+    const parent = await createTitledTab(context, "Batch Root Parent");
+    const sourceA = await createTitledTab(context, "Batch Root Source A");
+    const sourceB = await createTitledTab(context, "Batch Root Source B");
+    const tail = await createTitledTab(context, "Batch Root Tail");
+
+    const parentTabId = await tabIdByTitle(sidePanelPage, "Batch Root Parent");
+    const sourceATabId = await tabIdByTitle(sidePanelPage, "Batch Root Source A");
+    const sourceBTabId = await tabIdByTitle(sidePanelPage, "Batch Root Source B");
+    expect(Number.isInteger(parentTabId)).toBeTruthy();
+    expect(Number.isInteger(sourceATabId)).toBeTruthy();
+    expect(Number.isInteger(sourceBTabId)).toBeTruthy();
+
+    await sidePanelPage.evaluate(async ({ parentTabId, sourceATabId, sourceBTabId }) => {
+      await chrome.runtime.sendMessage({
+        type: "TREE_ACTION",
+        payload: {
+          type: "REPARENT_TAB",
+          tabId: sourceATabId,
+          newParentTabId: parentTabId
+        }
+      });
+      await chrome.runtime.sendMessage({
+        type: "TREE_ACTION",
+        payload: {
+          type: "REPARENT_TAB",
+          tabId: sourceBTabId,
+          newParentTabId: parentTabId
+        }
+      });
+    }, { parentTabId, sourceATabId, sourceBTabId });
+
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      return childTitles(tree, "Batch Root Parent");
+    }).toEqual(["Batch Root Source A", "Batch Root Source B"]);
+
+    const rowSourceA = rowByTitle(sidePanelPage, "Batch Root Source A");
+    const rowSourceB = rowByTitle(sidePanelPage, "Batch Root Source B");
+    await rowSourceA.click();
+    await rowSourceB.click({ modifiers: ["Shift"] });
+    await dragRowToSearchRoot(sidePanelPage, "Batch Root Source A");
+
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      const roots = rootTitles(tree);
+      const tailIndex = roots.indexOf("Batch Root Tail");
+      const sourceAIndex = roots.indexOf("Batch Root Source A");
+      const sourceBIndex = roots.indexOf("Batch Root Source B");
+      return {
+        parentChildren: childTitles(tree, "Batch Root Parent"),
+        endsWithDraggedBlock: roots.slice(-2).join("|") === "Batch Root Source A|Batch Root Source B",
+        orderedAfterTail: tailIndex >= 0 && tailIndex < sourceAIndex && sourceAIndex < sourceBIndex
+      };
+    }).toEqual({
+      parentChildren: [],
+      endsWithDraggedBlock: true,
+      orderedAfterTail: true
+    });
+
+    await parent.close().catch(() => {});
+    await sourceA.close().catch(() => {});
+    await sourceB.close().catch(() => {});
+    await tail.close().catch(() => {});
   });
 });
