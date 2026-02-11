@@ -2502,6 +2502,58 @@ function reconcileChildren(container, tree, desiredNodeKeys, query, visibilityBy
   }
 }
 
+function reconcilePinnedTrack(track, tree, desiredNodeKeys, query, visibilityByNodeId) {
+  const existingByTabId = new Map();
+  for (const child of Array.from(track.children)) {
+    const tabId = child.dataset.tabId;
+    if (tabId) {
+      existingByTabId.set(tabId, child);
+    }
+  }
+
+  const desiredTabIds = new Set();
+  const orderedElements = [];
+
+  for (const [index, nodeKey] of desiredNodeKeys.entries()) {
+    const node = tree.nodes[nodeKey];
+    if (!node) {
+      continue;
+    }
+    const tabId = String(node.tabId);
+    desiredTabIds.add(tabId);
+
+    const existing = existingByTabId.get(tabId);
+    if (existing) {
+      patchNodeRow(existing, tree, node, {
+        showGroupBadge: true,
+        siblingIndex: index,
+        siblingCount: desiredNodeKeys.length
+      });
+      orderedElements.push(existing);
+    } else {
+      const row = createNodeRow(tree, node, {
+        showGroupBadge: true,
+        siblingIndex: index,
+        siblingCount: desiredNodeKeys.length
+      });
+      orderedElements.push(row);
+    }
+  }
+
+  for (const [tabId, el] of existingByTabId) {
+    if (!desiredTabIds.has(tabId)) {
+      el.remove();
+    }
+  }
+
+  for (let i = 0; i < orderedElements.length; i++) {
+    const el = orderedElements[i];
+    if (track.children[i] !== el) {
+      track.insertBefore(el, track.children[i] || null);
+    }
+  }
+}
+
 function patchGroupSection(existingSection, tree, groupId, rootNodeIds, query, visibilityByNodeId) {
   const group = groupDisplay(tree, groupId);
   existingSection.style.setProperty("--group-color", group.color);
@@ -2702,10 +2754,7 @@ function patchTree() {
       if (track) {
         const renderablePinnedIds = pinned
           .filter((nodeKey) => shouldRenderNode(tree, nodeKey, query, visibilityByNodeId));
-        reconcileChildren(track, tree, renderablePinnedIds, query, visibilityByNodeId, {
-          showGroupBadge: true,
-          siblingCount: renderablePinnedIds.length
-        });
+        reconcilePinnedTrack(track, tree, renderablePinnedIds, query, visibilityByNodeId);
       }
       desiredElements.set(stripKey, existingStrip);
     } else {
