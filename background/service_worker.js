@@ -791,16 +791,21 @@ async function batchMoveToRoot(tabIds, options = {}) {
         next = moveNode(next, nodeId, null, null);
       }
     }
-    setWindowTree(next);
-
     const moveTabIds = orderedNodeIds.map((nodeId) => next.nodes[nodeId]?.tabId).filter((id) => Number.isFinite(id));
+    let movedInBrowser = !moveTabIds.length;
     if (moveTabIds.length) {
       try {
         await chrome.tabs.move(moveTabIds, { index: browserMoveIndex });
+        movedInBrowser = true;
       } catch {
-        // Best effort in mixed pin/group states.
+        movedInBrowser = false;
       }
     }
+
+    if (movedInBrowser) {
+      setWindowTree(next);
+    }
+    await syncWindowOrdering(windowId);
   }
 }
 
@@ -898,24 +903,30 @@ async function batchReparent(tabIds, newParentTabId, options = {}) {
       next = moveNode(next, sourceNodeId, parentNodeId, null);
     }
   }
-  setWindowTree(next);
-
   const moveTabIds = reparentableNodeIds.map((id) => next.nodes[id]?.tabId).filter((id) => Number.isFinite(id));
+  let movedInBrowser = !moveTabIds.length;
   if (moveTabIds.length) {
     try {
       await chrome.tabs.move(moveTabIds, { index: browserMoveIndex });
+      movedInBrowser = true;
     } catch {
-      // Best effort.
+      movedInBrowser = false;
     }
   }
 
-  if (Number.isInteger(parentTab.groupId) && parentTab.groupId >= 0 && moveTabIds.length) {
+  if (movedInBrowser) {
+    setWindowTree(next);
+  }
+
+  if (movedInBrowser && Number.isInteger(parentTab.groupId) && parentTab.groupId >= 0 && moveTabIds.length) {
     try {
       await chrome.tabs.group({ groupId: parentTab.groupId, tabIds: moveTabIds });
     } catch {
       // Best effort.
     }
   }
+
+  await syncWindowOrdering(parentTab.windowId);
 }
 
 function insertionIndexForGroupMove(tabs, sourceTabIds, payload) {
@@ -1291,8 +1302,25 @@ async function promoteActiveTab() {
     return;
   }
   const parent = tree.nodes[node.parentNodeId];
+  if (!parent) {
+    return;
+  }
   const grandParentId = parent?.parentNodeId || null;
-  setWindowTree(moveNode(tree, node.nodeId, grandParentId));
+  const siblings = grandParentId ? (tree.nodes[grandParentId]?.childNodeIds || []) : tree.rootNodeIds;
+  const parentPosition = siblings.indexOf(parent.nodeId);
+  const targetIndex = parentPosition >= 0 ? parentPosition + 1 : null;
+  const fallbackIndex = Number.isFinite(parent.index) ? parent.index + 1 : active.index;
+  const browserIndex = childInsertIndex(tree, parent.nodeId, fallbackIndex);
+
+  try {
+    await chrome.tabs.move(active.id, { index: browserIndex });
+  } catch {
+    await syncWindowOrdering(active.windowId);
+    return;
+  }
+
+  setWindowTree(moveNode(tree, node.nodeId, grandParentId, targetIndex));
+  await syncWindowOrdering(active.windowId);
 }
 
 async function moveActiveUnderPreviousRootSibling() {
@@ -1311,7 +1339,22 @@ async function moveActiveUnderPreviousRootSibling() {
     return;
   }
   const previousRoot = tree.rootNodeIds[rootIndex - 1];
+  const previousRootNode = tree.nodes[previousRoot];
+  if (!previousRootNode || !!previousRootNode.pinned !== !!node.pinned) {
+    return;
+  }
+  const fallbackIndex = Number.isFinite(previousRootNode.index) ? previousRootNode.index + 1 : active.index;
+  const browserIndex = childInsertIndex(tree, previousRoot, fallbackIndex);
+
+  try {
+    await chrome.tabs.move(active.id, { index: browserIndex });
+  } catch {
+    await syncWindowOrdering(active.windowId);
+    return;
+  }
+
   setWindowTree(moveNode(tree, nodeId, previousRoot));
+  await syncWindowOrdering(active.windowId);
 }
 
 async function toggleActiveNodeCollapse() {
@@ -1435,6 +1478,7 @@ chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
   const activeTabId = await getWindowActiveTabId(removeInfo.windowId);
   next = reconcileSelectedTabId(next, activeTabId);
   setWindowTree(next);
+  scheduleWindowOrderingSync(removeInfo.windowId);
 });
 
 chrome.tabs.onAttached.addListener(async (tabId, attachInfo) => {
@@ -1458,6 +1502,7 @@ chrome.tabs.onDetached.addListener(async (tabId, detachInfo) => {
   const activeTabId = await getWindowActiveTabId(detachInfo.oldWindowId);
   next = reconcileSelectedTabId(next, activeTabId);
   setWindowTree(next);
+  scheduleWindowOrderingSync(detachInfo.oldWindowId);
 });
 
 chrome.windows.onRemoved.addListener(async (windowId) => {
