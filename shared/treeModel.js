@@ -325,12 +325,22 @@ export function removeSubtree(tree, nodeId) {
 
 export function ensureValidTree(tree) {
   const next = cloneTree(tree);
+  const dedupeIds = (ids) => {
+    const seen = new Set();
+    return ids.filter((id) => {
+      if (seen.has(id)) {
+        return false;
+      }
+      seen.add(id);
+      return true;
+    });
+  };
 
   const known = new Set(Object.keys(next.nodes));
-  next.rootNodeIds = next.rootNodeIds.filter((id) => known.has(id));
+  next.rootNodeIds = dedupeIds(next.rootNodeIds.filter((id) => known.has(id)));
 
   for (const node of Object.values(next.nodes)) {
-    node.childNodeIds = node.childNodeIds.filter((id) => known.has(id) && id !== node.nodeId);
+    node.childNodeIds = dedupeIds(node.childNodeIds.filter((id) => known.has(id) && id !== node.nodeId));
     if (node.parentNodeId && !known.has(node.parentNodeId)) {
       node.parentNodeId = null;
     }

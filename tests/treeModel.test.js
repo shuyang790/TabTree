@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildTreeFromTabs,
   createEmptyWindowTree,
+  ensureValidTree,
   moveNode,
   normalizeGroupedTabParents,
   nodeIdFromTabId,
@@ -247,4 +248,49 @@ test("buildTreeFromTabs falls back to title matching when urls are missing", () 
 
   assert.equal(restored.nodes[nodeIdFromTabId(2)].parentNodeId, nodeIdFromTabId(1));
   assert.deepEqual(restored.nodes[nodeIdFromTabId(1)].childNodeIds, [nodeIdFromTabId(2)]);
+});
+
+test("ensureValidTree dedupes root and child node ids while repairing missing parents", () => {
+  const rootNodeId = nodeIdFromTabId(1);
+  const childNodeId = nodeIdFromTabId(2);
+  const staleParentNodeId = nodeIdFromTabId(999);
+  const orphanNodeId = nodeIdFromTabId(3);
+
+  const tree = createEmptyWindowTree(1);
+  tree.nodes = {
+    [rootNodeId]: {
+      nodeId: rootNodeId,
+      tabId: 1,
+      parentNodeId: null,
+      childNodeIds: [childNodeId, childNodeId, staleParentNodeId, rootNodeId],
+      collapsed: false,
+      lastKnownTitle: "Root",
+      lastKnownUrl: "https://example.com/1"
+    },
+    [childNodeId]: {
+      nodeId: childNodeId,
+      tabId: 2,
+      parentNodeId: rootNodeId,
+      childNodeIds: [],
+      collapsed: false,
+      lastKnownTitle: "Child",
+      lastKnownUrl: "https://example.com/2"
+    },
+    [orphanNodeId]: {
+      nodeId: orphanNodeId,
+      tabId: 3,
+      parentNodeId: staleParentNodeId,
+      childNodeIds: [],
+      collapsed: false,
+      lastKnownTitle: "Orphan",
+      lastKnownUrl: "https://example.com/3"
+    }
+  };
+  tree.rootNodeIds = [rootNodeId, rootNodeId, orphanNodeId, staleParentNodeId];
+
+  const validated = ensureValidTree(tree);
+
+  assert.deepEqual(validated.rootNodeIds, [rootNodeId, orphanNodeId]);
+  assert.deepEqual(validated.nodes[rootNodeId].childNodeIds, [childNodeId]);
+  assert.equal(validated.nodes[orphanNodeId].parentNodeId, null);
 });

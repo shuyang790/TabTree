@@ -297,6 +297,22 @@ function browserInsertionIndexForRelativePlacement(tabs, movingTabIds, targetTab
   return insertionPos;
 }
 
+async function resolveBrowserMoveIndex(windowId, requestedIndex) {
+  if (!Number.isFinite(requestedIndex)) {
+    return null;
+  }
+
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ windowId });
+  } catch {
+    return null;
+  }
+
+  const maxIndex = Math.max(0, tabs.length - 1);
+  return Math.max(0, Math.min(Math.trunc(requestedIndex), maxIndex));
+}
+
 function removeTabIdsFromWindowTree(windowId, tabIds) {
   const result = removeTabIdsFromTree(windowTree(windowId), tabIds);
   if (result.changed) {
@@ -1251,17 +1267,22 @@ async function handleTreeAction(payload) {
 
     let next = moveNode(tree, nodeId, parentNodeId, payload.newIndex ?? null);
     next = sortTreeByIndex(next);
-    setWindowTree(next);
 
-    if (typeof payload.browserIndex === "number") {
+    let movedInBrowser = true;
+    const browserIndex = await resolveBrowserMoveIndex(tab.windowId, payload.browserIndex);
+    if (browserIndex !== null) {
       try {
-        await chrome.tabs.move(payload.tabId, { index: payload.browserIndex });
+        await chrome.tabs.move(payload.tabId, { index: browserIndex });
       } catch {
-        // Best effort.
+        movedInBrowser = false;
       }
     }
 
-    if (parentNodeId) {
+    if (movedInBrowser) {
+      setWindowTree(next);
+    }
+
+    if (movedInBrowser && parentNodeId) {
       const parentTabId = tree.nodes[parentNodeId]?.tabId;
       const parentTab = parentTabId ? await getTab(parentTabId) : null;
       if (parentTab && Number.isInteger(parentTab.groupId) && parentTab.groupId >= 0) {
@@ -1272,21 +1293,27 @@ async function handleTreeAction(payload) {
         }
       }
     }
+    await syncWindowOrdering(tab.windowId);
     return;
   }
 
   if (type === TREE_ACTIONS.MOVE_TO_ROOT) {
     let next = moveNode(tree, nodeId, null, payload.index ?? null);
     next = sortTreeByIndex(next);
-    setWindowTree(next);
 
-    if (typeof payload.browserIndex === "number") {
+    let movedInBrowser = true;
+    const browserIndex = await resolveBrowserMoveIndex(tab.windowId, payload.browserIndex);
+    if (browserIndex !== null) {
       try {
-        await chrome.tabs.move(payload.tabId, { index: payload.browserIndex });
+        await chrome.tabs.move(payload.tabId, { index: browserIndex });
       } catch {
-        // Best effort.
+        movedInBrowser = false;
       }
     }
+    if (movedInBrowser) {
+      setWindowTree(next);
+    }
+    await syncWindowOrdering(tab.windowId);
     return;
   }
 }

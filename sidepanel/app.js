@@ -253,6 +253,7 @@ const DROP_EDGE_RATIO = 0.2;
 const INSIDE_DROP_DWELL_MS = 180;
 const AUTO_SCROLL_EDGE_PX = 56;
 const AUTO_SCROLL_MAX_STEP = 18;
+const SETTINGS_WRITE_DEBOUNCE_MS = 320;
 const DROP_TARGET_CLASSES = [
   "drop-valid-before",
   "drop-valid-after",
@@ -296,6 +297,7 @@ const DENSITY_PRESETS = {
     topbarPadY: 12
   }
 };
+const SETTINGS_SIGNATURE_KEYS = Object.keys(DEFAULT_SETTINGS);
 
 const state = {
   settings: null,
@@ -332,6 +334,10 @@ const state = {
   settingsReturnFocusEl: null,
   confirmReturnFocusEl: null,
   pendingCloseAction: null,
+  pendingSettingsPatch: null,
+  settingsWriteTimer: null,
+  settingsWriteInFlight: false,
+  lastHydratedSettingsSignature: null,
   contextMenu: {
     open: false,
     kind: null,
@@ -672,6 +678,24 @@ function hydrateSettingsForm() {
   }
 }
 
+function settingsSignature(settings) {
+  if (!settings) {
+    return "";
+  }
+  return SETTINGS_SIGNATURE_KEYS
+    .map((key) => `${key}:${String(settings[key])}`)
+    .join("|");
+}
+
+function hydrateSettingsFormIfNeeded() {
+  const signature = settingsSignature(state.settings);
+  if (signature === state.lastHydratedSettingsSignature) {
+    return;
+  }
+  hydrateSettingsForm();
+  state.lastHydratedSettingsSignature = signature;
+}
+
 async function applySettingsPatch(patch) {
   if (!state.settings || !patch || typeof patch !== "object") {
     return;
@@ -682,10 +706,62 @@ async function applySettingsPatch(patch) {
     ...patch
   };
   render();
+  queueSettingsPatch(patch);
+}
 
-  await send(MESSAGE_TYPES.PATCH_SETTINGS, {
-    settingsPatch: patch
-  });
+function queueSettingsPatch(patch) {
+  if (!patch || typeof patch !== "object" || !Object.keys(patch).length) {
+    return;
+  }
+
+  state.pendingSettingsPatch = {
+    ...(state.pendingSettingsPatch || {}),
+    ...patch
+  };
+
+  if (state.settingsWriteTimer) {
+    clearTimeout(state.settingsWriteTimer);
+  }
+  state.settingsWriteTimer = setTimeout(() => {
+    state.settingsWriteTimer = null;
+    void flushPendingSettingsPatch();
+  }, SETTINGS_WRITE_DEBOUNCE_MS);
+}
+
+async function flushPendingSettingsPatch() {
+  if (state.settingsWriteInFlight) {
+    return;
+  }
+
+  const patch = state.pendingSettingsPatch;
+  if (!patch || !Object.keys(patch).length) {
+    state.pendingSettingsPatch = null;
+    return;
+  }
+
+  state.pendingSettingsPatch = null;
+  state.settingsWriteInFlight = true;
+  try {
+    await send(MESSAGE_TYPES.PATCH_SETTINGS, {
+      settingsPatch: patch
+    });
+  } finally {
+    state.settingsWriteInFlight = false;
+    if (state.pendingSettingsPatch && !state.settingsWriteTimer) {
+      state.settingsWriteTimer = setTimeout(() => {
+        state.settingsWriteTimer = null;
+        void flushPendingSettingsPatch();
+      }, SETTINGS_WRITE_DEBOUNCE_MS);
+    }
+  }
+}
+
+function flushPendingSettingsPatchSoon() {
+  if (state.settingsWriteTimer) {
+    clearTimeout(state.settingsWriteTimer);
+    state.settingsWriteTimer = null;
+  }
+  void flushPendingSettingsPatch();
 }
 
 async function resetSettingsSection(section) {
@@ -2180,6 +2256,7 @@ function createNodeRow(tree, node, options = {}) {
   row.setAttribute("aria-expanded", node.childNodeIds.length ? String(!node.collapsed) : "false");
   row.setAttribute("aria-selected", state.selectedTabIds.has(node.tabId) ? "true" : "false");
   row.setAttribute("aria-level", String(visualDepth));
+  row.setAttribute("aria-label", node.lastKnownTitle || t("untitledTab", [], "Untitled tab"));
   if (Number.isFinite(siblingIndex) && Number.isFinite(siblingCount)) {
     row.setAttribute("aria-posinset", String(siblingIndex + 1));
     row.setAttribute("aria-setsize", String(siblingCount));
@@ -2203,6 +2280,7 @@ function createNodeRow(tree, node, options = {}) {
     row.classList.add("pinned-row");
     row.title = pinnedTitle;
     row.dataset.pinnedTitle = pinnedTitle;
+    row.setAttribute("aria-label", pinnedTitle);
   }
 
   const twisty = document.createElement("button");
@@ -2475,6 +2553,7 @@ function patchNodeRow(row, tree, node, options = {}) {
   row.setAttribute("aria-expanded", node.childNodeIds.length ? String(!node.collapsed) : "false");
   row.setAttribute("aria-selected", state.selectedTabIds.has(node.tabId) ? "true" : "false");
   row.setAttribute("aria-level", String(visualDepth));
+  row.setAttribute("aria-label", node.lastKnownTitle || t("untitledTab", [], "Untitled tab"));
   if (Number.isFinite(siblingIndex) && Number.isFinite(siblingCount)) {
     row.setAttribute("aria-posinset", String(siblingIndex + 1));
     row.setAttribute("aria-setsize", String(siblingCount));
@@ -2521,6 +2600,7 @@ function patchNodeRow(row, tree, node, options = {}) {
     const pinnedTitle = node.lastKnownTitle || t("pinnedTabTitle", [], "Pinned tab");
     row.title = pinnedTitle;
     row.dataset.pinnedTitle = pinnedTitle;
+    row.setAttribute("aria-label", pinnedTitle);
     row.querySelector(".pinned-label-peek")?.remove();
   } else {
     row.removeAttribute("title");
@@ -3033,7 +3113,7 @@ function render() {
   }
 
   applyThemeFromSettings();
-  hydrateSettingsForm();
+  hydrateSettingsFormIfNeeded();
   updateShortcutHint();
   renderTree();
   renderContextMenu();
@@ -3777,6 +3857,9 @@ function bindEvents() {
 
   window.addEventListener("blur", () => {
     closeContextMenu();
+  });
+  window.addEventListener("beforeunload", () => {
+    flushPendingSettingsPatchSoon();
   });
   window.addEventListener("resize", () => {
     if (!state.contextMenu.open) {
