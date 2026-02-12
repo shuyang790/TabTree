@@ -288,6 +288,133 @@ test.describe("TabTree extension", () => {
     await tabB.close().catch(() => {});
   });
 
+  test("batch close confirmation cancel keeps selected tabs open", async ({ context, sidePanelPage }) => {
+    const tabA = await createTitledTab(context, "Ctx Cancel A");
+    const tabB = await createTitledTab(context, "Ctx Cancel B");
+
+    const rowA = rowByTitle(sidePanelPage, "Ctx Cancel A");
+    const rowB = rowByTitle(sidePanelPage, "Ctx Cancel B");
+    await expect(rowA).toBeVisible();
+    await expect(rowB).toBeVisible();
+
+    await rowA.click();
+    await rowB.click({ modifiers: ["Shift"] });
+    await rowB.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="close-selected-tabs"]').click();
+
+    const confirmOverlay = sidePanelPage.locator("#confirm-overlay");
+    await expect(confirmOverlay).toBeVisible();
+    await sidePanelPage.locator("#confirm-cancel").click();
+    await expect(confirmOverlay).toBeHidden();
+
+    await expect(rowA).toBeVisible();
+    await expect(rowB).toBeVisible();
+
+    await tabA.close().catch(() => {});
+    await tabB.close().catch(() => {});
+  });
+
+  test("single close-selected action skips confirmation", async ({ context, sidePanelPage }) => {
+    const tabA = await createTitledTab(context, "Ctx Single Close");
+    const rowA = rowByTitle(sidePanelPage, "Ctx Single Close");
+    await expect(rowA).toBeVisible();
+
+    await rowA.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="close-selected-tabs"]').click();
+
+    await expect(sidePanelPage.locator("#confirm-overlay")).toBeHidden();
+    await expect(rowA).toHaveCount(0);
+
+    await tabA.close().catch(() => {});
+  });
+
+  test("canceling subtree close leaves parent and child tabs intact", async ({ context, sidePanelPage }) => {
+    const parent = await createTitledTab(context, "Subtree Cancel Parent");
+    const child = await createTitledTab(context, "Subtree Cancel Child");
+    const parentTabId = await tabIdByTitle(sidePanelPage, "Subtree Cancel Parent");
+    const childTabId = await tabIdByTitle(sidePanelPage, "Subtree Cancel Child");
+    expect(Number.isInteger(parentTabId)).toBeTruthy();
+    expect(Number.isInteger(childTabId)).toBeTruthy();
+
+    await sidePanelPage.evaluate(async ({ childTabId, parentTabId }) => {
+      await chrome.runtime.sendMessage({
+        type: "TREE_ACTION",
+        payload: {
+          type: "REPARENT_TAB",
+          tabId: childTabId,
+          newParentTabId: parentTabId
+        }
+      });
+    }, { childTabId, parentTabId });
+
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      return childTitles(tree, "Subtree Cancel Parent");
+    }).toEqual(["Subtree Cancel Child"]);
+
+    const parentRow = rowByTitle(sidePanelPage, "Subtree Cancel Parent");
+    await parentRow.locator('[data-action="toggle-collapse"]').click();
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      const parentNode = nodeByTitle(tree, "Subtree Cancel Parent");
+      return !!parentNode?.collapsed;
+    }).toBeTruthy();
+
+    await parentRow.locator('[data-action="close-tab"]').click();
+    await expect(sidePanelPage.locator("#confirm-overlay")).toBeVisible();
+    await sidePanelPage.locator("#confirm-cancel").click();
+    await expect(sidePanelPage.locator("#confirm-overlay")).toBeHidden();
+
+    await expect(rowByTitle(sidePanelPage, "Subtree Cancel Parent")).toBeVisible();
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      const childNode = nodeByTitle(tree, "Subtree Cancel Child");
+      const parentNode = nodeByTitle(tree, "Subtree Cancel Parent");
+      return !!childNode && !!parentNode && childNode.parentNodeId === parentNode.nodeId;
+    }).toBeTruthy();
+
+    await parent.close().catch(() => {});
+    await child.close().catch(() => {});
+  });
+
+  test("batch close skips modal when confirmCloseBatch is disabled", async ({ context, sidePanelPage }) => {
+    const tabA = await createTitledTab(context, "Ctx Skip Confirm A");
+    const tabB = await createTitledTab(context, "Ctx Skip Confirm B");
+
+    await sidePanelPage.evaluate(async () => {
+      await chrome.runtime.sendMessage({
+        type: "PATCH_SETTINGS",
+        payload: {
+          settingsPatch: {
+            confirmCloseBatch: false
+          }
+        }
+      });
+    });
+
+    await expect.poll(async () => sidePanelPage.evaluate(async () => {
+      const response = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+      return !!response?.payload?.settings?.confirmCloseBatch;
+    })).toBe(false);
+
+    const rowA = rowByTitle(sidePanelPage, "Ctx Skip Confirm A");
+    const rowB = rowByTitle(sidePanelPage, "Ctx Skip Confirm B");
+    await expect(rowA).toBeVisible();
+    await expect(rowB).toBeVisible();
+
+    await rowA.click();
+    await rowB.click({ modifiers: ["Shift"] });
+    await rowB.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="close-selected-tabs"]').click();
+
+    await expect(sidePanelPage.locator("#confirm-overlay")).toBeHidden();
+    await expect(rowA).toHaveCount(0);
+    await expect(rowB).toHaveCount(0);
+
+    await tabA.close().catch(() => {});
+    await tabB.close().catch(() => {});
+  });
+
   test("keeps side panel tree scoped to its window", async ({ context, extensionId, sidePanelPage }) => {
     const sidePanelUrl = `chrome-extension://${extensionId}/sidepanel/index.html`;
     const windowOneTitle = "Window One Unique";
