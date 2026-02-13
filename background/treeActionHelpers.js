@@ -66,3 +66,18 @@ export function insertionIndexForGroupMove(tabs, sourceTabIds, payload) {
   }
   return remaining[targetPosition].index;
 }
+
+export function relativeMoveDestinationIndex(anchorIndex, movingIndex, placement) {
+  if (!Number.isFinite(anchorIndex) || !Number.isFinite(movingIndex)) {
+    return -1;
+  }
+  if (placement !== "before" && placement !== "after") {
+    return -1;
+  }
+
+  let destinationIndex = placement === "after" ? anchorIndex + 1 : anchorIndex;
+  if (movingIndex < anchorIndex) {
+    destinationIndex -= 1;
+  }
+  return Math.max(0, destinationIndex);
+}

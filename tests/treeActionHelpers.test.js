@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   browserInsertionIndexForRelativePlacement,
   insertionIndexForGroupMove,
+  relativeMoveDestinationIndex,
   uniqueFiniteTabIdsInOrder
 } from "../background/treeActionHelpers.js";
 
@@ -72,4 +73,12 @@ test("insertionIndexForGroupMove resolves target tab/group indices", () => {
     }),
     4
   );
+});
+
+test("relativeMoveDestinationIndex handles before/after with index-shift correction", () => {
+  assert.equal(relativeMoveDestinationIndex(10, 3, "after"), 10);
+  assert.equal(relativeMoveDestinationIndex(10, 12, "after"), 11);
+  assert.equal(relativeMoveDestinationIndex(10, 3, "before"), 9);
+  assert.equal(relativeMoveDestinationIndex(10, 12, "before"), 10);
+  assert.equal(relativeMoveDestinationIndex(10, 3, "invalid"), -1);
 });

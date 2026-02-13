@@ -20,6 +20,7 @@ import { dedupeRootNodeIds } from "../shared/treeUtils.js";
 import {
   browserInsertionIndexForRelativePlacement,
   insertionIndexForGroupMove,
+  relativeMoveDestinationIndex,
   uniqueFiniteTabIdsInOrder
 } from "./treeActionHelpers.js";
 import { shouldProcessTabUpdate } from "./tabUpdates.js";
@@ -302,10 +303,7 @@ async function moveTabsRelativeToTarget(windowId, moveTabIds, targetTabId, place
       return false;
     }
 
-    let destinationIndex = placement === "after" ? anchorTab.index + 1 : anchorTab.index;
-    if (movingTab.index < anchorTab.index) {
-      destinationIndex -= 1;
-    }
+    const destinationIndex = relativeMoveDestinationIndex(anchorTab.index, movingTab.index, placement);
     try {
       await chrome.tabs.move(tabId, { index: destinationIndex });
     } catch (error) {

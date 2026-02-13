@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS, MESSAGE_TYPES, TREE_ACTIONS } from "../shared/constants.js";
 import { applyRuntimeStateUpdate } from "./statePatch.js";
 import { buildClosePlan, shouldConfirmClose } from "./closePlan.js";
+import { buildDropPayload as buildDropPayloadModel, canDrop as canDropModel } from "./dropModel.js";
 import { sendOrThrow } from "./messaging.js";
 import {
   pruneSelection as pruneSelectionState,
@@ -1635,35 +1636,6 @@ function shouldRenderNode(tree, nodeKey, query, visibilityByNodeId) {
   return visibilityByNodeId.get(nodeKey) === true;
 }
 
-function isDescendant(tree, ancestorNodeId, maybeDescendantNodeId) {
-  if (!ancestorNodeId || !maybeDescendantNodeId) {
-    return false;
-  }
-  const stack = [...(tree.nodes[ancestorNodeId]?.childNodeIds || [])];
-  while (stack.length) {
-    const current = stack.pop();
-    if (current === maybeDescendantNodeId) {
-      return true;
-    }
-    stack.push(...(tree.nodes[current]?.childNodeIds || []));
-  }
-  return false;
-}
-
-function subtreeMaxIndex(tree, rootNodeId) {
-  let max = tree.nodes[rootNodeId]?.index ?? 0;
-  const stack = [...(tree.nodes[rootNodeId]?.childNodeIds || [])];
-  while (stack.length) {
-    const current = stack.pop();
-    const node = tree.nodes[current];
-    if (node) {
-      max = Math.max(max, node.index ?? max);
-      stack.push(...node.childNodeIds);
-    }
-  }
-  return max;
-}
-
 function getDropPosition(event, row, options = {}) {
   const { allowInside = true } = options;
   const rect = row.getBoundingClientRect();
@@ -1982,132 +1954,21 @@ function closeSettingsPanel() {
 }
 
 function canDrop(tree, sourceTabIds, targetTabId, position) {
-  const targetNodeId = nodeId(targetTabId);
-  const targetNode = tree.nodes[targetNodeId];
-  if (!targetNode) {
-    return false;
-  }
-
-  const sourceNodeIds = sourceTabIds.map((tabId) => nodeId(tabId));
-  if (sourceNodeIds.includes(targetNodeId)) {
-    return false;
-  }
-
-  let newParentNodeId = null;
-  if (position === "inside") {
-    newParentNodeId = targetNodeId;
-  } else {
-    newParentNodeId = targetNode.parentNodeId;
-  }
-
-  const expectedPinned = (() => {
-    if (newParentNodeId) {
-      return !!tree.nodes[newParentNodeId]?.pinned;
-    }
-    return !!targetNode.pinned;
-  })();
-
-  for (const sourceNodeId of sourceNodeIds) {
-    const sourceNode = tree.nodes[sourceNodeId];
-    if (!sourceNode) {
-      return false;
-    }
-
-    if (newParentNodeId && isDescendant(tree, sourceNodeId, newParentNodeId)) {
-      return false;
-    }
-
-    if (!!sourceNode.pinned !== expectedPinned) {
-      return false;
-    }
-  }
-
-  return true;
+  return canDropModel({
+    tree,
+    sourceTabIds,
+    targetTabId,
+    position
+  });
 }
 
 function buildDropPayload(tree, sourceTabIds, targetTabId, position) {
-  const targetNodeId = nodeId(targetTabId);
-  const target = tree.nodes[targetNodeId];
-  if (!target) {
-    return null;
-  }
-
-  if (sourceTabIds.length > 1) {
-    if (position === "inside") {
-      return {
-        type: TREE_ACTIONS.BATCH_REPARENT,
-        tabIds: sourceTabIds,
-        newParentTabId: target.tabId,
-        targetTabId: target.tabId,
-        placement: "inside"
-      };
-    }
-    if (target.parentNodeId) {
-      return {
-        type: TREE_ACTIONS.BATCH_REPARENT,
-        tabIds: sourceTabIds,
-        newParentTabId: tree.nodes[target.parentNodeId]?.tabId || null,
-        targetTabId: target.tabId,
-        placement: position
-      };
-    }
-    return {
-      type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
-      tabIds: sourceTabIds,
-      targetTabId: target.tabId,
-      placement: position
-    };
-  }
-
-  const sourceTabId = sourceTabIds[0];
-  const sourceNodeId = nodeId(sourceTabId);
-  const source = tree.nodes[sourceNodeId];
-  if (!source) {
-    return null;
-  }
-
-  if (position === "inside") {
-    return {
-      type: TREE_ACTIONS.REPARENT_TAB,
-      tabId: sourceTabId,
-      targetTabId,
-      newParentTabId: target.tabId,
-      newIndex: target.childNodeIds.length,
-      browserIndex: subtreeMaxIndex(tree, targetNodeId) + 1
-    };
-  }
-
-  const parentNodeId = target.parentNodeId;
-  const siblings = parentNodeId ? tree.nodes[parentNodeId]?.childNodeIds || [] : tree.rootNodeIds;
-  let newIndex = siblings.indexOf(targetNodeId);
-  if (position === "after") {
-    newIndex += 1;
-  }
-
-  const oldIndexInSameList = siblings.indexOf(sourceNodeId);
-  if (oldIndexInSameList >= 0 && oldIndexInSameList < newIndex) {
-    newIndex -= 1;
-  }
-
-  const browserIndex = target.index + (position === "after" ? 1 : 0);
-
-  if (parentNodeId) {
-    return {
-      type: TREE_ACTIONS.REPARENT_TAB,
-      tabId: sourceTabId,
-      targetTabId,
-      newParentTabId: tree.nodes[parentNodeId]?.tabId || null,
-      newIndex,
-      browserIndex
-    };
-  }
-
-  return {
-    type: TREE_ACTIONS.MOVE_TO_ROOT,
-    tabId: sourceTabId,
-    index: newIndex,
-    browserIndex
-  };
+  return buildDropPayloadModel({
+    tree,
+    sourceTabIds,
+    targetTabId,
+    position
+  });
 }
 
 async function dropToRoot(tree) {

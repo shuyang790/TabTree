@@ -1,12 +1,46 @@
 import { TREE_ACTIONS } from "../shared/constants.js";
 
+function defaultNodeIdFromTabId(tabId) {
+  return `tab:${tabId}`;
+}
+
+function defaultIsDescendant(tree, ancestorNodeId, maybeDescendantNodeId) {
+  if (!ancestorNodeId || !maybeDescendantNodeId) {
+    return false;
+  }
+  const stack = [...(tree.nodes[ancestorNodeId]?.childNodeIds || [])];
+  while (stack.length) {
+    const current = stack.pop();
+    if (current === maybeDescendantNodeId) {
+      return true;
+    }
+    stack.push(...(tree.nodes[current]?.childNodeIds || []));
+  }
+  return false;
+}
+
+function defaultSubtreeMaxIndex(tree, rootNodeId) {
+  let max = tree.nodes[rootNodeId]?.index ?? 0;
+  const stack = [...(tree.nodes[rootNodeId]?.childNodeIds || [])];
+  while (stack.length) {
+    const current = stack.pop();
+    const node = tree.nodes[current];
+    if (!node) {
+      continue;
+    }
+    max = Math.max(max, node.index);
+    stack.push(...node.childNodeIds);
+  }
+  return max;
+}
+
 export function canDrop({
   tree,
   sourceTabIds,
   targetTabId,
   position,
-  nodeIdFromTabId,
-  isDescendant
+  nodeIdFromTabId = defaultNodeIdFromTabId,
+  isDescendant = defaultIsDescendant
 }) {
   if (!tree || typeof nodeIdFromTabId !== "function" || typeof isDescendant !== "function") {
     return false;
@@ -60,8 +94,8 @@ export function buildDropPayload({
   sourceTabIds,
   targetTabId,
   position,
-  nodeIdFromTabId,
-  subtreeMaxIndex
+  nodeIdFromTabId = defaultNodeIdFromTabId,
+  subtreeMaxIndex = defaultSubtreeMaxIndex
 }) {
   if (!tree || typeof nodeIdFromTabId !== "function" || typeof subtreeMaxIndex !== "function") {
     return null;
