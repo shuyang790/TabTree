@@ -31,6 +31,7 @@ import {
   normalizedDepth as normalizedDepthModel,
   safeFaviconUrl as safeFaviconUrlModel
 } from "./rowPresentationModel.js";
+import { buildRootDropPayload as buildRootDropPayloadModel } from "./rootDropModel.js";
 import {
   pruneSelection as pruneSelectionState,
   replaceSelection as replaceSelectionState,
@@ -1847,34 +1848,17 @@ async function dropToRoot(tree) {
     return;
   }
 
-  if (state.draggingTabIds.length > 1) {
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
-      tabIds: [...state.draggingTabIds]
-    });
-  } else {
-    const tabId = state.draggingTabIds[0];
-    const draggingNode = tree.nodes[nodeId(tabId)];
-    if (!draggingNode) {
-      state.draggingTabIds = [];
-      resetInsideDropHover();
-      clearDropClasses();
-      return;
-    }
-
-    const maxBrowserIndex = Math.max(
-      0,
-      ...Object.values(tree.nodes)
-        .filter((n) => !!n.pinned === !!draggingNode.pinned)
-        .map((n) => n.index)
-    );
-
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.MOVE_TO_ROOT,
-      tabId,
-      browserIndex: maxBrowserIndex + 1
-    });
+  const payload = buildRootDropPayloadModel({
+    tree,
+    draggingTabIds: state.draggingTabIds
+  });
+  if (!payload) {
+    state.draggingTabIds = [];
+    resetInsideDropHover();
+    clearDropClasses();
+    return;
   }
+  await send(MESSAGE_TYPES.TREE_ACTION, payload);
 
   state.draggingTabIds = [];
   resetInsideDropHover();
