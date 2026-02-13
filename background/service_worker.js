@@ -38,6 +38,12 @@ import {
 } from "../shared/treeStore.js";
 import { createPersistCoordinator } from "./persistence.js";
 import { createInitCoordinator } from "./initCoordinator.js";
+import {
+  handleCloseSubtreeAction,
+  handleMoveToRootAction,
+  handleReparentTabAction,
+  handleToggleGroupCollapseAction
+} from "./treeActionHandlers.js";
 
 const state = {
   settings: null,
@@ -387,6 +393,10 @@ async function syncWindowOrdering(windowId) {
   next = { ...next, groups: groupMap };
 
   setWindowTree(next);
+}
+
+function resolveStaleWindowIdByNodeId(targetNodeId) {
+  return Object.values(state.windows).find((win) => !!win.nodes[targetNodeId])?.windowId;
 }
 
 function scheduleWindowOrderingSync(windowId) {
@@ -1211,44 +1221,23 @@ async function handleTreeAction(payload) {
   }
 
   if (type === TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE) {
-    const groupId = payload.groupId;
-    if (!Number.isInteger(groupId)) {
-      return;
-    }
-
-    const windowId = await resolveGroupWindowId(groupId, payload.windowId);
-    if (!Number.isInteger(windowId)) {
-      return;
-    }
-
-    const tree = windowTree(windowId);
-    const group = tree.groups?.[groupId];
-    const collapsed = typeof payload.collapsed === "boolean" ? payload.collapsed : !group?.collapsed;
-
-    try {
-      await chrome.tabGroups.update(groupId, { collapsed });
-    } catch {
-      // Best effort.
-    }
-
-    await refreshGroupMetadata(windowId);
-    return;
+    return handleToggleGroupCollapseAction(payload, {
+      resolveGroupWindowId,
+      windowTree,
+      updateGroupCollapsed: (groupId, collapsed) => chrome.tabGroups.update(groupId, { collapsed }),
+      refreshGroupMetadata
+    });
   }
 
   if (type === TREE_ACTIONS.CLOSE_SUBTREE) {
-    const closingTab = await getTab(payload.tabId);
-    if (closingTab) {
-      await closeSubtree(closingTab.windowId, payload.tabId, payload.includeDescendants ?? true);
-      return;
-    }
-
-    const staleNodeId = nodeIdFromTabId(payload.tabId);
-    const staleWindowId = Object.values(state.windows).find((win) => !!win.nodes[staleNodeId])?.windowId;
-    if (Number.isInteger(staleWindowId)) {
-      removeTabIdsFromWindowTree(staleWindowId, [payload.tabId]);
-      await pruneWindowTreeAgainstLiveTabs(staleWindowId);
-    }
-    return;
+    return handleCloseSubtreeAction(payload, {
+      getTab,
+      closeSubtree,
+      nodeIdFromTabId,
+      resolveStaleWindowIdByNodeId,
+      removeTabIdsFromWindowTree,
+      pruneWindowTreeAgainstLiveTabs
+    });
   }
 
   const tab = await getTab(payload.tabId);
@@ -1264,82 +1253,31 @@ async function handleTreeAction(payload) {
   }
 
   if (type === TREE_ACTIONS.REPARENT_TAB) {
-    const parentNodeId = payload.newParentTabId ? nodeIdFromTabId(payload.newParentTabId) : null;
-    if (!canReparent(tree, nodeId, parentNodeId)) {
-      return;
-    }
-    if (!parentNodeId && payload.targetTabId) {
-      const targetNode = tree.nodes[nodeIdFromTabId(payload.targetTabId)];
-      const sourceNode = tree.nodes[nodeId];
-      if (targetNode && sourceNode && !!targetNode.pinned !== !!sourceNode.pinned) {
-        return;
-      }
-    }
-
-    let next = moveNode(tree, nodeId, parentNodeId, payload.newIndex ?? null);
-    next = sortTreeByIndex(next);
-
-    let movedInBrowser = true;
-    const browserIndex = await resolveBrowserMoveIndex(tab.windowId, payload.browserIndex);
-    if (browserIndex !== null) {
-      try {
-        await chrome.tabs.move(payload.tabId, { index: browserIndex });
-      } catch (error) {
-        logUnexpectedFailure("reparentTab.move", error, {
-          windowId: tab.windowId,
-          tabId: payload.tabId,
-          browserIndex
-        });
-        movedInBrowser = false;
-      }
-    }
-
-    if (movedInBrowser) {
-      setWindowTree(next);
-    }
-
-    if (movedInBrowser && parentNodeId) {
-      const parentTabId = tree.nodes[parentNodeId]?.tabId;
-      const parentTab = parentTabId ? await getTab(parentTabId) : null;
-      if (parentTab && Number.isInteger(parentTab.groupId) && parentTab.groupId >= 0) {
-        try {
-          await chrome.tabs.group({ groupId: parentTab.groupId, tabIds: [payload.tabId] });
-        } catch (error) {
-          logUnexpectedFailure("reparentTab.group", error, {
-            windowId: tab.windowId,
-            tabId: payload.tabId,
-            groupId: parentTab.groupId
-          });
-        }
-      }
-    }
-    await syncWindowOrdering(tab.windowId);
-    return;
+    return handleReparentTabAction({ payload, tab, tree, nodeId }, {
+      nodeIdFromTabId,
+      canReparent,
+      moveNode,
+      sortTreeByIndex,
+      resolveBrowserMoveIndex,
+      moveTab: (tabId, index) => chrome.tabs.move(tabId, { index }),
+      logUnexpectedFailure,
+      setWindowTree,
+      getTab,
+      groupTabs: (groupId, tabIds) => chrome.tabs.group({ groupId, tabIds }),
+      syncWindowOrdering
+    });
   }
 
   if (type === TREE_ACTIONS.MOVE_TO_ROOT) {
-    let next = moveNode(tree, nodeId, null, payload.index ?? null);
-    next = sortTreeByIndex(next);
-
-    let movedInBrowser = true;
-    const browserIndex = await resolveBrowserMoveIndex(tab.windowId, payload.browserIndex);
-    if (browserIndex !== null) {
-      try {
-        await chrome.tabs.move(payload.tabId, { index: browserIndex });
-      } catch (error) {
-        logUnexpectedFailure("moveToRoot.move", error, {
-          windowId: tab.windowId,
-          tabId: payload.tabId,
-          browserIndex
-        });
-        movedInBrowser = false;
-      }
-    }
-    if (movedInBrowser) {
-      setWindowTree(next);
-    }
-    await syncWindowOrdering(tab.windowId);
-    return;
+    return handleMoveToRootAction({ payload, tab, tree, nodeId }, {
+      moveNode,
+      sortTreeByIndex,
+      resolveBrowserMoveIndex,
+      moveTab: (tabId, index) => chrome.tabs.move(tabId, { index }),
+      logUnexpectedFailure,
+      setWindowTree,
+      syncWindowOrdering
+    });
   }
 }
 

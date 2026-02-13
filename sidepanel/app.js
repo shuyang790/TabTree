@@ -1,7 +1,13 @@
 import { DEFAULT_SETTINGS, MESSAGE_TYPES, TREE_ACTIONS } from "../shared/constants.js";
 import { applyRuntimeStateUpdate } from "./statePatch.js";
 import { buildClosePlan, shouldConfirmClose } from "./closePlan.js";
+import {
+  buildConfirmDialogState,
+  confirmSkipPatch,
+  nextFocusWrapIndex
+} from "./confirmCloseModel.js";
 import { resolveContextScopeTabIds as resolveContextScopeTabIdsModel } from "./contextScopeModel.js";
+import { deriveContextMenuActionIntent } from "./contextMenuActionModel.js";
 import {
   dropClassesForTarget,
   emptyDragTarget,
@@ -993,124 +999,44 @@ async function executeContextMenuAction(action) {
     return;
   }
 
-  if (action === "rename-group") {
+  const intent = deriveContextMenuActionIntent({
+    action,
+    tree,
+    contextMenu: state.contextMenu,
+    groupTabIds
+  });
+
+  if (intent.kind === "open-rename-group") {
     state.contextMenu.renameOpen = true;
     renderContextMenu();
     return;
   }
 
-  if (action === "close-group") {
-    const tabIds = groupTabIds(tree, state.contextMenu.groupId);
+  if (intent.shouldCloseMenu) {
     closeContextMenu();
-    if (!tabIds.length) {
+  }
+
+  if (intent.kind === "request-close") {
+    if (intent.totalTabs <= 0) {
       return;
     }
-    await requestClose(
-      {
-        kind: "batch-tabs",
-        tabIds
-      },
-      tabIds.length,
-      true
-    );
+    await requestClose(intent.closeAction, intent.totalTabs, intent.isBatch);
     return;
   }
 
-  if (action === "close-selected-tabs") {
-    const tabIds = state.contextMenu.scopeTabIds;
-    closeContextMenu();
-    if (!tabIds.length) {
+  if (intent.kind === "tree-action") {
+    if (!intent.payload) {
       return;
     }
-    await requestClose(
-      {
-        kind: "batch-tabs",
-        tabIds
-      },
-      tabIds.length,
-      true
-    );
+    await send(MESSAGE_TYPES.TREE_ACTION, intent.payload);
     return;
   }
 
-  if (action === "group-selected-new") {
-    const tabIds = state.contextMenu.scopeTabIds;
-    const hasGroupedTabs = tabIds.some((tabId) => tree.nodes[nodeId(tabId)]?.groupId !== null);
-    closeContextMenu();
-    if (!tabIds.length || hasGroupedTabs) {
+  if (intent.kind === "copy-urls") {
+    if (!intent.text) {
       return;
     }
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.BATCH_GROUP_NEW,
-      tabIds
-    });
-    return;
-  }
-
-  if (typeof action === "string" && action.startsWith("group-selected-existing:")) {
-    const tabIds = state.contextMenu.scopeTabIds;
-    const groupId = Number(action.slice("group-selected-existing:".length));
-    const windowId = state.contextMenu.windowId;
-    closeContextMenu();
-    if (!tabIds.length || !Number.isInteger(groupId)) {
-      return;
-    }
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.BATCH_GROUP_EXISTING,
-      tabIds,
-      groupId,
-      windowId
-    });
-    return;
-  }
-
-  if (action === "add-child") {
-    const tabId = state.contextMenu.primaryTabId;
-    closeContextMenu();
-    if (!Number.isFinite(tabId)) {
-      return;
-    }
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.ADD_CHILD_TAB,
-      parentTabId: tabId
-    });
-    return;
-  }
-
-  if (action === "move-selected-root") {
-    const tabIds = state.contextMenu.scopeTabIds;
-    closeContextMenu();
-    if (!tabIds.length) {
-      return;
-    }
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
-      tabIds
-    });
-    return;
-  }
-
-  if (action === "toggle-collapse") {
-    const tabId = state.contextMenu.primaryTabId;
-    closeContextMenu();
-    if (!Number.isFinite(tabId)) {
-      return;
-    }
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.TOGGLE_COLLAPSE,
-      tabId
-    });
-    return;
-  }
-
-  if (action === "copy-urls") {
-    const urls = scopedUrls(tree, state.contextMenu.scopeTabIds);
-    closeContextMenu();
-    if (!urls.length) {
-      return;
-    }
-    await copyTextToClipboard(urls.join("\n"));
-    return;
+    await copyTextToClipboard(intent.text);
   }
 }
 
@@ -1793,13 +1719,20 @@ async function requestClose(action, totalTabs, isBatch) {
     return;
   }
 
-  state.pendingCloseAction = { action, isBatch };
-  state.confirmReturnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  dom.confirmMessage.textContent = t(
-    "confirmCloseMessage",
-    [String(totalTabs)],
-    `This will close ${totalTabs} tabs. Continue?`
-  );
+  const confirmState = buildConfirmDialogState({
+    action,
+    isBatch,
+    totalTabs,
+    activeElement: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    formatMessage: (count) => t(
+      "confirmCloseMessage",
+      [String(count)],
+      `This will close ${count} tabs. Continue?`
+    )
+  });
+  state.pendingCloseAction = confirmState.pendingCloseAction;
+  state.confirmReturnFocusEl = confirmState.confirmReturnFocusEl;
+  dom.confirmMessage.textContent = confirmState.message;
   dom.confirmSkip.checked = false;
   dom.confirmOverlay.hidden = false;
   queueMicrotask(() => {
@@ -3362,10 +3295,8 @@ function bindEvents() {
       return;
     }
 
-    if (dom.confirmSkip.checked) {
-      const patch = pending.isBatch
-        ? { confirmCloseBatch: false }
-        : { confirmCloseSubtree: false };
+    const patch = confirmSkipPatch(pending, dom.confirmSkip.checked);
+    if (patch) {
       state.settings = { ...state.settings, ...patch };
       try {
         await send(MESSAGE_TYPES.PATCH_SETTINGS, { settingsPatch: patch });
@@ -3413,10 +3344,10 @@ function bindEvents() {
           return;
         }
         const currentIndex = focusables.indexOf(document.activeElement);
-        const delta = event.shiftKey ? -1 : 1;
-        const nextIndex = currentIndex >= 0
-          ? (currentIndex + delta + focusables.length) % focusables.length
-          : 0;
+        const nextIndex = nextFocusWrapIndex(currentIndex, focusables.length, event.shiftKey);
+        if (nextIndex < 0) {
+          return;
+        }
         event.preventDefault();
         focusables[nextIndex].focus();
       }

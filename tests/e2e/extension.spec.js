@@ -103,6 +103,29 @@ async function dragRowToSearchRoot(sidePanelPage, sourceTitle) {
   });
 }
 
+function groupHeaderByContainedRowTitle(sidePanelPage, rowTitle) {
+  return sidePanelPage
+    .locator(".group-section")
+    .filter({ has: rowByTitle(sidePanelPage, rowTitle) })
+    .first()
+    .locator(".group-header");
+}
+
+async function dragGroupHeaderToRow(sidePanelPage, sourceRowTitle, targetRowTitle, position) {
+  const sourceHeader = groupHeaderByContainedRowTitle(sidePanelPage, sourceRowTitle);
+  const targetRow = rowByTitle(sidePanelPage, targetRowTitle);
+  await expect(sourceHeader).toBeVisible();
+  await expect(targetRow).toBeVisible();
+
+  const box = await targetRow.boundingBox();
+  expect(box).toBeTruthy();
+  const y = position === "before" ? 2 : Math.max(2, Math.floor(box.height - 2));
+  const x = Math.max(8, Math.floor(box.width / 2));
+  await sourceHeader.dragTo(targetRow, {
+    targetPosition: { x, y }
+  });
+}
+
 test.describe("TabTree extension", () => {
   test("loads side panel app shell", async ({ sidePanelPage }) => {
     await expect(sidePanelPage.locator("#search")).toBeVisible();
@@ -410,6 +433,107 @@ test.describe("TabTree extension", () => {
     await expect(sidePanelPage.locator("#confirm-overlay")).toBeHidden();
     await expect(rowA).toHaveCount(0);
     await expect(rowB).toHaveCount(0);
+
+    await tabA.close().catch(() => {});
+    await tabB.close().catch(() => {});
+  });
+
+  test("confirm skip checkbox disables future batch-close confirmations after accept", async ({ context, sidePanelPage }) => {
+    const tabA = await createTitledTab(context, "Ctx Skip Persist A");
+    const tabB = await createTitledTab(context, "Ctx Skip Persist B");
+
+    const rowA = rowByTitle(sidePanelPage, "Ctx Skip Persist A");
+    const rowB = rowByTitle(sidePanelPage, "Ctx Skip Persist B");
+    await expect(rowA).toBeVisible();
+    await expect(rowB).toBeVisible();
+
+    await rowA.click();
+    await rowB.click({ modifiers: ["Shift"] });
+    await rowB.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="close-selected-tabs"]').click();
+
+    const confirmOverlay = sidePanelPage.locator("#confirm-overlay");
+    await expect(confirmOverlay).toBeVisible();
+    await sidePanelPage.locator("#confirm-skip").check();
+    await sidePanelPage.locator("#confirm-ok").click();
+
+    await expect(rowA).toHaveCount(0);
+    await expect(rowB).toHaveCount(0);
+
+    await expect.poll(async () => sidePanelPage.evaluate(async () => {
+      const response = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+      return response?.payload?.settings?.confirmCloseBatch ?? null;
+    })).toBe(false);
+
+    const tabC = await createTitledTab(context, "Ctx Skip Persist C");
+    const tabD = await createTitledTab(context, "Ctx Skip Persist D");
+    const rowC = rowByTitle(sidePanelPage, "Ctx Skip Persist C");
+    const rowD = rowByTitle(sidePanelPage, "Ctx Skip Persist D");
+    await expect(rowC).toBeVisible();
+    await expect(rowD).toBeVisible();
+
+    await rowC.click();
+    await rowD.click({ modifiers: ["Shift"] });
+    await rowD.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="close-selected-tabs"]').click();
+
+    await expect(confirmOverlay).toBeHidden();
+    await expect(rowC).toHaveCount(0);
+    await expect(rowD).toHaveCount(0);
+
+    await tabA.close().catch(() => {});
+    await tabB.close().catch(() => {});
+    await tabC.close().catch(() => {});
+    await tabD.close().catch(() => {});
+  });
+
+  test("canceling with skip checked does not persist confirm-close preference", async ({ context, sidePanelPage }) => {
+    const tabA = await createTitledTab(context, "Ctx Skip Cancel A");
+    const tabB = await createTitledTab(context, "Ctx Skip Cancel B");
+
+    await sidePanelPage.evaluate(async () => {
+      await chrome.runtime.sendMessage({
+        type: "PATCH_SETTINGS",
+        payload: {
+          settingsPatch: {
+            confirmCloseBatch: true
+          }
+        }
+      });
+    });
+
+    const rowA = rowByTitle(sidePanelPage, "Ctx Skip Cancel A");
+    const rowB = rowByTitle(sidePanelPage, "Ctx Skip Cancel B");
+    await expect(rowA).toBeVisible();
+    await expect(rowB).toBeVisible();
+
+    await rowA.click();
+    await rowB.click({ modifiers: ["Shift"] });
+    await rowB.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="close-selected-tabs"]').click();
+
+    const confirmOverlay = sidePanelPage.locator("#confirm-overlay");
+    const confirmSkip = sidePanelPage.locator("#confirm-skip");
+    await expect(confirmOverlay).toBeVisible();
+    await confirmSkip.check();
+    await sidePanelPage.locator("#confirm-cancel").click();
+    await expect(confirmOverlay).toBeHidden();
+
+    await expect(rowA).toBeVisible();
+    await expect(rowB).toBeVisible();
+
+    await rowA.click();
+    await rowB.click({ modifiers: ["Shift"] });
+    await rowB.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="close-selected-tabs"]').click();
+    await expect(confirmOverlay).toBeVisible();
+    await expect(confirmSkip).not.toBeChecked();
+    await sidePanelPage.locator("#confirm-cancel").click();
+
+    await expect.poll(async () => sidePanelPage.evaluate(async () => {
+      const response = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+      return response?.payload?.settings?.confirmCloseBatch ?? null;
+    })).toBe(true);
 
     await tabA.close().catch(() => {});
     await tabB.close().catch(() => {});
@@ -748,6 +872,61 @@ test.describe("TabTree extension", () => {
     await seedB.close().catch(() => {});
     await moveA.close().catch(() => {});
     await moveB.close().catch(() => {});
+  });
+
+  test("dragging a group header before a row reorders the grouped block in UI", async ({ context, sidePanelPage }) => {
+    const target = await createTitledTab(context, "UI Group Target");
+    const tail = await createTitledTab(context, "UI Group Tail");
+    const tabA = await createTitledTab(context, "UI Group Drag A");
+    const tabB = await createTitledTab(context, "UI Group Drag B");
+
+    const rowA = rowByTitle(sidePanelPage, "UI Group Drag A");
+    const rowB = rowByTitle(sidePanelPage, "UI Group Drag B");
+    const rowTarget = rowByTitle(sidePanelPage, "UI Group Target");
+    await expect(rowA).toBeVisible();
+    await expect(rowB).toBeVisible();
+    await expect(rowTarget).toBeVisible();
+
+    await rowA.click();
+    await rowB.click({ modifiers: ["Shift"] });
+    await rowA.click({ button: "right" });
+    await sidePanelPage.locator('.context-menu-item[data-action="group-selected-new"]').click();
+
+    const groupHeader = groupHeaderByContainedRowTitle(sidePanelPage, "UI Group Drag A");
+    await expect(groupHeader).toBeVisible();
+    const sourceGroupId = Number(await groupHeader.getAttribute("data-group-id"));
+    expect(Number.isInteger(sourceGroupId)).toBeTruthy();
+
+    await dragGroupHeaderToRow(sidePanelPage, "UI Group Drag A", "UI Group Target", "before");
+
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      const roots = rootTitles(tree).filter((title) => [
+        "UI Group Drag A",
+        "UI Group Drag B",
+        "UI Group Target",
+        "UI Group Tail"
+      ].includes(title));
+      const nodeA = nodeByTitle(tree, "UI Group Drag A");
+      const nodeB = nodeByTitle(tree, "UI Group Drag B");
+      return {
+        roots,
+        grouped: nodeA?.groupId === sourceGroupId && nodeB?.groupId === sourceGroupId
+      };
+    }).toEqual({
+      roots: [
+        "UI Group Drag A",
+        "UI Group Drag B",
+        "UI Group Target",
+        "UI Group Tail"
+      ],
+      grouped: true
+    });
+
+    await target.close().catch(() => {});
+    await tail.close().catch(() => {});
+    await tabA.close().catch(() => {});
+    await tabB.close().catch(() => {});
   });
 
   test("moving a two-tab group keeps both tabs visible in side panel", async ({ context, sidePanelPage }) => {
