@@ -17,6 +17,7 @@ import {
   buildMoveGroupBlockPayload,
   canDropGroup as canDropGroupModel
 } from "./groupDropModel.js";
+import { orderedExistingGroups as orderedExistingGroupsModel } from "./groupOptionsModel.js";
 import { sendOrThrow } from "./messaging.js";
 import {
   buildVisibilityMap,
@@ -976,43 +977,10 @@ function groupTabIds(tree, groupId) {
 }
 
 function orderedExistingGroups(tree) {
-  const ordered = [];
-  const seen = new Set();
   const { blocks } = rootBuckets(tree);
-
-  for (const block of blocks) {
-    if (block.type !== "group") {
-      continue;
-    }
-    const group = tree.groups?.[block.groupId];
-    if (!group || seen.has(group.id)) {
-      continue;
-    }
-    const tabCount = groupTabIds(tree, group.id).length;
-    ordered.push({
-      id: group.id,
-      title: group.title || t("unnamedGroup", [], "Unnamed group"),
-      color: group.color,
-      tabCount
-    });
-    seen.add(group.id);
-  }
-
-  for (const group of Object.values(tree.groups || {})) {
-    if (!Number.isInteger(group?.id) || seen.has(group.id)) {
-      continue;
-    }
-    const tabCount = groupTabIds(tree, group.id).length;
-    ordered.push({
-      id: group.id,
-      title: group.title || t("unnamedGroup", [], "Unnamed group"),
-      color: group.color,
-      tabCount
-    });
-    seen.add(group.id);
-  }
-
-  return ordered;
+  return orderedExistingGroupsModel(tree, blocks, {
+    unnamedGroupLabel: t("unnamedGroup", [], "Unnamed group")
+  });
 }
 
 async function executeContextMenuAction(action) {
