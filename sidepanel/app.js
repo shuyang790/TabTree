@@ -28,6 +28,10 @@ import {
   rootBuckets as rootBucketsModel
 } from "./rootBucketsModel.js";
 import {
+  normalizedDepth as normalizedDepthModel,
+  safeFaviconUrl as safeFaviconUrlModel
+} from "./rowPresentationModel.js";
+import {
   pruneSelection as pruneSelectionState,
   replaceSelection as replaceSelectionState,
   selectRangeTo as selectRangeSelection,
@@ -460,8 +464,7 @@ function nodeId(tabId) {
 }
 
 function normalizedDepth(depth) {
-  const value = Number.isFinite(depth) ? Math.trunc(depth) : 1;
-  return Math.max(1, Math.min(MAX_VISUAL_DEPTH, value));
+  return normalizedDepthModel(depth, { maxVisualDepth: MAX_VISUAL_DEPTH });
 }
 
 function pinnedSectionLabel(count) {
@@ -2167,10 +2170,7 @@ function rootBuckets(tree) {
 }
 
 function safeFaviconUrl(node) {
-  const shouldShow = node.pinned || state.settings?.showFavicons;
-  const rawUrl = shouldShow ? node.favIconUrl || "" : "";
-  return rawUrl && !rawUrl.startsWith("chrome://") && !rawUrl.startsWith("chrome-extension://")
-    ? rawUrl : "";
+  return safeFaviconUrlModel(node, { showFavicons: state.settings?.showFavicons });
 }
 
 function patchNodeRow(row, tree, node, options = {}) {
