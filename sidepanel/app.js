@@ -8,6 +8,10 @@ import {
   normalizeDragTarget,
   sameDragTarget
 } from "./dragTargetModel.js";
+import {
+  fallbackEdgePositionFromCoordinates,
+  getDropPositionFromCoordinates
+} from "./dropGeometryModel.js";
 import { buildDropPayload as buildDropPayloadModel, canDrop as canDropModel } from "./dropModel.js";
 import { sendOrThrow } from "./messaging.js";
 import {
@@ -1596,17 +1600,13 @@ function groupDisplay(tree, groupId) {
 function getDropPosition(event, row, options = {}) {
   const { allowInside = true } = options;
   const rect = row.getBoundingClientRect();
-  const y = event.clientY - rect.top;
-  if (y < rect.height * DROP_EDGE_RATIO) {
-    return "before";
-  }
-  if (y > rect.height * (1 - DROP_EDGE_RATIO)) {
-    return "after";
-  }
-  if (!allowInside) {
-    return y < rect.height * 0.5 ? "before" : "after";
-  }
-  return "inside";
+  return getDropPositionFromCoordinates({
+    clientY: event.clientY,
+    rectTop: rect.top,
+    rectHeight: rect.height,
+    allowInside,
+    edgeRatio: DROP_EDGE_RATIO
+  });
 }
 
 function removeDropTargetClasses(element) {
@@ -1720,7 +1720,11 @@ function canActivateInsideDrop(kind, id) {
 
 function fallbackEdgePosition(event, row) {
   const rect = row.getBoundingClientRect();
-  return event.clientY - rect.top < rect.height * 0.5 ? "before" : "after";
+  return fallbackEdgePositionFromCoordinates({
+    clientY: event.clientY,
+    rectTop: rect.top,
+    rectHeight: rect.height
+  });
 }
 
 function resolveTabDropIntent(tree, row, targetTabId, event) {
