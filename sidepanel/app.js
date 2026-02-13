@@ -23,6 +23,10 @@ import {
   shouldRenderNode
 } from "./searchModel.js";
 import {
+  groupTabIds as groupTabIdsModel,
+  rootBuckets as rootBucketsModel
+} from "./rootBucketsModel.js";
+import {
   pruneSelection as pruneSelectionState,
   replaceSelection as replaceSelectionState,
   selectRangeTo as selectRangeSelection,
@@ -968,10 +972,7 @@ function scopedUrls(tree, tabIds) {
 }
 
 function groupTabIds(tree, groupId) {
-  return Object.values(tree.nodes)
-    .filter((node) => node.groupId === groupId)
-    .map((node) => node.tabId)
-    .filter((tabId) => Number.isFinite(tabId));
+  return groupTabIdsModel(tree, groupId);
 }
 
 function orderedExistingGroups(tree) {
@@ -2194,39 +2195,7 @@ function createGroupSection(tree, groupId, rootNodeIds, query, visibilityByNodeI
 }
 
 function rootBuckets(tree) {
-  const pinned = [];
-  const blocks = [];
-  const groupBlockById = new Map();
-
-  for (const rootNodeId of tree.rootNodeIds) {
-    const node = tree.nodes[rootNodeId];
-    if (!node) {
-      continue;
-    }
-    if (node.pinned) {
-      pinned.push(rootNodeId);
-      continue;
-    }
-    if (state.settings?.showGroupHeaders && node.groupId !== null) {
-      if (!groupBlockById.has(node.groupId)) {
-        const block = {
-          type: "group",
-          groupId: node.groupId,
-          rootNodeIds: []
-        };
-        groupBlockById.set(node.groupId, block);
-        blocks.push(block);
-      }
-      groupBlockById.get(node.groupId).rootNodeIds.push(rootNodeId);
-      continue;
-    }
-    blocks.push({
-      type: "node",
-      rootNodeId
-    });
-  }
-
-  return { pinned, blocks };
+  return rootBucketsModel(tree, { showGroupHeaders: !!state.settings?.showGroupHeaders });
 }
 
 function safeFaviconUrl(node) {
