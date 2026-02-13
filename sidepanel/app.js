@@ -2,6 +2,12 @@ import { DEFAULT_SETTINGS, MESSAGE_TYPES, TREE_ACTIONS } from "../shared/constan
 import { applyRuntimeStateUpdate } from "./statePatch.js";
 import { buildClosePlan, shouldConfirmClose } from "./closePlan.js";
 import { resolveContextScopeTabIds as resolveContextScopeTabIdsModel } from "./contextScopeModel.js";
+import {
+  dropClassesForTarget,
+  emptyDragTarget,
+  normalizeDragTarget,
+  sameDragTarget
+} from "./dragTargetModel.js";
 import { buildDropPayload as buildDropPayloadModel, canDrop as canDropModel } from "./dropModel.js";
 import { sendOrThrow } from "./messaging.js";
 import {
@@ -1603,43 +1609,6 @@ function getDropPosition(event, row, options = {}) {
   return "inside";
 }
 
-function emptyDragTarget() {
-  return {
-    kind: null,
-    tabId: null,
-    groupId: null,
-    position: null,
-    valid: false
-  };
-}
-
-function sameDragTarget(a, b) {
-  return a.kind === b.kind
-    && a.tabId === b.tabId
-    && a.groupId === b.groupId
-    && a.position === b.position
-    && a.valid === b.valid;
-}
-
-function dropClassesForTarget(target) {
-  if (!target || target.kind === null || target.kind === "root") {
-    return [];
-  }
-  if (!target.valid) {
-    return ["drop-invalid"];
-  }
-  if (target.position === "before") {
-    return ["drop-valid-before"];
-  }
-  if (target.position === "after") {
-    return ["drop-valid-after"];
-  }
-  if (target.position === "inside") {
-    return ["drop-valid-inside"];
-  }
-  return [];
-}
-
 function removeDropTargetClasses(element) {
   if (!element) {
     return;
@@ -1662,15 +1631,7 @@ function updateSearchDropAffordance() {
 }
 
 function setDragTarget(target = null, element = null) {
-  const next = target
-    ? {
-      kind: target.kind || null,
-      tabId: Number.isFinite(target.tabId) ? target.tabId : null,
-      groupId: Number.isInteger(target.groupId) ? target.groupId : null,
-      position: target.position || null,
-      valid: !!target.valid
-    }
-    : emptyDragTarget();
+  const next = normalizeDragTarget(target);
 
   if (sameDragTarget(state.dragTarget, next) && state.dragTargetElement === element) {
     updateSearchDropAffordance();
