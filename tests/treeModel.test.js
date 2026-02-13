@@ -2,11 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildSyncSnapshot,
   buildTreeFromTabs,
   createEmptyWindowTree,
   ensureValidTree,
+  inferTreeFromSyncSnapshot,
   moveNode,
   normalizeGroupedTabParents,
+  normalizeUrl,
   nodeIdFromTabId,
   reconcileSelectedTabId,
   removeNodePromoteChildren,
@@ -293,4 +296,90 @@ test("ensureValidTree dedupes root and child node ids while repairing missing pa
   assert.deepEqual(validated.rootNodeIds, [rootNodeId, orphanNodeId]);
   assert.deepEqual(validated.nodes[rootNodeId].childNodeIds, [childNodeId]);
   assert.equal(validated.nodes[orphanNodeId].parentNodeId, null);
+});
+
+test("normalizeUrl strips hash and trailing slash while preserving query", () => {
+  assert.equal(
+    normalizeUrl("https://example.com/path/?q=1#frag"),
+    "https://example.com/path?q=1"
+  );
+  assert.equal(normalizeUrl("not-a-url"), "not-a-url");
+  assert.equal(normalizeUrl(""), "");
+});
+
+test("buildSyncSnapshot enforces window/node/url limits", () => {
+  const windowA = createEmptyWindowTree(1);
+  const windowB = createEmptyWindowTree(2);
+  const windowC = createEmptyWindowTree(3);
+
+  windowA.updatedAt = 100;
+  windowB.updatedAt = 300;
+  windowC.updatedAt = 200;
+
+  windowB.nodes[nodeIdFromTabId(20)] = {
+    nodeId: nodeIdFromTabId(20),
+    tabId: 20,
+    parentNodeId: null,
+    childNodeIds: [nodeIdFromTabId(21), nodeIdFromTabId(22)],
+    collapsed: false,
+    lastKnownUrl: "https://example.com/super-long-root-url"
+  };
+  windowB.nodes[nodeIdFromTabId(21)] = {
+    nodeId: nodeIdFromTabId(21),
+    tabId: 21,
+    parentNodeId: nodeIdFromTabId(20),
+    childNodeIds: [],
+    collapsed: true,
+    lastKnownUrl: "https://example.com/child-one"
+  };
+  windowB.nodes[nodeIdFromTabId(22)] = {
+    nodeId: nodeIdFromTabId(22),
+    tabId: 22,
+    parentNodeId: nodeIdFromTabId(20),
+    childNodeIds: [],
+    collapsed: false,
+    lastKnownUrl: "https://example.com/child-two"
+  };
+  windowB.rootNodeIds = [nodeIdFromTabId(20)];
+
+  const snapshot = buildSyncSnapshot(
+    { 1: windowA, 2: windowB, 3: windowC },
+    { maxWindows: 2, maxNodesPerWindow: 2, maxUrlLength: 20 }
+  );
+
+  assert.equal(snapshot.windows.length, 2);
+  assert.deepEqual(snapshot.windows.map((entry) => entry.w), ["2", "3"]);
+  assert.equal(snapshot.windows[0].n.length, 2);
+  assert.ok(snapshot.windows[0].n[0].u.length <= 20);
+  assert.equal(snapshot.windows[0].n[1].c, 1);
+});
+
+test("inferTreeFromSyncSnapshot returns null for missing window snapshot", () => {
+  const tabs = [tab({ id: 1, url: "https://example.com/a" })];
+  const inferred = inferTreeFromSyncSnapshot(99, tabs, {
+    windows: [{ w: "1", n: [{ u: "https://example.com/a", p: "", c: 0 }] }]
+  });
+  assert.equal(inferred, null);
+});
+
+test("inferTreeFromSyncSnapshot reconstructs parent-child from snapshot urls", () => {
+  const tabs = [
+    tab({ id: 1, index: 0, url: "https://example.com/root" }),
+    tab({ id: 2, index: 1, url: "https://example.com/child" })
+  ];
+
+  const inferred = inferTreeFromSyncSnapshot(7, tabs, {
+    windows: [
+      {
+        w: "7",
+        n: [
+          { u: "https://example.com/root", p: "", c: 0 },
+          { u: "https://example.com/child", p: "https://example.com/root", c: 1 }
+        ]
+      }
+    ]
+  });
+
+  assert.ok(inferred);
+  assert.equal(inferred.nodes[nodeIdFromTabId(2)].parentNodeId, nodeIdFromTabId(1));
 });
