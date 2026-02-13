@@ -1,8 +1,13 @@
 import { DEFAULT_SETTINGS, MESSAGE_TYPES, TREE_ACTIONS } from "../shared/constants.js";
 import { applyRuntimeStateUpdate } from "./statePatch.js";
 import { buildClosePlan, shouldConfirmClose } from "./closePlan.js";
+import { resolveContextScopeTabIds as resolveContextScopeTabIdsModel } from "./contextScopeModel.js";
 import { buildDropPayload as buildDropPayloadModel, canDrop as canDropModel } from "./dropModel.js";
 import { sendOrThrow } from "./messaging.js";
+import {
+  buildVisibilityMap,
+  shouldRenderNode
+} from "./searchModel.js";
 import {
   pruneSelection as pruneSelectionState,
   replaceSelection as replaceSelectionState,
@@ -795,18 +800,12 @@ function updateShortcutHint() {
 }
 
 function resolveContextScopeTabIds(primaryTabId) {
-  const tree = currentWindowTree();
-  if (Number.isFinite(primaryTabId) && tree?.nodes[nodeId(primaryTabId)]) {
-    const selected = selectedTabIdsArray()
-      .filter((id) => Number.isFinite(id))
-      .filter((id) => !!tree?.nodes[nodeId(id)]);
-
-    if (selected.includes(primaryTabId)) {
-      return Array.from(new Set(selected));
-    }
-    return [primaryTabId];
-  }
-  return [];
+  return resolveContextScopeTabIdsModel({
+    tree: currentWindowTree(),
+    primaryTabId,
+    selectedTabIds: state.selectedTabIds,
+    nodeIdFromTabId: nodeId
+  });
 }
 
 function contextMenuFocusables() {
@@ -1579,14 +1578,6 @@ async function send(type, payload = {}) {
   return sendOrThrow(type, payload);
 }
 
-function matchesSearch(node, query) {
-  if (!query) {
-    return true;
-  }
-  const haystack = `${node.lastKnownTitle || ""} ${node.lastKnownUrl || ""}`.toLowerCase();
-  return haystack.includes(query);
-}
-
 function groupDisplay(tree, groupId) {
   const group = tree.groups?.[groupId] || null;
   return {
@@ -1594,46 +1585,6 @@ function groupDisplay(tree, groupId) {
     color: GROUP_COLOR_MAP[group?.color] || GROUP_COLOR_MAP.grey,
     collapsed: !!group?.collapsed
   };
-}
-
-function buildVisibilityMap(tree, query) {
-  const visibility = new Map();
-  if (!query) {
-    return visibility;
-  }
-
-  const visit = (nodeKey) => {
-    if (visibility.has(nodeKey)) {
-      return visibility.get(nodeKey);
-    }
-
-    const node = tree.nodes[nodeKey];
-    if (!node) {
-      visibility.set(nodeKey, false);
-      return false;
-    }
-
-    let childVisible = false;
-    for (const childId of node.childNodeIds) {
-      childVisible = visit(childId) || childVisible;
-    }
-
-    const visible = matchesSearch(node, query) || childVisible;
-    visibility.set(nodeKey, visible);
-    return visible;
-  };
-
-  for (const rootNodeId of tree.rootNodeIds) {
-    visit(rootNodeId);
-  }
-  return visibility;
-}
-
-function shouldRenderNode(tree, nodeKey, query, visibilityByNodeId) {
-  if (!query) {
-    return !!tree.nodes[nodeKey];
-  }
-  return visibilityByNodeId.get(nodeKey) === true;
 }
 
 function getDropPosition(event, row, options = {}) {
