@@ -1,5 +1,15 @@
 import { DEFAULT_SETTINGS, MESSAGE_TYPES, TREE_ACTIONS } from "../shared/constants.js";
 import { applyRuntimeStateUpdate } from "./statePatch.js";
+import { buildClosePlan, shouldConfirmClose } from "./closePlan.js";
+import { sendOrThrow } from "./messaging.js";
+import {
+  pruneSelection as pruneSelectionState,
+  replaceSelection as replaceSelectionState,
+  selectRangeTo as selectRangeSelection,
+  selectedExistingTabIds as listSelectedExistingTabIds,
+  selectedTabIdsArray as getSelectedTabIdsArray,
+  toggleSelection as toggleSelectionState
+} from "./selectionModel.js";
 
 const GROUP_COLOR_MAP = {
   grey: "#8a909c",
@@ -459,7 +469,7 @@ function currentActiveTabId() {
 }
 
 function selectedTabIdsArray() {
-  return Array.from(state.selectedTabIds);
+  return getSelectedTabIdsArray(state.selectedTabIds);
 }
 
 function resetContextMenuState() {
@@ -488,12 +498,7 @@ function refreshVisibleTabIds() {
 }
 
 function selectedExistingTabIds(tree = currentWindowTree()) {
-  if (!tree) {
-    return [];
-  }
-  return selectedTabIdsArray()
-    .filter((id) => Number.isFinite(id))
-    .filter((id) => !!tree.nodes[nodeId(id)]);
+  return listSelectedExistingTabIds(tree, state.selectedTabIds, nodeId);
 }
 
 function setTreeRowTabStop(preferredTabId = null) {
@@ -542,52 +547,36 @@ function syncRenderedSelectionState() {
 }
 
 function replaceSelection(tabIds, anchorTabId = null) {
-  state.selectedTabIds = new Set(tabIds.filter((id) => Number.isFinite(id)));
-  state.selectionAnchorTabId = anchorTabId;
+  const next = replaceSelectionState(tabIds, anchorTabId);
+  state.selectedTabIds = next.selectedTabIds;
+  state.selectionAnchorTabId = next.selectionAnchorTabId;
 }
 
 function toggleSelection(tabId) {
-  if (state.selectedTabIds.has(tabId)) {
-    state.selectedTabIds.delete(tabId);
-  } else {
-    state.selectedTabIds.add(tabId);
-  }
-  if (state.selectedTabIds.size === 0) {
-    state.selectionAnchorTabId = null;
-  } else if (!state.selectionAnchorTabId) {
-    state.selectionAnchorTabId = tabId;
-  }
+  const next = toggleSelectionState({
+    selectedTabIds: state.selectedTabIds,
+    selectionAnchorTabId: state.selectionAnchorTabId
+  }, tabId);
+  state.selectedTabIds = next.selectedTabIds;
+  state.selectionAnchorTabId = next.selectionAnchorTabId;
 }
 
 function selectRangeTo(tabId) {
-  const ordered = visibleTabIdsInOrder();
-  if (!ordered.length) {
-    replaceSelection([tabId], tabId);
-    return;
-  }
-  const anchor = state.selectionAnchorTabId ?? tabId;
-  const anchorIndex = ordered.indexOf(anchor);
-  const targetIndex = ordered.indexOf(tabId);
-  if (anchorIndex < 0 || targetIndex < 0) {
-    replaceSelection([tabId], tabId);
-    return;
-  }
-
-  const start = Math.min(anchorIndex, targetIndex);
-  const end = Math.max(anchorIndex, targetIndex);
-  replaceSelection(ordered.slice(start, end + 1), anchor);
+  const next = selectRangeSelection(visibleTabIdsInOrder(), {
+    selectedTabIds: state.selectedTabIds,
+    selectionAnchorTabId: state.selectionAnchorTabId
+  }, tabId);
+  state.selectedTabIds = next.selectedTabIds;
+  state.selectionAnchorTabId = next.selectionAnchorTabId;
 }
 
 function pruneSelection(tree) {
-  if (!tree) {
-    replaceSelection([], null);
-    return;
-  }
-  const existing = new Set(Object.values(tree.nodes).map((n) => n.tabId));
-  const next = selectedTabIdsArray().filter((id) => existing.has(id));
-  const anchor = existing.has(state.selectionAnchorTabId) ? state.selectionAnchorTabId : null;
-  state.selectedTabIds = new Set(next);
-  state.selectionAnchorTabId = anchor;
+  const next = pruneSelectionState(tree, {
+    selectedTabIds: state.selectedTabIds,
+    selectionAnchorTabId: state.selectionAnchorTabId
+  });
+  state.selectedTabIds = next.selectedTabIds;
+  state.selectionAnchorTabId = next.selectionAnchorTabId;
 }
 
 function getSystemColorMode() {
@@ -745,6 +734,12 @@ async function flushPendingSettingsPatch() {
     await send(MESSAGE_TYPES.PATCH_SETTINGS, {
       settingsPatch: patch
     });
+  } catch (error) {
+    console.warn("Failed to persist settings patch", error);
+    state.pendingSettingsPatch = {
+      ...(patch || {}),
+      ...(state.pendingSettingsPatch || {})
+    };
   } finally {
     state.settingsWriteInFlight = false;
     if (state.pendingSettingsPatch && !state.settingsWriteTimer) {
@@ -1163,16 +1158,13 @@ async function setGroupColor(color) {
     : [];
   closeContextMenu();
   try {
-    const response = await send(MESSAGE_TYPES.TREE_ACTION, {
+    await send(MESSAGE_TYPES.TREE_ACTION, {
       type: TREE_ACTIONS.SET_GROUP_COLOR,
       groupId,
       windowId,
       color,
       tabIds
     });
-    if (response?.ok === false) {
-      throw new Error(response.error || "Unknown error");
-    }
   } catch (error) {
     console.warn("Failed to sync native tab group color", error);
   }
@@ -1583,7 +1575,7 @@ function renderContextMenu() {
 }
 
 async function send(type, payload = {}) {
-  return chrome.runtime.sendMessage({ type, payload });
+  return sendOrThrow(type, payload);
 }
 
 function matchesSearch(node, query) {
@@ -1923,64 +1915,6 @@ async function moveGroupBlockToTarget(tree, target, position) {
   await send(MESSAGE_TYPES.TREE_ACTION, payload);
 }
 
-function dedupeCloseRootNodeIds(tree, nodeIds) {
-  const selected = new Set(nodeIds);
-  return nodeIds.filter((id) => {
-    let current = tree.nodes[id]?.parentNodeId || null;
-    while (current) {
-      if (selected.has(current)) {
-        return false;
-      }
-      current = tree.nodes[current]?.parentNodeId || null;
-    }
-    return true;
-  });
-}
-
-function subtreeTabIds(tree, rootNodeId) {
-  const output = [];
-  const stack = [rootNodeId];
-  while (stack.length) {
-    const currentId = stack.pop();
-    const current = tree.nodes[currentId];
-    if (!current) {
-      continue;
-    }
-    output.push(current.tabId);
-    stack.push(...current.childNodeIds);
-  }
-  return output;
-}
-
-function buildClosePlan(tree, tabIds) {
-  const nodeIds = tabIds
-    .map((tabId) => nodeId(tabId))
-    .filter((id) => !!tree.nodes[id]);
-
-  const roots = dedupeCloseRootNodeIds(tree, Array.from(new Set(nodeIds)));
-  const allTabIds = new Set();
-  for (const rootId of roots) {
-    for (const tabId of subtreeTabIds(tree, rootId)) {
-      allTabIds.add(tabId);
-    }
-  }
-
-  return {
-    rootTabIds: roots.map((id) => tree.nodes[id]?.tabId).filter((id) => Number.isFinite(id)),
-    totalTabs: allTabIds.size
-  };
-}
-
-function shouldConfirmClose(totalTabs, isBatch) {
-  if (!state.settings || totalTabs < 2) {
-    return false;
-  }
-  if (isBatch) {
-    return !!state.settings.confirmCloseBatch;
-  }
-  return !!state.settings.confirmCloseSubtree;
-}
-
 async function executeCloseAction(action) {
   if (action.kind === "single") {
     await send(MESSAGE_TYPES.TREE_ACTION, {
@@ -2010,7 +1944,7 @@ async function executeCloseAction(action) {
 }
 
 async function requestClose(action, totalTabs, isBatch) {
-  if (!shouldConfirmClose(totalTabs, isBatch)) {
+  if (!shouldConfirmClose(state.settings, totalTabs, isBatch)) {
     await executeCloseAction(action);
     return;
   }
@@ -3130,22 +3064,26 @@ function scheduleRender() {
 }
 
 async function bootstrap() {
-  state.panelWindowId = await resolvePanelWindowId();
-  const response = await send(MESSAGE_TYPES.GET_STATE, {
-    windowId: state.panelWindowId
-  });
-  if (response?.ok) {
-    state.settings = response.payload.settings;
-    state.windows = response.payload.windows || {};
-    state.focusedWindowId = response.payload.focusedWindowId;
-    if (!Number.isInteger(state.panelWindowId) && Number.isInteger(response.payload.focusedWindowId)) {
-      state.panelWindowId = response.payload.focusedWindowId;
+  try {
+    state.panelWindowId = await resolvePanelWindowId();
+    const response = await send(MESSAGE_TYPES.GET_STATE, {
+      windowId: state.panelWindowId
+    });
+    if (response?.ok) {
+      state.settings = response.payload.settings;
+      state.windows = response.payload.windows || {};
+      state.focusedWindowId = response.payload.focusedWindowId;
+      if (!Number.isInteger(state.panelWindowId) && Number.isInteger(response.payload.focusedWindowId)) {
+        state.panelWindowId = response.payload.focusedWindowId;
+      }
+      const activeTabId = currentActiveTabId();
+      if (activeTabId) {
+        replaceSelection([activeTabId], activeTabId);
+      }
+      render();
     }
-    const activeTabId = currentActiveTabId();
-    if (activeTabId) {
-      replaceSelection([activeTabId], activeTabId);
-    }
-    render();
+  } catch (error) {
+    console.warn("Failed to bootstrap side panel state", error);
   }
 }
 
@@ -3256,7 +3194,7 @@ function bindEvents() {
           }, 1, false);
           return;
         }
-        const plan = buildClosePlan(tree, [tabId]);
+        const plan = buildClosePlan(tree, [tabId], nodeId);
         if (!plan.rootTabIds.length) {
           return;
         }
@@ -3748,7 +3686,11 @@ function bindEvents() {
         ? { confirmCloseBatch: false }
         : { confirmCloseSubtree: false };
       state.settings = { ...state.settings, ...patch };
-      await send(MESSAGE_TYPES.PATCH_SETTINGS, { settingsPatch: patch });
+      try {
+        await send(MESSAGE_TYPES.PATCH_SETTINGS, { settingsPatch: patch });
+      } catch (error) {
+        console.warn("Failed to persist close-confirmation setting", error);
+      }
     }
 
     closeConfirmDialog();
