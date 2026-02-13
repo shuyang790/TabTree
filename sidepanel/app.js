@@ -13,6 +13,10 @@ import {
   getDropPositionFromCoordinates
 } from "./dropGeometryModel.js";
 import { buildDropPayload as buildDropPayloadModel, canDrop as canDropModel } from "./dropModel.js";
+import {
+  buildMoveGroupBlockPayload,
+  canDropGroup as canDropGroupModel
+} from "./groupDropModel.js";
 import { sendOrThrow } from "./messaging.js";
 import {
   buildVisibilityMap,
@@ -1760,44 +1764,23 @@ function resolveTabDropIntent(tree, row, targetTabId, event) {
 }
 
 function canDropGroup(tree, sourceGroupId, options = {}) {
-  const { targetGroupId = null, targetTabId = null } = options;
-  if (!Number.isInteger(sourceGroupId)) {
-    return false;
-  }
-  const sourceHasRows = Object.values(tree.nodes).some((node) => node.groupId === sourceGroupId && !node.pinned);
-  if (!sourceHasRows) {
-    return false;
-  }
-  if (Number.isInteger(targetGroupId) && targetGroupId === sourceGroupId) {
-    return false;
-  }
-  if (Number.isFinite(targetTabId)) {
-    const targetNode = tree.nodes[nodeId(targetTabId)];
-    if (!targetNode || targetNode.pinned || targetNode.parentNodeId) {
-      return false;
-    }
-    if (targetNode.groupId === sourceGroupId) {
-      return false;
-    }
-  }
-  return true;
+  return canDropGroupModel({
+    tree,
+    sourceGroupId,
+    targetGroupId: options.targetGroupId,
+    targetTabId: options.targetTabId
+  });
 }
 
 async function moveGroupBlockToTarget(tree, target, position) {
-  if (!state.draggingGroupId || (position !== "before" && position !== "after")) {
-    return;
-  }
-  const payload = {
-    type: TREE_ACTIONS.MOVE_GROUP_BLOCK,
+  const payload = buildMoveGroupBlockPayload({
     sourceGroupId: state.draggingGroupId,
     windowId: tree.windowId,
+    target,
     position
-  };
-
-  if (target.kind === "group") {
-    payload.targetGroupId = target.groupId;
-  } else if (target.kind === "tab") {
-    payload.targetTabId = target.tabId;
+  });
+  if (!payload) {
+    return;
   }
 
   await send(MESSAGE_TYPES.TREE_ACTION, payload);
@@ -3171,7 +3154,7 @@ function bindEvents() {
     if (!Number.isFinite(tabId)) {
       return;
     }
-    if (state.draggingGroupId) {
+    if (Number.isInteger(state.draggingGroupId)) {
       event.preventDefault();
       return;
     }
