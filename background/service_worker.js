@@ -400,6 +400,9 @@ function resolveStaleWindowIdByNodeId(targetNodeId) {
 }
 
 function scheduleWindowOrderingSync(windowId) {
+  if (!Number.isInteger(windowId)) {
+    return;
+  }
   const existing = syncTimers.get(windowId);
   if (existing) {
     clearTimeout(existing);
@@ -409,6 +412,16 @@ function scheduleWindowOrderingSync(windowId) {
     void syncWindowOrdering(windowId);
   }, WINDOW_SYNC_DEBOUNCE_MS);
   syncTimers.set(windowId, handle);
+}
+
+async function resolveGroupWindowIdFromEvent(group) {
+  if (Number.isInteger(group?.windowId)) {
+    return group.windowId;
+  }
+  if (!Number.isInteger(group?.id)) {
+    return null;
+  }
+  return resolveGroupWindowId(group.id, null);
 }
 
 const ensureInitialized = createInitCoordinator({
@@ -1518,22 +1531,34 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
 
 chrome.tabGroups.onCreated.addListener(async (group) => {
   await ensureInitialized();
-  await refreshGroupMetadata(group.windowId);
+  const windowId = await resolveGroupWindowIdFromEvent(group);
+  if (Number.isInteger(windowId)) {
+    await refreshGroupMetadata(windowId);
+  }
 });
 
 chrome.tabGroups.onUpdated.addListener(async (group) => {
   await ensureInitialized();
-  scheduleWindowOrderingSync(group.windowId);
+  const windowId = await resolveGroupWindowIdFromEvent(group);
+  if (Number.isInteger(windowId)) {
+    scheduleWindowOrderingSync(windowId);
+  }
 });
 
 chrome.tabGroups.onMoved.addListener(async (group) => {
   await ensureInitialized();
-  scheduleWindowOrderingSync(group.windowId);
+  const windowId = await resolveGroupWindowIdFromEvent(group);
+  if (Number.isInteger(windowId)) {
+    scheduleWindowOrderingSync(windowId);
+  }
 });
 
 chrome.tabGroups.onRemoved.addListener(async (group) => {
   await ensureInitialized();
-  await refreshGroupMetadata(group.windowId);
+  const windowId = await resolveGroupWindowIdFromEvent(group);
+  if (Number.isInteger(windowId)) {
+    await refreshGroupMetadata(windowId);
+  }
 });
 
 chrome.commands.onCommand.addListener(async (command) => {

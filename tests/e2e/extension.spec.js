@@ -93,6 +93,84 @@ function childTitles(tree, parentTitle) {
     .filter((title) => !!title);
 }
 
+async function nativeOrderByTitles(sidePanelPage, titles) {
+  return sidePanelPage.evaluate(async (trackedTitles) => {
+    const tracked = new Set(trackedTitles);
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    return tabs
+      .sort((a, b) => a.index - b.index)
+      .map((tab) => tab.title || "")
+      .filter((title) => tracked.has(title));
+  }, titles);
+}
+
+async function treeOrderByTitles(sidePanelPage, titles) {
+  const tree = await getCurrentWindowTree(sidePanelPage);
+  const tracked = new Set(titles);
+  return Object.values(tree?.nodes || {})
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    .map((node) => node.lastKnownTitle || "")
+    .filter((title) => tracked.has(title));
+}
+
+async function activeTreeRowTitle(sidePanelPage) {
+  return sidePanelPage.evaluate(() => {
+    const row = document.querySelector(".tree-row.active");
+    return row?.querySelector(".title")?.textContent?.trim() || null;
+  });
+}
+
+async function expectTreeAndNativeOrderMatch(sidePanelPage, titles, expectedOrder) {
+  await expect.poll(async () => {
+    const [treeOrder, nativeOrder] = await Promise.all([
+      treeOrderByTitles(sidePanelPage, titles),
+      nativeOrderByTitles(sidePanelPage, titles)
+    ]);
+    return { treeOrder, nativeOrder };
+  }).toEqual({
+    treeOrder: expectedOrder,
+    nativeOrder: expectedOrder
+  });
+}
+
+async function syncInvariantSummary(sidePanelPage, trackedTitles) {
+  return sidePanelPage.evaluate(async (titles) => {
+    const tracked = new Set(titles);
+    const windowId = (await chrome.windows.getCurrent()).id;
+    const [tabs, response] = await Promise.all([
+      chrome.tabs.query({ windowId }),
+      chrome.runtime.sendMessage({
+        type: "GET_STATE",
+        payload: { windowId }
+      })
+    ]);
+    const windows = response?.payload?.windows || {};
+    const tree = windows[windowId] || windows[String(windowId)] || null;
+    const trackedNativeTabs = tabs
+      .filter((tab) => tracked.has(tab.title || ""))
+      .sort((a, b) => a.index - b.index);
+    const trackedNativeTitles = trackedNativeTabs.map((tab) => tab.title || "");
+    const trackedNativeIds = trackedNativeTabs.map((tab) => tab.id);
+    const trackedTreeNodes = Object.values(tree?.nodes || {})
+      .filter((node) => tracked.has(node.lastKnownTitle || ""));
+    const trackedTreeIds = trackedTreeNodes.map((node) => node.tabId);
+    const trackedTreeTitles = trackedTreeNodes
+      .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+      .map((node) => node.lastKnownTitle || "");
+    const nativeOnlyTabIds = trackedNativeIds.filter((id) => !trackedTreeIds.includes(id));
+    const treeOnlyTabIds = trackedTreeIds.filter((id) => !trackedNativeIds.includes(id));
+    const activeTabId = tabs.find((tab) => tab.active)?.id ?? null;
+    return {
+      trackedNativeTitles,
+      trackedTreeTitles,
+      nativeOnlyTabIds,
+      treeOnlyTabIds,
+      selectedTabId: tree?.selectedTabId ?? null,
+      activeTabId
+    };
+  }, trackedTitles);
+}
+
 async function dragRowToRow(sidePanelPage, sourceTitle, targetTitle, position) {
   const source = rowByTitle(sidePanelPage, sourceTitle);
   const target = rowByTitle(sidePanelPage, targetTitle);
@@ -489,6 +567,454 @@ test.describe("TabTree extension", () => {
     await expect
       .poll(() => context.pages().length, { message: "Expected add-child to create a new tab" })
       .toBeGreaterThan(beforeCount);
+  });
+
+  test("native tab activation updates the active row in the side panel", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const titles = [
+        "Native Activate Alpha",
+        "Native Activate Beta",
+        "Native Activate Gamma"
+      ];
+      for (const title of titles) {
+        pages.push(await createTitledTab(context, title));
+      }
+
+      const activateTitle = "Native Activate Beta";
+      const activateTabId = await tabIdByTitle(sidePanelPage, activateTitle);
+      expect(Number.isInteger(activateTabId)).toBeTruthy();
+
+      await sidePanelPage.evaluate(async (tabId) => {
+        await chrome.tabs.update(tabId, { active: true });
+      }, activateTabId);
+
+      await expect.poll(() => activeChromeTabTitle(sidePanelPage)).toBe(activateTitle);
+      await expect.poll(() => activeTreeRowTitle(sidePanelPage)).toBe(activateTitle);
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
+  test("clicking a side panel row activates the same native tab", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const firstTitle = "Panel Activate One";
+      const secondTitle = "Panel Activate Two";
+      pages.push(await createTitledTab(context, firstTitle));
+      pages.push(await createTitledTab(context, secondTitle));
+
+      const firstRow = rowByTitle(sidePanelPage, firstTitle);
+      const secondRow = rowByTitle(sidePanelPage, secondTitle);
+      await expect(firstRow).toBeVisible();
+      await expect(secondRow).toBeVisible();
+
+      await firstRow.click();
+      await expect.poll(() => activeChromeTabTitle(sidePanelPage)).toBe(firstTitle);
+      await expect.poll(() => activeTreeRowTitle(sidePanelPage)).toBe(firstTitle);
+
+      await secondRow.click();
+      await expect.poll(() => activeChromeTabTitle(sidePanelPage)).toBe(secondTitle);
+      await expect.poll(() => activeTreeRowTitle(sidePanelPage)).toBe(secondTitle);
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
+  test("native tab moves are reflected in tree order", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const titles = [
+        "Native Move A",
+        "Native Move B",
+        "Native Move C",
+        "Native Move D"
+      ];
+      for (const title of titles) {
+        pages.push(await createTitledTab(context, title));
+      }
+
+      await sidePanelPage.evaluate(async ({ moveTitle, anchorTitle }) => {
+        const tabs = await chrome.tabs.query({ currentWindow: true });
+        const moveTab = tabs.find((tab) => tab.title === moveTitle);
+        const anchorTab = tabs.find((tab) => tab.title === anchorTitle);
+        if (!moveTab || !anchorTab) {
+          throw new Error("Move setup failed");
+        }
+        await chrome.tabs.move(moveTab.id, { index: anchorTab.index });
+      }, {
+        moveTitle: "Native Move D",
+        anchorTitle: "Native Move B"
+      });
+
+      await expectTreeAndNativeOrderMatch(sidePanelPage, titles, [
+        "Native Move A",
+        "Native Move D",
+        "Native Move B",
+        "Native Move C"
+      ]);
+
+      await sidePanelPage.evaluate(async ({ moveTitle, anchorTitle }) => {
+        const tabs = await chrome.tabs.query({ currentWindow: true });
+        const moveTab = tabs.find((tab) => tab.title === moveTitle);
+        const anchorTab = tabs.find((tab) => tab.title === anchorTitle);
+        if (!moveTab || !anchorTab) {
+          throw new Error("Second move setup failed");
+        }
+        await chrome.tabs.move(moveTab.id, { index: anchorTab.index + 1 });
+      }, {
+        moveTitle: "Native Move A",
+        anchorTitle: "Native Move C"
+      });
+
+      await expectTreeAndNativeOrderMatch(sidePanelPage, titles, [
+        "Native Move D",
+        "Native Move B",
+        "Native Move C",
+        "Native Move A"
+      ]);
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
+  test("invalid pinned-unpinned drag does not mutate tree or native order", async ({ context, sidePanelPage }) => {
+    const pinnedPage = await createTitledTab(context, "Pinned Boundary Source");
+    const regularPage = await createTitledTab(context, "Pinned Boundary Target");
+    const pinnedTabId = await tabIdByTitle(sidePanelPage, "Pinned Boundary Source");
+    expect(Number.isInteger(pinnedTabId)).toBeTruthy();
+
+    await sidePanelPage.evaluate(async (tabId) => {
+      await chrome.tabs.update(tabId, { pinned: true });
+    }, pinnedTabId);
+
+    const trackedTitles = ["Pinned Boundary Source", "Pinned Boundary Target"];
+    const baseline = await nativeOrderByTitles(sidePanelPage, trackedTitles);
+    await expectTreeAndNativeOrderMatch(sidePanelPage, trackedTitles, baseline);
+
+    await dragRowToRow(sidePanelPage, "Pinned Boundary Source", "Pinned Boundary Target", "inside");
+
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      const pinnedNode = nodeByTitle(tree, "Pinned Boundary Source");
+      const targetChildren = childTitles(tree, "Pinned Boundary Target");
+      return {
+        pinnedParentNodeId: pinnedNode?.parentNodeId ?? null,
+        becameChild: targetChildren.includes("Pinned Boundary Source")
+      };
+    }).toEqual({
+      pinnedParentNodeId: null,
+      becameChild: false
+    });
+
+    await expectTreeAndNativeOrderMatch(sidePanelPage, trackedTitles, baseline);
+
+    await pinnedPage.close().catch(() => {});
+    await regularPage.close().catch(() => {});
+  });
+
+  test("group collapse stays synchronized between side panel and native tab group", async ({ context, sidePanelPage }) => {
+    const tabA = await createTitledTab(context, "Group Collapse Sync A");
+    const tabB = await createTitledTab(context, "Group Collapse Sync B");
+    const result = await sidePanelPage.evaluate(async ({ titleA, titleB, groupTitle }) => {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const tabA = tabs.find((tab) => tab.title === titleA);
+      const tabB = tabs.find((tab) => tab.title === titleB);
+      if (!tabA || !tabB) {
+        throw new Error("Group setup tabs missing");
+      }
+      const groupId = await chrome.tabs.group({ tabIds: [tabA.id, tabB.id] });
+      await chrome.tabGroups.update(groupId, { title: groupTitle });
+      return { groupId };
+    }, {
+      titleA: "Group Collapse Sync A",
+      titleB: "Group Collapse Sync B",
+      groupTitle: "Group Collapse Sync"
+    });
+    const groupId = result.groupId;
+    expect(Number.isInteger(groupId)).toBeTruthy();
+
+    const groupHeader = sidePanelPage.locator(`.group-header[data-group-id="${groupId}"]`).first();
+    const groupChildren = sidePanelPage.locator(`.group-header[data-group-id="${groupId}"] + .group-children`).first();
+    await expect(groupHeader).toBeVisible();
+    await expect(groupChildren).toBeVisible();
+
+    await groupHeader.click();
+    await expect.poll(async () => sidePanelPage.evaluate(async (id) => {
+      const group = await chrome.tabGroups.get(id);
+      return !!group?.collapsed;
+    }, groupId)).toBe(true);
+    await expect(groupHeader).toHaveAttribute("aria-expanded", "false");
+    await expect(groupChildren).toBeHidden();
+
+    await sidePanelPage.evaluate(async (id) => {
+      await chrome.tabGroups.update(id, { collapsed: false });
+    }, groupId);
+
+    // Drive a native tab-move event to force a full window ordering refresh.
+    await sidePanelPage.evaluate(async (id) => {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const grouped = tabs
+        .filter((tab) => tab.groupId === id)
+        .sort((a, b) => a.index - b.index);
+      if (grouped.length >= 2) {
+        await chrome.tabs.move(grouped[1].id, { index: grouped[0].index });
+      }
+    }, groupId);
+
+    await expect.poll(async () => sidePanelPage.evaluate(async (id) => {
+      const group = await chrome.tabGroups.get(id);
+      return !!group?.collapsed;
+    }, groupId)).toBe(false);
+    await expect(groupHeader).toHaveAttribute("aria-expanded", "true");
+    await expect(groupChildren).toBeVisible();
+
+    await tabA.close().catch(() => {});
+    await tabB.close().catch(() => {});
+  });
+
+  test("moving a tab across windows updates both trees without duplicates", async ({ context, extensionId, sidePanelPage }) => {
+    const sidePanelUrl = `chrome-extension://${extensionId}/sidepanel/index.html`;
+    const moveTitle = "Cross Window Move Target";
+    const windowOneId = await sidePanelPage.evaluate(async () => (await chrome.windows.getCurrent()).id);
+
+    const sidePanelTwoPromise = context.waitForEvent("page");
+    await sidePanelPage.evaluate(async (url) => {
+      await chrome.windows.create({ url });
+    }, sidePanelUrl);
+    const sidePanelPageTwo = await sidePanelTwoPromise;
+    await sidePanelPageTwo.waitForLoadState("domcontentloaded");
+
+    try {
+      const windowTwoId = await sidePanelPageTwo.evaluate(async () => (await chrome.windows.getCurrent()).id);
+      expect(windowTwoId).not.toBe(windowOneId);
+
+      const movedTabId = await sidePanelPage.evaluate(async ({ windowId, title }) => {
+        const tab = await chrome.tabs.create({
+          windowId,
+          url: `data:text/html,${encodeURIComponent(`<title>${title}</title><main>${title}</main>`)}`
+        });
+        return tab.id;
+      }, { windowId: windowOneId, title: moveTitle });
+      expect(Number.isInteger(movedTabId)).toBeTruthy();
+
+      await expect(rowByTitle(sidePanelPage, moveTitle)).toBeVisible();
+      await expect(rowByTitle(sidePanelPageTwo, moveTitle)).toHaveCount(0);
+
+      await sidePanelPage.evaluate(async ({ tabId, windowId }) => {
+        await chrome.tabs.move(tabId, { windowId, index: -1 });
+      }, { tabId: movedTabId, windowId: windowTwoId });
+
+      await expect(rowByTitle(sidePanelPage, moveTitle)).toHaveCount(0);
+      await expect(rowByTitle(sidePanelPageTwo, moveTitle)).toBeVisible();
+
+      await expect.poll(async () => sidePanelPage.evaluate(async ({ windowOneId, windowTwoId, title }) => {
+        const response = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+        const windows = response?.payload?.windows || {};
+        const treeOne = windows[windowOneId] || windows[String(windowOneId)] || null;
+        const treeTwo = windows[windowTwoId] || windows[String(windowTwoId)] || null;
+        const inOne = Object.values(treeOne?.nodes || {}).filter((node) => node.lastKnownTitle === title).length;
+        const inTwo = Object.values(treeTwo?.nodes || {}).filter((node) => node.lastKnownTitle === title).length;
+        return { inOne, inTwo };
+      }, { windowOneId, windowTwoId, title: moveTitle })).toEqual({ inOne: 0, inTwo: 1 });
+    } finally {
+      await sidePanelPageTwo.close().catch(() => {});
+    }
+  });
+
+  test("native close of parent promotes children and keeps order synced", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const parentTitle = "Native Parent Close Root";
+      const childATitle = "Native Parent Close Child A";
+      const childBTitle = "Native Parent Close Child B";
+      for (const title of [parentTitle, childATitle, childBTitle]) {
+        pages.push(await createTitledTab(context, title));
+      }
+
+      const parentTabId = await tabIdByTitle(sidePanelPage, parentTitle);
+      const childATabId = await tabIdByTitle(sidePanelPage, childATitle);
+      const childBTabId = await tabIdByTitle(sidePanelPage, childBTitle);
+      expect(Number.isInteger(parentTabId)).toBeTruthy();
+      expect(Number.isInteger(childATabId)).toBeTruthy();
+      expect(Number.isInteger(childBTabId)).toBeTruthy();
+
+      await sidePanelPage.evaluate(async ({ parentTabId, childATabId, childBTabId }) => {
+        await chrome.runtime.sendMessage({
+          type: "TREE_ACTION",
+          payload: { type: "REPARENT_TAB", tabId: childATabId, newParentTabId: parentTabId }
+        });
+        await chrome.runtime.sendMessage({
+          type: "TREE_ACTION",
+          payload: { type: "REPARENT_TAB", tabId: childBTabId, newParentTabId: parentTabId }
+        });
+      }, { parentTabId, childATabId, childBTabId });
+
+      await expect.poll(async () => {
+        const tree = await getCurrentWindowTree(sidePanelPage);
+        return childTitles(tree, parentTitle);
+      }).toEqual([childATitle, childBTitle]);
+
+      await sidePanelPage.evaluate(async (tabId) => {
+        await chrome.tabs.remove(tabId);
+      }, parentTabId);
+
+      await expect(rowByTitle(sidePanelPage, parentTitle)).toHaveCount(0);
+      await expectTreeAndNativeOrderMatch(sidePanelPage, [childATitle, childBTitle], [childATitle, childBTitle]);
+      await expect.poll(async () => {
+        const tree = await getCurrentWindowTree(sidePanelPage);
+        const childA = nodeByTitle(tree, childATitle);
+        const childB = nodeByTitle(tree, childBTitle);
+        return {
+          childAParentNodeId: childA?.parentNodeId ?? null,
+          childBParentNodeId: childB?.parentNodeId ?? null
+        };
+      }).toEqual({
+        childAParentNodeId: null,
+        childBParentNodeId: null
+      });
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
+  test("mixed native and tree actions preserve tree-native sync invariants", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    const titles = [
+      "Stress Sync A",
+      "Stress Sync B",
+      "Stress Sync C",
+      "Stress Sync D",
+      "Stress Sync E",
+      "Stress Sync F"
+    ];
+
+    const assertSyncInvariants = async () => {
+      await expect.poll(async () => {
+        const summary = await syncInvariantSummary(sidePanelPage, titles);
+        return {
+          sameOrder: JSON.stringify(summary.trackedTreeTitles) === JSON.stringify(summary.trackedNativeTitles),
+          nativeOnlyCount: summary.nativeOnlyTabIds.length,
+          treeOnlyCount: summary.treeOnlyTabIds.length,
+          selectedMatchesActive: summary.selectedTabId === summary.activeTabId
+        };
+      }).toEqual({
+        sameOrder: true,
+        nativeOnlyCount: 0,
+        treeOnlyCount: 0,
+        selectedMatchesActive: true
+      });
+    };
+
+    try {
+      for (const title of titles) {
+        pages.push(await createTitledTab(context, title));
+      }
+      await assertSyncInvariants();
+
+      await sidePanelPage.evaluate(async ({ titleA, titleB }) => {
+        const tabs = await chrome.tabs.query({ currentWindow: true });
+        const tabA = tabs.find((tab) => tab.title === titleA);
+        const tabB = tabs.find((tab) => tab.title === titleB);
+        if (!tabA || !tabB) {
+          throw new Error("Group setup failed in stress test");
+        }
+        await chrome.tabs.group({ tabIds: [tabA.id, tabB.id] });
+      }, { titleA: "Stress Sync E", titleB: "Stress Sync F" });
+      await assertSyncInvariants();
+
+      await sidePanelPage.evaluate(async ({ parentTitle, childTitles }) => {
+        const tabs = await chrome.tabs.query({ currentWindow: true });
+        const parent = tabs.find((tab) => tab.title === parentTitle);
+        const children = childTitles
+          .map((title) => tabs.find((tab) => tab.title === title))
+          .filter(Boolean);
+        if (!parent || children.length !== childTitles.length) {
+          throw new Error("Batch reparent setup failed in stress test");
+        }
+        await chrome.runtime.sendMessage({
+          type: "TREE_ACTION",
+          payload: {
+            type: "BATCH_REPARENT",
+            tabIds: children.map((tab) => tab.id),
+            newParentTabId: parent.id,
+            targetTabId: parent.id,
+            placement: "inside"
+          }
+        });
+      }, {
+        parentTitle: "Stress Sync B",
+        childTitles: ["Stress Sync C", "Stress Sync D"]
+      });
+      await assertSyncInvariants();
+
+      await sidePanelPage.evaluate(async ({ anchorTitle, movingTitles }) => {
+        const tabs = await chrome.tabs.query({ currentWindow: true });
+        const anchor = tabs.find((tab) => tab.title === anchorTitle);
+        const moving = movingTitles
+          .map((title) => tabs.find((tab) => tab.title === title))
+          .filter(Boolean);
+        if (!anchor || moving.length !== movingTitles.length) {
+          throw new Error("Batch move-to-root setup failed in stress test");
+        }
+        await chrome.runtime.sendMessage({
+          type: "TREE_ACTION",
+          payload: {
+            type: "BATCH_MOVE_TO_ROOT",
+            tabIds: moving.map((tab) => tab.id),
+            targetTabId: anchor.id,
+            placement: "after"
+          }
+        });
+      }, {
+        anchorTitle: "Stress Sync A",
+        movingTitles: ["Stress Sync C", "Stress Sync D"]
+      });
+      await assertSyncInvariants();
+
+      await sidePanelPage.evaluate(async ({ moveTitle, anchorTitle }) => {
+        const tabs = await chrome.tabs.query({ currentWindow: true });
+        const moveTab = tabs.find((tab) => tab.title === moveTitle);
+        const anchorTab = tabs.find((tab) => tab.title === anchorTitle);
+        if (!moveTab || !anchorTab) {
+          throw new Error("Native move setup failed in stress test");
+        }
+        await chrome.tabs.move(moveTab.id, { index: anchorTab.index });
+      }, { moveTitle: "Stress Sync F", anchorTitle: "Stress Sync A" });
+      await assertSyncInvariants();
+
+      await sidePanelPage.evaluate(async (activeTitle) => {
+        const tabs = await chrome.tabs.query({ currentWindow: true });
+        const tab = tabs.find((candidate) => candidate.title === activeTitle);
+        if (!tab) {
+          throw new Error("Activate setup failed in stress test");
+        }
+        await chrome.tabs.update(tab.id, { active: true });
+      }, "Stress Sync D");
+      await assertSyncInvariants();
+
+      await sidePanelPage.evaluate(async (closeTitle) => {
+        const tabs = await chrome.tabs.query({ currentWindow: true });
+        const tab = tabs.find((candidate) => candidate.title === closeTitle);
+        if (!tab) {
+          throw new Error("Close setup failed in stress test");
+        }
+        await chrome.tabs.remove(tab.id);
+      }, "Stress Sync B");
+      await assertSyncInvariants();
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
   });
 
   test("pinned strip shows count and exposes native pinned title tooltip", async ({ context, sidePanelPage }) => {
@@ -1418,6 +1944,12 @@ test.describe("TabTree extension", () => {
       return childTitles(tree, "Batch Inside Target");
     }).toEqual(["Batch Inside Source A", "Batch Inside Source B"]);
 
+    await expectTreeAndNativeOrderMatch(
+      sidePanelPage,
+      ["Batch Inside Parent", "Batch Inside Target", "Batch Inside Source A", "Batch Inside Source B"],
+      ["Batch Inside Parent", "Batch Inside Target", "Batch Inside Source A", "Batch Inside Source B"]
+    );
+
     await parent.close().catch(() => {});
     await sourceA.close().catch(() => {});
     await sourceB.close().catch(() => {});
@@ -1454,6 +1986,12 @@ test.describe("TabTree extension", () => {
       "Batch Before Tail"
     ]);
 
+    await expectTreeAndNativeOrderMatch(
+      sidePanelPage,
+      ["Batch Before Source A", "Batch Before Source B", "Batch Before Target", "Batch Before Tail"],
+      ["Batch Before Source A", "Batch Before Source B", "Batch Before Target", "Batch Before Tail"]
+    );
+
     await target.close().catch(() => {});
     await tail.close().catch(() => {});
     await sourceA.close().catch(() => {});
@@ -1489,6 +2027,12 @@ test.describe("TabTree extension", () => {
       "Batch After Source B",
       "Batch After Tail"
     ]);
+
+    await expectTreeAndNativeOrderMatch(
+      sidePanelPage,
+      ["Batch After Target", "Batch After Source A", "Batch After Source B", "Batch After Tail"],
+      ["Batch After Target", "Batch After Source A", "Batch After Source B", "Batch After Tail"]
+    );
 
     await sourceA.close().catch(() => {});
     await sourceB.close().catch(() => {});
@@ -1555,6 +2099,12 @@ test.describe("TabTree extension", () => {
       endsWithDraggedBlock: true,
       orderedAfterTail: true
     });
+
+    await expectTreeAndNativeOrderMatch(
+      sidePanelPage,
+      ["Batch Root Parent", "Batch Root Tail", "Batch Root Source A", "Batch Root Source B"],
+      ["Batch Root Parent", "Batch Root Tail", "Batch Root Source A", "Batch Root Source B"]
+    );
 
     await parent.close().catch(() => {});
     await sourceA.close().catch(() => {});
