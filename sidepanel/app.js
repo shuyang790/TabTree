@@ -2293,6 +2293,79 @@ async function dropToRoot(tree) {
   clearDropClasses();
 }
 
+function keyboardMoveTargetTabId(ordered, selectedSet, startIndex, endIndex, mode) {
+  if (mode === "before" || mode === "inside") {
+    for (let i = startIndex - 1; i >= 0; i -= 1) {
+      const tabId = ordered[i];
+      if (!selectedSet.has(tabId)) {
+        return tabId;
+      }
+    }
+    return null;
+  }
+
+  if (mode === "after") {
+    for (let i = endIndex + 1; i < ordered.length; i += 1) {
+      const tabId = ordered[i];
+      if (!selectedSet.has(tabId)) {
+        return tabId;
+      }
+    }
+    return null;
+  }
+
+  return null;
+}
+
+async function moveSelectionByKeyboard(sourceTabId, mode) {
+  const tree = currentWindowTree();
+  if (!tree || !Number.isFinite(sourceTabId)) {
+    return false;
+  }
+  if (mode !== "before" && mode !== "after" && mode !== "inside") {
+    return false;
+  }
+
+  const dragTabIds = orderedDragSelection(sourceTabId)
+    .filter((tabId) => !!tree.nodes[nodeId(tabId)]);
+  if (!dragTabIds.length) {
+    return false;
+  }
+
+  const ordered = visibleTabIdsInOrder();
+  if (!ordered.length) {
+    return false;
+  }
+
+  const selectedSet = new Set(dragTabIds);
+  const selectedIndexes = dragTabIds
+    .map((tabId) => ordered.indexOf(tabId))
+    .filter((index) => index >= 0);
+  if (!selectedIndexes.length) {
+    return false;
+  }
+  const startIndex = Math.min(...selectedIndexes);
+  const endIndex = Math.max(...selectedIndexes);
+
+  const targetTabId = keyboardMoveTargetTabId(ordered, selectedSet, startIndex, endIndex, mode);
+  if (!Number.isFinite(targetTabId)) {
+    return false;
+  }
+
+  if (!canDrop(tree, dragTabIds, targetTabId, mode)) {
+    return false;
+  }
+
+  const payload = buildDropPayload(tree, dragTabIds, targetTabId, mode);
+  if (!payload) {
+    return false;
+  }
+
+  await sendTreeActionWithUndo(payload);
+  adoptDraggedSelection(dragTabIds, dragTabIds[0]);
+  return true;
+}
+
 async function onRowClicked(event, tabId) {
   state.focusedTabId = tabId;
   const isToggle = event.metaKey || event.ctrlKey;
@@ -3782,6 +3855,24 @@ function bindEvents() {
 
     const ordered = visibleTabIdsInOrder();
     const currentIndex = ordered.indexOf(tabId);
+
+    if (event.altKey && event.shiftKey) {
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        await moveSelectionByKeyboard(tabId, "before");
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        await moveSelectionByKeyboard(tabId, "after");
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        await moveSelectionByKeyboard(tabId, "inside");
+        return;
+      }
+    }
 
     if (event.key === "ArrowDown") {
       event.preventDefault();

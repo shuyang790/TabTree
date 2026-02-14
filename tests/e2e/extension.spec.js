@@ -2132,6 +2132,66 @@ test.describe("TabTree extension", () => {
     await tail.close().catch(() => {});
   });
 
+  test("keyboard shortcuts move selected block before/after/inside", async ({ context, sidePanelPage }) => {
+    const root = await createTitledTab(context, "Keyboard Move Root");
+    const sourceA = await createTitledTab(context, "Keyboard Move Source A");
+    const sourceB = await createTitledTab(context, "Keyboard Move Source B");
+    const target = await createTitledTab(context, "Keyboard Move Target");
+
+    const rowSourceA = rowByTitle(sidePanelPage, "Keyboard Move Source A");
+    const rowSourceB = rowByTitle(sidePanelPage, "Keyboard Move Source B");
+    await expect(rowSourceA).toBeVisible();
+    await expect(rowSourceB).toBeVisible();
+
+    await rowSourceA.click();
+    await rowSourceB.click({ modifiers: ["Shift"] });
+    await rowSourceA.focus();
+    await rowSourceA.press("Alt+Shift+ArrowDown");
+
+    await expectTreeAndNativeOrderMatch(
+      sidePanelPage,
+      ["Keyboard Move Root", "Keyboard Move Target", "Keyboard Move Source A", "Keyboard Move Source B"],
+      ["Keyboard Move Root", "Keyboard Move Target", "Keyboard Move Source A", "Keyboard Move Source B"]
+    );
+
+    await rowByTitle(sidePanelPage, "Keyboard Move Source A").focus();
+    await rowByTitle(sidePanelPage, "Keyboard Move Source A").press("Alt+Shift+ArrowUp");
+    await expectTreeAndNativeOrderMatch(
+      sidePanelPage,
+      ["Keyboard Move Root", "Keyboard Move Source A", "Keyboard Move Source B", "Keyboard Move Target"],
+      ["Keyboard Move Root", "Keyboard Move Source A", "Keyboard Move Source B", "Keyboard Move Target"]
+    );
+
+    await rowByTitle(sidePanelPage, "Keyboard Move Source A").focus();
+    await rowByTitle(sidePanelPage, "Keyboard Move Source A").press("Alt+Shift+ArrowRight");
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      return {
+        rootOrder: rootTitles(tree).filter((title) => [
+          "Keyboard Move Root",
+          "Keyboard Move Target",
+          "Keyboard Move Source A",
+          "Keyboard Move Source B"
+        ].includes(title)),
+        children: childTitles(tree, "Keyboard Move Root")
+      };
+    }).toEqual({
+      rootOrder: ["Keyboard Move Root", "Keyboard Move Target"],
+      children: ["Keyboard Move Source A", "Keyboard Move Source B"]
+    });
+
+    await expectTreeAndNativeOrderMatch(
+      sidePanelPage,
+      ["Keyboard Move Root", "Keyboard Move Source A", "Keyboard Move Source B", "Keyboard Move Target"],
+      ["Keyboard Move Root", "Keyboard Move Source A", "Keyboard Move Source B", "Keyboard Move Target"]
+    );
+
+    await root.close().catch(() => {});
+    await sourceA.close().catch(() => {});
+    await sourceB.close().catch(() => {});
+    await target.close().catch(() => {});
+  });
+
   test("dragging an unselected row adopts dragged selection for quick back-and-forth moves", async ({ context, sidePanelPage }) => {
     const staleA = await createTitledTab(context, "Drag Select Stale A");
     const staleB = await createTitledTab(context, "Drag Select Stale B");
