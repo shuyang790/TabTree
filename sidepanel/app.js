@@ -9,6 +9,10 @@ import {
 import { resolveContextScopeTabIds as resolveContextScopeTabIdsModel } from "./contextScopeModel.js";
 import { deriveContextMenuActionIntent } from "./contextMenuActionModel.js";
 import {
+  blendAutoScrollVelocity,
+  computeAutoScrollTargetDelta
+} from "./autoScrollModel.js";
+import {
   dropClassesForTarget,
   emptyDragTarget,
   normalizeDragTarget,
@@ -312,8 +316,10 @@ const THEME_PRESETS = {
 const BASE_LIGHT_PRESET = "base-light";
 const BASE_DARK_PRESET = "base-dark";
 const DEFAULT_ACCENT = "#0b57d0";
-const AUTO_SCROLL_EDGE_PX = 56;
+const AUTO_SCROLL_EDGE_PX = 72;
+const AUTO_SCROLL_MIN_STEP = 1;
 const AUTO_SCROLL_MAX_STEP = 18;
+const AUTO_SCROLL_MAX_STEP_VIRTUAL = 30;
 const SETTINGS_WRITE_DEBOUNCE_MS = 320;
 const UNDO_TOAST_MS = 8000;
 const VIRTUALIZE_MIN_ROWS = 300;
@@ -411,7 +417,8 @@ const state = {
   dragAutoScroll: {
     active: false,
     clientY: 0,
-    rafId: null
+    rafId: null,
+    velocity: 0
   },
   undoToastTimer: null,
   pendingUndoMove: null,
@@ -1942,18 +1949,26 @@ function maybeAutoScroll(clientY) {
 
     const rect = dom.treeRoot.getBoundingClientRect();
     const y = state.dragAutoScroll.clientY;
-    let delta = 0;
+    const maxStep = state.virtualModeActive ? AUTO_SCROLL_MAX_STEP_VIRTUAL : AUTO_SCROLL_MAX_STEP;
+    const targetDelta = computeAutoScrollTargetDelta({
+      clientY: y,
+      rectTop: rect.top,
+      rectBottom: rect.bottom,
+      edgePx: AUTO_SCROLL_EDGE_PX,
+      minStep: AUTO_SCROLL_MIN_STEP,
+      maxStep
+    });
+    state.dragAutoScroll.velocity = blendAutoScrollVelocity(
+      state.dragAutoScroll.velocity,
+      targetDelta
+    );
+    const appliedDelta = Math.trunc(state.dragAutoScroll.velocity);
 
-    if (y < rect.top + AUTO_SCROLL_EDGE_PX) {
-      const ratio = Math.min(1, (rect.top + AUTO_SCROLL_EDGE_PX - y) / AUTO_SCROLL_EDGE_PX);
-      delta = -Math.ceil(ratio * AUTO_SCROLL_MAX_STEP);
-    } else if (y > rect.bottom - AUTO_SCROLL_EDGE_PX) {
-      const ratio = Math.min(1, (y - (rect.bottom - AUTO_SCROLL_EDGE_PX)) / AUTO_SCROLL_EDGE_PX);
-      delta = Math.ceil(ratio * AUTO_SCROLL_MAX_STEP);
+    if (appliedDelta !== 0) {
+      dom.treeRoot.scrollTop += appliedDelta;
     }
 
-    if (delta !== 0) {
-      dom.treeRoot.scrollTop += delta;
+    if (targetDelta !== 0 || state.dragAutoScroll.velocity !== 0) {
       state.dragAutoScroll.rafId = requestAnimationFrame(tick);
     }
   };
@@ -1963,6 +1978,7 @@ function maybeAutoScroll(clientY) {
 
 function stopAutoScroll() {
   state.dragAutoScroll.active = false;
+  state.dragAutoScroll.velocity = 0;
   if (state.dragAutoScroll.rafId) {
     cancelAnimationFrame(state.dragAutoScroll.rafId);
     state.dragAutoScroll.rafId = null;
