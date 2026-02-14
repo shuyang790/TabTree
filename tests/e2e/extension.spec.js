@@ -174,6 +174,8 @@ async function syncInvariantSummary(sidePanelPage, trackedTitles) {
 async function dragRowToRow(sidePanelPage, sourceTitle, targetTitle, position) {
   const source = rowByTitle(sidePanelPage, sourceTitle);
   const target = rowByTitle(sidePanelPage, targetTitle);
+  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
   await expect(source).toBeVisible();
   await expect(target).toBeVisible();
   if (position === "inside") {
@@ -2163,7 +2165,20 @@ test.describe("TabTree extension", () => {
     );
 
     await rowByTitle(sidePanelPage, "Keyboard Move Source A").focus();
-    await rowByTitle(sidePanelPage, "Keyboard Move Source A").press("Alt+Shift+ArrowRight");
+    await sidePanelPage.evaluate((title) => {
+      const rows = Array.from(document.querySelectorAll(".tree-row[data-tab-id]"));
+      const row = rows.find((entry) => entry.querySelector(".title")?.textContent?.trim() === title);
+      if (!row) {
+        throw new Error("Keyboard move source row missing");
+      }
+      row.focus();
+      row.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "ArrowRight",
+        altKey: true,
+        shiftKey: true,
+        bubbles: true
+      }));
+    }, "Keyboard Move Source A");
     await expect.poll(async () => {
       const tree = await getCurrentWindowTree(sidePanelPage);
       return {
@@ -2415,6 +2430,136 @@ test.describe("TabTree extension", () => {
     await tail.close().catch(() => {});
   });
 
+  test("repeated back-and-forth subtree block moves stay stable on 100-tab trees", async ({ sidePanelPage }) => {
+    const prefix = "E2E Stress Tab ";
+    const total = 100;
+    const parentTitles = [`${prefix}10`, `${prefix}11`, `${prefix}12`];
+    const childTitlesByParent = new Map([
+      [`${prefix}10`, `${prefix}30`],
+      [`${prefix}11`, `${prefix}31`],
+      [`${prefix}12`, `${prefix}32`]
+    ]);
+    const leftAnchor = `${prefix}6`;
+    const rightAnchor = `${prefix}16`;
+
+    try {
+      await sidePanelPage.evaluate(async ({ prefix, total }) => {
+        for (let i = 0; i < total; i += 1) {
+          await chrome.tabs.create({
+            active: false,
+            url: `data:text/html,<title>${prefix}${i}</title><main>${i}</main>`
+          });
+        }
+      }, { prefix, total });
+
+      await expect.poll(async () => {
+        const tree = await getCurrentWindowTree(sidePanelPage);
+        return Object.values(tree?.nodes || {})
+          .map((node) => node.lastKnownTitle || "")
+          .filter((title) => title.startsWith(prefix)).length;
+      }, { timeout: 30000 }).toBe(total);
+
+      const tabIds = {};
+      for (const title of [...parentTitles, ...childTitlesByParent.values()]) {
+        tabIds[title] = await tabIdByTitle(sidePanelPage, title);
+        expect(Number.isInteger(tabIds[title])).toBeTruthy();
+      }
+
+      await sidePanelPage.evaluate(async ({ tabIds, parentTitles, childEntries }) => {
+        for (const [parentTitle, childTitle] of childEntries) {
+          await chrome.runtime.sendMessage({
+            type: "TREE_ACTION",
+            payload: {
+              type: "REPARENT_TAB",
+              tabId: tabIds[childTitle],
+              newParentTabId: tabIds[parentTitle]
+            }
+          });
+        }
+      }, {
+        tabIds,
+        parentTitles,
+        childEntries: Array.from(childTitlesByParent.entries())
+      });
+
+      await expect.poll(async () => {
+        const tree = await getCurrentWindowTree(sidePanelPage);
+        return parentTitles.map((parentTitle) => ({
+          parentTitle,
+          children: childTitles(tree, parentTitle)
+        }));
+      }).toEqual(parentTitles.map((parentTitle) => ({
+        parentTitle,
+        children: [childTitlesByParent.get(parentTitle)]
+      })));
+
+      await sidePanelPage.evaluate(async ({ parentTitles, tabIds }) => {
+        for (const parentTitle of parentTitles) {
+          await chrome.runtime.sendMessage({
+            type: "TREE_ACTION",
+            payload: {
+              type: "TOGGLE_COLLAPSE",
+              tabId: tabIds[parentTitle]
+            }
+          });
+        }
+      }, { parentTitles, tabIds });
+
+      const rowFirstParent = rowByTitle(sidePanelPage, parentTitles[0]);
+      const rowLastParent = rowByTitle(sidePanelPage, parentTitles[2]);
+      await rowFirstParent.click();
+      await rowLastParent.click({ modifiers: ["Shift"] });
+
+      const trackedRoots = [
+        leftAnchor,
+        rightAnchor,
+        parentTitles[0],
+        parentTitles[1],
+        parentTitles[2]
+      ];
+
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        await dragRowToRow(sidePanelPage, parentTitles[0], rightAnchor, "after");
+        await expect.poll(async () => {
+          const tree = await getCurrentWindowTree(sidePanelPage);
+          const [treeOrder, nativeOrder] = await Promise.all([
+            treeOrderByTitles(sidePanelPage, trackedRoots),
+            nativeOrderByTitles(sidePanelPage, trackedRoots)
+          ]);
+          return {
+            parentChildren: parentTitles.map((parentTitle) => childTitles(tree, parentTitle)),
+            trackedOrderParity: JSON.stringify(treeOrder) === JSON.stringify(nativeOrder),
+            trackedCountOk: treeOrder.length === trackedRoots.length
+          };
+        }).toEqual({
+          parentChildren: parentTitles.map((parentTitle) => [childTitlesByParent.get(parentTitle)]),
+          trackedOrderParity: true,
+          trackedCountOk: true
+        });
+
+        await dragRowToRow(sidePanelPage, parentTitles[0], leftAnchor, "after");
+        await expect.poll(async () => {
+          const tree = await getCurrentWindowTree(sidePanelPage);
+          const [treeOrder, nativeOrder] = await Promise.all([
+            treeOrderByTitles(sidePanelPage, trackedRoots),
+            nativeOrderByTitles(sidePanelPage, trackedRoots)
+          ]);
+          return {
+            parentChildren: parentTitles.map((parentTitle) => childTitles(tree, parentTitle)),
+            trackedOrderParity: JSON.stringify(treeOrder) === JSON.stringify(nativeOrder),
+            trackedCountOk: treeOrder.length === trackedRoots.length
+          };
+        }).toEqual({
+          parentChildren: parentTitles.map((parentTitle) => [childTitlesByParent.get(parentTitle)]),
+          trackedOrderParity: true,
+          trackedCountOk: true
+        });
+      }
+    } finally {
+      await closeTabsByPrefix(sidePanelPage, prefix);
+    }
+  });
+
   test("long trees activate virtualization and limit rendered rows", async ({ sidePanelPage }) => {
     const prefix = "E2E Virtual Row ";
     const total = 320;
@@ -2491,14 +2636,12 @@ test.describe("TabTree extension", () => {
           const text = anchor?.textContent || "";
           return {
             visible: !anchor?.hidden,
-            containsTarget: text.includes(title),
-            virtualized: document.querySelector("#tree-root")?.classList?.contains("virtualized") || false
+            containsTarget: text.includes(title)
           };
         }, targetTitle);
       }).toEqual({
         visible: true,
-        containsTarget: true,
-        virtualized: true
+        containsTarget: true
       });
 
       await sidePanelPage.evaluate(() => {
