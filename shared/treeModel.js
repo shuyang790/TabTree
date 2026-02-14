@@ -398,25 +398,31 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
 
   const previousRecords = [];
   if (previousTree?.nodes) {
-    for (const node of Object.values(previousTree.nodes)) {
+    for (const [previousNodeId, node] of Object.entries(previousTree.nodes)) {
+      const parentNodeId = node.parentNodeId || null;
+      const parentNode = parentNodeId ? previousTree.nodes[parentNodeId] : null;
       previousRecords.push({
+        previousNodeId,
+        parentPreviousNodeId: parentNodeId,
         url: normalizeUrl(node.lastKnownUrl),
-        parentUrl: node.parentNodeId ? normalizeUrl(previousTree.nodes[node.parentNodeId]?.lastKnownUrl) : null,
+        parentUrl: parentNode ? normalizeUrl(parentNode.lastKnownUrl) : null,
         title: node.lastKnownTitle || "",
-        parentTitle: node.parentNodeId ? (previousTree.nodes[node.parentNodeId]?.lastKnownTitle || "") : "",
+        parentTitle: parentNode ? (parentNode.lastKnownTitle || "") : "",
         collapsed: !!node.collapsed,
         consumed: false
       });
     }
   }
 
-  const takeFirstUnconsumed = (bucket) => {
+  const takeFirstUnconsumed = (bucket, predicate = null) => {
     if (!bucket) {
       return null;
     }
-    while (bucket.length) {
-      const candidate = bucket.shift();
+    for (const candidate of bucket) {
       if (!candidate || candidate.consumed) {
+        continue;
+      }
+      if (typeof predicate === "function" && !predicate(candidate)) {
         continue;
       }
       candidate.consumed = true;
@@ -442,9 +448,20 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
   const matchedByTabId = new Map();
   for (const tab of sortedTabs) {
     const url = normalizeUrl(tab.url);
-    let match = takeFirstUnconsumed(previousByUrl.get(url));
-    if (!match && typeof tab.title === "string" && tab.title) {
-      match = takeFirstUnconsumed(previousByTitle.get(tab.title));
+    const title = typeof tab.title === "string" ? tab.title : "";
+    let match = null;
+    if (title) {
+      // Prefer stable identity when duplicate URLs exist.
+      match = takeFirstUnconsumed(previousByTitle.get(title), (record) => record.url === url);
+      if (!match) {
+        match = takeFirstUnconsumed(previousByTitle.get(title));
+      }
+    }
+    if (!match) {
+      match = takeFirstUnconsumed(previousByUrl.get(url));
+    }
+    if (!match && title) {
+      match = takeFirstUnconsumed(previousByTitle.get(title));
     }
     if (match) {
       matchedByTabId.set(tab.id, match);
@@ -485,14 +502,28 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
     }
   }
 
-  // First attempt: restore parent by previous URL relation.
-  for (const tab of sortedTabs) {
-    const match = matchedByTabId.get(tab.id);
-    if (!match?.parentUrl && !match?.parentTitle) {
+  const tabById = new Map(sortedTabs.map((tab) => [tab.id, tab]));
+  const currentTabIdByPreviousNodeId = new Map();
+  for (const [tabId, match] of matchedByTabId.entries()) {
+    if (!match?.previousNodeId) {
       continue;
     }
+    currentTabIdByPreviousNodeId.set(match.previousNodeId, tabId);
+  }
+
+  // Prefer previous-node identity, then fall back to URL/title relation.
+  for (const tab of sortedTabs) {
+    const match = matchedByTabId.get(tab.id);
+    if (!match?.parentPreviousNodeId && !match?.parentUrl && !match?.parentTitle) {
+      continue;
+    }
+
     let parentTab = null;
-    if (match.parentUrl) {
+    if (match.parentPreviousNodeId) {
+      const parentTabId = currentTabIdByPreviousNodeId.get(match.parentPreviousNodeId);
+      parentTab = Number.isInteger(parentTabId) ? (tabById.get(parentTabId) || null) : null;
+    }
+    if (!parentTab && match.parentUrl) {
       const firstCandidate = firstTabByUrl.get(match.parentUrl) || null;
       const secondCandidate = secondTabByUrl.get(match.parentUrl) || null;
       parentTab = firstCandidate?.id !== tab.id

@@ -21,6 +21,20 @@ async function createTitledTab(context, title) {
   return page;
 }
 
+async function createHashTitledTab(context, title) {
+  const page = await context.newPage();
+  const html = `
+    <script>
+      const title = decodeURIComponent(location.hash.slice(1) || "Untitled");
+      document.title = title;
+      document.body.textContent = title;
+    </script>
+  `;
+  await page.goto(`data:text/html,${encodeURIComponent(html)}#${encodeURIComponent(title)}`);
+  await expect.poll(() => page.title()).toBe(title);
+  return page;
+}
+
 async function launchExtensionContext(userDataDir) {
   const context = await chromium.launchPersistentContext(userDataDir, {
     headless: process.env.PW_HEADLESS === "1",
@@ -192,6 +206,217 @@ test("restores parent-child tree relationship after browser restart", async () =
 
     expect(restoredRelation?.parentNodeId).toBeTruthy();
     expect(restoredRelation?.childParentNodeId).toBe(restoredRelation?.parentNodeId);
+  } finally {
+    await launchTwo?.context?.close().catch(() => {});
+    await launchOne?.context?.close().catch(() => {});
+    rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
+test("restores same-url siblings under original parent after browser restart", async () => {
+  const userDataDir = mkdtempSync(path.join(os.tmpdir(), "tabtree-persist-dup-url-"));
+  const stamp = Date.now();
+  const parentTitle = `Restart SameUrl Parent ${stamp}`;
+  const childATitle = `Restart SameUrl Child A ${stamp}`;
+  const childBTitle = `Restart SameUrl Child B ${stamp}`;
+
+  let launchOne = null;
+  let launchTwo = null;
+
+  try {
+    launchOne = await launchExtensionContext(userDataDir);
+    const { context, sidePanelPage } = launchOne;
+
+    await createHashTitledTab(context, parentTitle);
+    await createHashTitledTab(context, childATitle);
+    await createHashTitledTab(context, childBTitle);
+
+    await expect(rowByTitle(sidePanelPage, parentTitle)).toBeVisible();
+    await expect(rowByTitle(sidePanelPage, childATitle)).toBeVisible();
+    await expect(rowByTitle(sidePanelPage, childBTitle)).toBeVisible();
+
+    const tabIds = await sidePanelPage.evaluate(async ({ parentTitle, childATitle, childBTitle }) => {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const findByTitle = (title) => tabs.find((tab) => (tab.title || "") === title)?.id ?? null;
+      return {
+        parentTabId: findByTitle(parentTitle),
+        childATabId: findByTitle(childATitle),
+        childBTabId: findByTitle(childBTitle),
+        windowId: (await chrome.windows.getCurrent()).id
+      };
+    }, { parentTitle, childATitle, childBTitle });
+
+    expect(Number.isInteger(tabIds.parentTabId)).toBeTruthy();
+    expect(Number.isInteger(tabIds.childATabId)).toBeTruthy();
+    expect(Number.isInteger(tabIds.childBTabId)).toBeTruthy();
+
+    await sidePanelPage.evaluate(async ({ parentTabId, childATabId, childBTabId }) => {
+      await chrome.runtime.sendMessage({
+        type: "TREE_ACTION",
+        payload: {
+          type: "REPARENT_TAB",
+          tabId: childATabId,
+          newParentTabId: parentTabId
+        }
+      });
+      await chrome.runtime.sendMessage({
+        type: "TREE_ACTION",
+        payload: {
+          type: "REPARENT_TAB",
+          tabId: childBTabId,
+          newParentTabId: parentTabId
+        }
+      });
+    }, {
+      parentTabId: tabIds.parentTabId,
+      childATabId: tabIds.childATabId,
+      childBTabId: tabIds.childBTabId
+    });
+
+    await expect.poll(async () => {
+      return sidePanelPage.evaluate(async ({ windowId, parentTitle, childATitle, childBTitle }) => {
+        const response = await chrome.runtime.sendMessage({
+          type: "GET_STATE",
+          payload: { windowId }
+        });
+        const windows = response?.payload?.windows || {};
+        const tree = windows[windowId] || windows[String(windowId)] || null;
+        if (!tree) {
+          return null;
+        }
+        const nodes = Object.values(tree.nodes || {});
+        const parentNode = nodes.find((node) => node.lastKnownTitle === parentTitle) || null;
+        const childA = nodes.find((node) => node.lastKnownTitle === childATitle) || null;
+        const childB = nodes.find((node) => node.lastKnownTitle === childBTitle) || null;
+        return {
+          parentNodeId: parentNode?.nodeId ?? null,
+          childAParentNodeId: childA?.parentNodeId ?? null,
+          childBParentNodeId: childB?.parentNodeId ?? null
+        };
+      }, { windowId: tabIds.windowId, parentTitle, childATitle, childBTitle });
+    }).toEqual({
+      parentNodeId: `tab:${tabIds.parentTabId}`,
+      childAParentNodeId: `tab:${tabIds.parentTabId}`,
+      childBParentNodeId: `tab:${tabIds.parentTabId}`
+    });
+
+    await sidePanelPage.evaluate(async ({ parentTabId, childATabId, childBTabId }) => {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const parent = tabs.find((tab) => tab.id === parentTabId);
+      if (!parent) {
+        throw new Error("parent tab missing");
+      }
+      await chrome.tabs.move(childATabId, { index: parent.index });
+      const refreshed = await chrome.tabs.query({ currentWindow: true });
+      const parentAfter = refreshed.find((tab) => tab.id === parentTabId);
+      if (!parentAfter) {
+        throw new Error("parent tab missing after first move");
+      }
+      await chrome.tabs.move(childBTabId, { index: parentAfter.index + 1 });
+    }, {
+      parentTabId: tabIds.parentTabId,
+      childATabId: tabIds.childATabId,
+      childBTabId: tabIds.childBTabId
+    });
+
+    await expect.poll(async () => sidePanelPage.evaluate(async ({ parentTitle, childATitle, childBTitle }) => {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      return tabs
+        .sort((a, b) => a.index - b.index)
+        .map((tab) => tab.title || "")
+        .filter((title) => title === parentTitle || title === childATitle || title === childBTitle);
+    }, { parentTitle, childATitle, childBTitle })).toEqual([
+      childATitle,
+      parentTitle,
+      childBTitle
+    ]);
+
+    await expect.poll(async () => {
+      return sidePanelPage.evaluate(async ({ windowId, parentTabId, childATabId, childBTabId }) => {
+        const key = `tree.local.v1.${windowId}`;
+        const raw = await chrome.storage.local.get([key]);
+        const tree = raw[key] || null;
+        if (!tree) {
+          return null;
+        }
+        return {
+          childAParentNodeId: tree.nodes?.[`tab:${childATabId}`]?.parentNodeId ?? null,
+          childBParentNodeId: tree.nodes?.[`tab:${childBTabId}`]?.parentNodeId ?? null
+        };
+      }, {
+        windowId: tabIds.windowId,
+        parentTabId: tabIds.parentTabId,
+        childATabId: tabIds.childATabId,
+        childBTabId: tabIds.childBTabId
+      });
+    }, { timeout: 10000 }).toEqual({
+      childAParentNodeId: `tab:${tabIds.parentTabId}`,
+      childBParentNodeId: `tab:${tabIds.parentTabId}`
+    });
+
+    await context.close();
+
+    launchTwo = await launchExtensionContext(userDataDir);
+    const sidePanelPageTwo = launchTwo.sidePanelPage;
+
+    await expect(rowByTitle(sidePanelPageTwo, parentTitle)).toBeVisible();
+    await expect(rowByTitle(sidePanelPageTwo, childATitle)).toBeVisible();
+    await expect(rowByTitle(sidePanelPageTwo, childBTitle)).toBeVisible();
+
+    await expect.poll(async () => {
+      const summary = await sidePanelPageTwo.evaluate(async ({ parentTitle, childATitle, childBTitle }) => {
+        const currentWindowId = (await chrome.windows.getCurrent()).id;
+        const response = await chrome.runtime.sendMessage({
+          type: "GET_STATE",
+          payload: { windowId: currentWindowId }
+        });
+        const windows = response?.payload?.windows || {};
+        const tree = windows[currentWindowId] || windows[String(currentWindowId)] || null;
+        if (!tree) {
+          return null;
+        }
+        const nodes = Object.values(tree.nodes || {});
+        const parentNode = nodes.find((node) => node.lastKnownTitle === parentTitle) || null;
+        const childA = nodes.find((node) => node.lastKnownTitle === childATitle) || null;
+        const childB = nodes.find((node) => node.lastKnownTitle === childBTitle) || null;
+        return {
+          parentNodeId: parentNode?.nodeId ?? null,
+          childAParentNodeId: childA?.parentNodeId ?? null,
+          childBParentNodeId: childB?.parentNodeId ?? null
+        };
+      }, { parentTitle, childATitle, childBTitle });
+      return summary;
+    }, { timeout: 10000 }).toMatchObject({
+      parentNodeId: expect.stringMatching(/^tab:\d+$/),
+      childAParentNodeId: expect.stringMatching(/^tab:\d+$/),
+      childBParentNodeId: expect.stringMatching(/^tab:\d+$/)
+    });
+
+    const restored = await sidePanelPageTwo.evaluate(async ({ parentTitle, childATitle, childBTitle }) => {
+      const currentWindowId = (await chrome.windows.getCurrent()).id;
+      const response = await chrome.runtime.sendMessage({
+        type: "GET_STATE",
+        payload: { windowId: currentWindowId }
+      });
+      const windows = response?.payload?.windows || {};
+      const tree = windows[currentWindowId] || windows[String(currentWindowId)] || null;
+      if (!tree) {
+        return null;
+      }
+      const nodes = Object.values(tree.nodes || {});
+      const parentNode = nodes.find((node) => node.lastKnownTitle === parentTitle) || null;
+      const childA = nodes.find((node) => node.lastKnownTitle === childATitle) || null;
+      const childB = nodes.find((node) => node.lastKnownTitle === childBTitle) || null;
+      return {
+        parentNodeId: parentNode?.nodeId ?? null,
+        childAParentNodeId: childA?.parentNodeId ?? null,
+        childBParentNodeId: childB?.parentNodeId ?? null
+      };
+    }, { parentTitle, childATitle, childBTitle });
+
+    expect(restored?.parentNodeId).toBeTruthy();
+    expect(restored?.childAParentNodeId).toBe(restored?.parentNodeId);
+    expect(restored?.childBParentNodeId).toBe(restored?.parentNodeId);
   } finally {
     await launchTwo?.context?.close().catch(() => {});
     await launchOne?.context?.close().catch(() => {});

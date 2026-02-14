@@ -218,6 +218,54 @@ test("buildTreeFromTabs handles large duplicate-url snapshots without self-paren
   }
 });
 
+test("buildTreeFromTabs preserves original parent for reordered same-url siblings", () => {
+  const sharedUrl = "https://dup-parent.test/path?token=1";
+  const tabs = [
+    tab({ id: 2, index: 0, title: "Child A", url: sharedUrl }),
+    tab({ id: 1, index: 1, title: "Parent", url: sharedUrl }),
+    tab({ id: 3, index: 2, title: "Child B", url: sharedUrl })
+  ];
+
+  const previousTree = createEmptyWindowTree(1);
+  previousTree.nodes = {
+    [nodeIdFromTabId(1)]: {
+      nodeId: nodeIdFromTabId(1),
+      tabId: 1,
+      parentNodeId: null,
+      childNodeIds: [nodeIdFromTabId(2), nodeIdFromTabId(3)],
+      collapsed: false,
+      lastKnownTitle: "Parent",
+      lastKnownUrl: sharedUrl
+    },
+    [nodeIdFromTabId(2)]: {
+      nodeId: nodeIdFromTabId(2),
+      tabId: 2,
+      parentNodeId: nodeIdFromTabId(1),
+      childNodeIds: [],
+      collapsed: false,
+      lastKnownTitle: "Child A",
+      lastKnownUrl: sharedUrl
+    },
+    [nodeIdFromTabId(3)]: {
+      nodeId: nodeIdFromTabId(3),
+      tabId: 3,
+      parentNodeId: nodeIdFromTabId(1),
+      childNodeIds: [],
+      collapsed: false,
+      lastKnownTitle: "Child B",
+      lastKnownUrl: sharedUrl
+    }
+  };
+  previousTree.rootNodeIds = [nodeIdFromTabId(1)];
+
+  const restored = buildTreeFromTabs(tabs, previousTree);
+
+  assert.equal(restored.nodes[nodeIdFromTabId(2)].parentNodeId, nodeIdFromTabId(1));
+  assert.equal(restored.nodes[nodeIdFromTabId(3)].parentNodeId, nodeIdFromTabId(1));
+  assert.notEqual(restored.nodes[nodeIdFromTabId(3)].parentNodeId, nodeIdFromTabId(2));
+  assert.deepEqual(restored.nodes[nodeIdFromTabId(1)].childNodeIds, [nodeIdFromTabId(2), nodeIdFromTabId(3)]);
+});
+
 test("buildTreeFromTabs falls back to title matching when urls are missing", () => {
   const tabs = [
     tab({ id: 1, index: 0, title: "Persist Parent", url: "" }),
