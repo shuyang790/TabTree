@@ -34,6 +34,17 @@ function defaultSubtreeMaxIndex(tree, rootNodeId) {
   return max;
 }
 
+function adjustBrowserIndexForSourceShift(requestedIndex, sourceIndex) {
+  if (!Number.isFinite(requestedIndex)) {
+    return requestedIndex;
+  }
+  let adjusted = requestedIndex;
+  if (Number.isFinite(sourceIndex) && sourceIndex < requestedIndex) {
+    adjusted -= 1;
+  }
+  return Math.max(0, adjusted);
+}
+
 export function canDrop({
   tree,
   sourceTabIds,
@@ -142,13 +153,14 @@ export function buildDropPayload({
   }
 
   if (position === "inside") {
+    const requestedBrowserIndex = subtreeMaxIndex(tree, targetNodeId) + 1;
     return {
       type: TREE_ACTIONS.REPARENT_TAB,
       tabId: sourceTabId,
       targetTabId,
       newParentTabId: target.tabId,
       newIndex: target.childNodeIds.length,
-      browserIndex: subtreeMaxIndex(tree, targetNodeId) + 1
+      browserIndex: adjustBrowserIndexForSourceShift(requestedBrowserIndex, source.index)
     };
   }
 
@@ -164,7 +176,8 @@ export function buildDropPayload({
     newIndex -= 1;
   }
 
-  const browserIndex = target.index + (position === "after" ? 1 : 0);
+  const requestedBrowserIndex = target.index + (position === "after" ? 1 : 0);
+  const browserIndex = adjustBrowserIndexForSourceShift(requestedBrowserIndex, source.index);
 
   if (parentNodeId) {
     return {

@@ -1019,6 +1019,70 @@ test.describe("TabTree extension", () => {
     await tabC.close().catch(() => {});
   });
 
+  test("single-tab inside drag keeps native order aligned for non-adjacent move", async ({ context, sidePanelPage }) => {
+    const sourceTitle = "Order Align Source";
+    const fillerTitle = "Order Align Filler";
+    const targetTitle = "Order Align Target";
+    const targetChildTitle = "Order Align Target Child";
+    const tailTitle = "Order Align Tail";
+
+    const source = await createTitledTab(context, sourceTitle);
+    const filler = await createTitledTab(context, fillerTitle);
+    const target = await createTitledTab(context, targetTitle);
+    const targetChild = await createTitledTab(context, targetChildTitle);
+    const tail = await createTitledTab(context, tailTitle);
+
+    const sourceTabId = await tabIdByTitle(sidePanelPage, sourceTitle);
+    const targetTabId = await tabIdByTitle(sidePanelPage, targetTitle);
+    const targetChildTabId = await tabIdByTitle(sidePanelPage, targetChildTitle);
+    expect(Number.isInteger(sourceTabId)).toBeTruthy();
+    expect(Number.isInteger(targetTabId)).toBeTruthy();
+    expect(Number.isInteger(targetChildTabId)).toBeTruthy();
+
+    await sidePanelPage.evaluate(async ({ targetTabId, targetChildTabId }) => {
+      await chrome.runtime.sendMessage({
+        type: "TREE_ACTION",
+        payload: {
+          type: "REPARENT_TAB",
+          tabId: targetChildTabId,
+          newParentTabId: targetTabId
+        }
+      });
+    }, { targetTabId, targetChildTabId });
+
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      return childTitles(tree, targetTitle);
+    }).toEqual([targetChildTitle]);
+
+    await dragRowToRow(sidePanelPage, sourceTitle, targetTitle, "inside");
+
+    const trackedTitles = [fillerTitle, targetTitle, targetChildTitle, sourceTitle, tailTitle];
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      const nativeOrder = await sidePanelPage.evaluate(async (titles) => {
+        const tabs = await chrome.tabs.query({ currentWindow: true });
+        return tabs
+          .sort((a, b) => a.index - b.index)
+          .map((tab) => tab.title || "")
+          .filter((title) => titles.includes(title));
+      }, trackedTitles);
+      return {
+        childOrder: childTitles(tree, targetTitle),
+        nativeOrder
+      };
+    }).toEqual({
+      childOrder: [targetChildTitle, sourceTitle],
+      nativeOrder: [fillerTitle, targetTitle, targetChildTitle, sourceTitle, tailTitle]
+    });
+
+    await source.close().catch(() => {});
+    await filler.close().catch(() => {});
+    await target.close().catch(() => {});
+    await targetChild.close().catch(() => {});
+    await tail.close().catch(() => {});
+  });
+
   test("multiselect drag inside reparents as ordered children", async ({ context, sidePanelPage }) => {
     const parent = await createTitledTab(context, "Batch Inside Parent");
     const sourceA = await createTitledTab(context, "Batch Inside Source A");

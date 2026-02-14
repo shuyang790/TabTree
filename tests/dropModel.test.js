@@ -123,7 +123,75 @@ test("buildDropPayload returns single-tab inside reparent payload", () => {
     targetTabId: 2,
     newParentTabId: 2,
     newIndex: 1,
-    browserIndex: 4
+    browserIndex: 3
+  });
+});
+
+test("buildDropPayload adjusts browser index for non-adjacent inside reparent", () => {
+  const tree = {
+    rootNodeIds: ["tab:1", "tab:2", "tab:3", "tab:5"],
+    nodes: {
+      "tab:1": { tabId: 1, index: 0, parentNodeId: null, pinned: false, childNodeIds: [] },
+      "tab:2": { tabId: 2, index: 1, parentNodeId: null, pinned: false, childNodeIds: [] },
+      "tab:3": { tabId: 3, index: 2, parentNodeId: null, pinned: false, childNodeIds: ["tab:4"] },
+      "tab:4": { tabId: 4, index: 3, parentNodeId: "tab:3", pinned: false, childNodeIds: [] },
+      "tab:5": { tabId: 5, index: 4, parentNodeId: null, pinned: false, childNodeIds: [] }
+    }
+  };
+  const payload = buildDropPayload({
+    tree,
+    sourceTabIds: [1],
+    targetTabId: 3,
+    position: "inside",
+    nodeIdFromTabId,
+    subtreeMaxIndex
+  });
+
+  assert.deepEqual(payload, {
+    type: TREE_ACTIONS.REPARENT_TAB,
+    tabId: 1,
+    targetTabId: 3,
+    newParentTabId: 3,
+    newIndex: 1,
+    browserIndex: 3
+  });
+});
+
+test("buildDropPayload adjusts browser index for root before move when source is before target", () => {
+  const tree = sampleTree();
+  const payload = buildDropPayload({
+    tree,
+    sourceTabIds: [1],
+    targetTabId: 3,
+    position: "before",
+    nodeIdFromTabId,
+    subtreeMaxIndex
+  });
+
+  assert.deepEqual(payload, {
+    type: TREE_ACTIONS.MOVE_TO_ROOT,
+    tabId: 1,
+    index: 1,
+    browserIndex: 1
+  });
+});
+
+test("buildDropPayload keeps browser index unchanged when source is after target", () => {
+  const tree = sampleTree();
+  const payload = buildDropPayload({
+    tree,
+    sourceTabIds: [4],
+    targetTabId: 2,
+    position: "before",
+    nodeIdFromTabId,
+    subtreeMaxIndex
+  });
+
+  assert.deepEqual(payload, {
+    type: TREE_ACTIONS.MOVE_TO_ROOT,
+    tabId: 4,
+    index: 1,
+    browserIndex: 1
   });
 });
 
@@ -147,6 +215,6 @@ test("dropModel works with default helper dependencies", () => {
     type: TREE_ACTIONS.MOVE_TO_ROOT,
     tabId: 1,
     index: 2,
-    browserIndex: 3
+    browserIndex: 2
   });
 });
