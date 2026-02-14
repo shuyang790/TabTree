@@ -220,6 +220,28 @@ async function dragRowToSearchRoot(sidePanelPage, sourceTitle) {
   });
 }
 
+async function dragRowToBottomRoot(sidePanelPage, sourceTitle) {
+  const source = rowByTitle(sidePanelPage, sourceTitle);
+  await expect(source).toBeVisible();
+  const bottomRootDropTarget = sidePanelPage.locator("#bottom-root-drop-zone");
+  await expect(bottomRootDropTarget).toBeVisible();
+  await source.dragTo(bottomRootDropTarget, {
+    targetPosition: { x: 24, y: 14 }
+  });
+}
+
+async function closeTabsByPrefix(sidePanelPage, prefix) {
+  await sidePanelPage.evaluate(async (targetPrefix) => {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    const toClose = tabs
+      .filter((tab) => (tab.title || "").startsWith(targetPrefix))
+      .map((tab) => tab.id);
+    if (toClose.length) {
+      await chrome.tabs.remove(toClose);
+    }
+  }, prefix);
+}
+
 function groupHeaderByContainedRowTitle(sidePanelPage, rowTitle) {
   return sidePanelPage
     .locator(".group-section")
@@ -2180,5 +2202,154 @@ test.describe("TabTree extension", () => {
     await sourceA.close().catch(() => {});
     await sourceB.close().catch(() => {});
     await tail.close().catch(() => {});
+  });
+
+  test("move undo toast restores previous order", async ({ context, sidePanelPage }) => {
+    const source = await createTitledTab(context, "Undo Move Source");
+    const target = await createTitledTab(context, "Undo Move Target");
+    const tail = await createTitledTab(context, "Undo Move Tail");
+
+    const tracked = ["Undo Move Source", "Undo Move Target", "Undo Move Tail"];
+    await expectTreeAndNativeOrderMatch(sidePanelPage, tracked, tracked);
+
+    await dragRowToRow(sidePanelPage, "Undo Move Source", "Undo Move Target", "after");
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      return rootTitles(tree).filter((title) => tracked.includes(title));
+    }).toEqual(["Undo Move Target", "Undo Move Source", "Undo Move Tail"]);
+
+    await expect(sidePanelPage.locator("#undo-toast")).toBeVisible();
+    await sidePanelPage.locator("#undo-last-move").click();
+
+    await expectTreeAndNativeOrderMatch(sidePanelPage, tracked, tracked);
+
+    await source.close().catch(() => {});
+    await target.close().catch(() => {});
+    await tail.close().catch(() => {});
+  });
+
+  test("multiselect drop on bottom root zone moves ordered block to root end", async ({ context, sidePanelPage }) => {
+    const parent = await createTitledTab(context, "Bottom Root Parent");
+    const sourceA = await createTitledTab(context, "Bottom Root Source A");
+    const sourceB = await createTitledTab(context, "Bottom Root Source B");
+    const tail = await createTitledTab(context, "Bottom Root Tail");
+
+    await sidePanelPage.evaluate(async () => {
+      await chrome.runtime.sendMessage({
+        type: "PATCH_SETTINGS",
+        payload: {
+          settingsPatch: { showBottomRootDropZone: true }
+        }
+      });
+    });
+
+    const parentTabId = await tabIdByTitle(sidePanelPage, "Bottom Root Parent");
+    const sourceATabId = await tabIdByTitle(sidePanelPage, "Bottom Root Source A");
+    const sourceBTabId = await tabIdByTitle(sidePanelPage, "Bottom Root Source B");
+    expect(Number.isInteger(parentTabId)).toBeTruthy();
+    expect(Number.isInteger(sourceATabId)).toBeTruthy();
+    expect(Number.isInteger(sourceBTabId)).toBeTruthy();
+
+    await sidePanelPage.evaluate(async ({ parentTabId, sourceATabId, sourceBTabId }) => {
+      await chrome.runtime.sendMessage({
+        type: "TREE_ACTION",
+        payload: {
+          type: "REPARENT_TAB",
+          tabId: sourceATabId,
+          newParentTabId: parentTabId
+        }
+      });
+      await chrome.runtime.sendMessage({
+        type: "TREE_ACTION",
+        payload: {
+          type: "REPARENT_TAB",
+          tabId: sourceBTabId,
+          newParentTabId: parentTabId
+        }
+      });
+    }, { parentTabId, sourceATabId, sourceBTabId });
+
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      return childTitles(tree, "Bottom Root Parent");
+    }).toEqual(["Bottom Root Source A", "Bottom Root Source B"]);
+
+    const rowSourceA = rowByTitle(sidePanelPage, "Bottom Root Source A");
+    const rowSourceB = rowByTitle(sidePanelPage, "Bottom Root Source B");
+    await rowSourceA.click();
+    await rowSourceB.click({ modifiers: ["Shift"] });
+    await dragRowToBottomRoot(sidePanelPage, "Bottom Root Source A");
+
+    await expect.poll(async () => {
+      const tree = await getCurrentWindowTree(sidePanelPage);
+      const roots = rootTitles(tree);
+      const tailIndex = roots.indexOf("Bottom Root Tail");
+      const sourceAIndex = roots.indexOf("Bottom Root Source A");
+      const sourceBIndex = roots.indexOf("Bottom Root Source B");
+      return {
+        parentChildren: childTitles(tree, "Bottom Root Parent"),
+        endsWithDraggedBlock: roots.slice(-2).join("|") === "Bottom Root Source A|Bottom Root Source B",
+        orderedAfterTail: tailIndex >= 0 && tailIndex < sourceAIndex && sourceAIndex < sourceBIndex
+      };
+    }).toEqual({
+      parentChildren: [],
+      endsWithDraggedBlock: true,
+      orderedAfterTail: true
+    });
+
+    await expectTreeAndNativeOrderMatch(
+      sidePanelPage,
+      ["Bottom Root Parent", "Bottom Root Tail", "Bottom Root Source A", "Bottom Root Source B"],
+      ["Bottom Root Parent", "Bottom Root Tail", "Bottom Root Source A", "Bottom Root Source B"]
+    );
+
+    await parent.close().catch(() => {});
+    await sourceA.close().catch(() => {});
+    await sourceB.close().catch(() => {});
+    await tail.close().catch(() => {});
+  });
+
+  test("long trees activate virtualization and limit rendered rows", async ({ sidePanelPage }) => {
+    const prefix = "E2E Virtual Row ";
+    const total = 320;
+    try {
+      await sidePanelPage.evaluate(async ({ prefix, total }) => {
+        for (let i = 0; i < total; i += 1) {
+          await chrome.tabs.create({
+            active: false,
+            url: `data:text/html,<title>${prefix}${i}</title><main>${i}</main>`
+          });
+        }
+      }, { prefix, total });
+
+      await expect.poll(async () => {
+        const tree = await getCurrentWindowTree(sidePanelPage);
+        const titles = Object.values(tree?.nodes || {})
+          .map((node) => node.lastKnownTitle || "")
+          .filter((title) => title.startsWith(prefix));
+        return titles.length;
+      }, { timeout: 30000 }).toBe(total);
+
+      await expect.poll(async () => {
+        return sidePanelPage.evaluate((totalCount) => {
+          const treeRoot = document.querySelector("#tree-root");
+          const renderedRows = document.querySelectorAll(".tree-row[data-tab-id]").length;
+          return {
+            virtualized: treeRoot?.classList?.contains("virtualized") || false,
+            renderedRowsLessThanTotal: renderedRows < totalCount
+          };
+        }, total);
+      }, { timeout: 10000 }).toEqual({
+        virtualized: true,
+        renderedRowsLessThanTotal: true
+      });
+
+      const renderedRows = await sidePanelPage.evaluate(() => {
+        return document.querySelectorAll(".tree-row[data-tab-id]").length;
+      });
+      expect(renderedRows).toBeLessThan(total);
+    } finally {
+      await closeTabsByPrefix(sidePanelPage, prefix);
+    }
   });
 });

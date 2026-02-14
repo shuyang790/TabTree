@@ -1802,7 +1802,7 @@ function updateSearchDropAffordance() {
 
   if (dom.bottomRootDropZone) {
     const enabled = !!state.settings?.showBottomRootDropZone;
-    const shouldShow = enabled && active;
+    const shouldShow = enabled;
     dom.bottomRootDropZone.hidden = !shouldShow;
     dom.bottomRootDropZone.dataset.dropFocused = focused ? "true" : "false";
   }
@@ -3249,9 +3249,17 @@ function renderTree() {
   const tree = currentWindowTree();
   const query = state.search.trim().toLowerCase();
   const visibilityByNodeId = tree ? buildVisibilityMap(tree, query) : null;
-  const virtualSummary = tree && visibilityByNodeId ? buildVirtualEntries(tree, query, visibilityByNodeId) : null;
+  const canConsiderVirtual = !!tree
+    && !!visibilityByNodeId
+    && !query
+    && !state.draggingTabIds.length
+    && !Number.isInteger(state.draggingGroupId)
+    && Object.keys(tree.nodes || {}).length >= VIRTUALIZE_MIN_ROWS;
+  const virtualSummary = canConsiderVirtual
+    ? buildVirtualEntries(tree, query, visibilityByNodeId)
+    : null;
 
-  if (tree && visibilityByNodeId && virtualSummary && shouldUseVirtualTreeRender(tree, query, virtualSummary.totalVisibleRows)) {
+  if (canConsiderVirtual && virtualSummary && shouldUseVirtualTreeRender(tree, query, virtualSummary.totalVisibleRows)) {
     renderVirtualTree(tree, query, visibilityByNodeId, virtualSummary);
     return;
   }
