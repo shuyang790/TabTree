@@ -41,6 +41,27 @@
   "dropToTopLevelBottomHint": {
     "message": "拖放到這裡可移到頂層"
   },
+  "dropStatusValid": {
+    "message": "可放置"
+  },
+  "dropBlockedGeneric": {
+    "message": "不可放置"
+  },
+  "dropBlockedCycle": {
+    "message": "循環層級"
+  },
+  "dropBlockedPinnedMismatch": {
+    "message": "釘選狀態不相容"
+  },
+  "dropBlockedSelection": {
+    "message": "選取項目衝突"
+  },
+  "dropBlockedGroupBoundary": {
+    "message": "群組邊界限制"
+  },
+  "dropBlockedSameGroup": {
+    "message": "同一群組"
+  },
   "moveCompleteUndo": {
     "message": "移動完成"
   },

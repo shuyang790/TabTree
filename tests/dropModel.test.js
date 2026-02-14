@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TREE_ACTIONS } from "../shared/constants.js";
-import { buildDropPayload, canDrop } from "../sidepanel/dropModel.js";
+import {
+  buildDropPayload,
+  canDrop,
+  DROP_BLOCK_REASONS,
+  dropBlockReason
+} from "../sidepanel/dropModel.js";
 
 function nodeIdFromTabId(tabId) {
   return `tab:${tabId}`;
@@ -72,6 +77,46 @@ test("canDrop rejects cycles and pinned mismatches", () => {
     isDescendant
   });
   assert.equal(pinnedMismatch, false);
+});
+
+test("dropBlockReason returns specific reason codes", () => {
+  const tree = sampleTree();
+
+  assert.equal(
+    dropBlockReason({
+      tree,
+      sourceTabIds: [2],
+      targetTabId: 4,
+      position: "inside",
+      nodeIdFromTabId,
+      isDescendant
+    }),
+    DROP_BLOCK_REASONS.CYCLE
+  );
+
+  assert.equal(
+    dropBlockReason({
+      tree,
+      sourceTabIds: [5],
+      targetTabId: 2,
+      position: "inside",
+      nodeIdFromTabId,
+      isDescendant
+    }),
+    DROP_BLOCK_REASONS.PINNED_MISMATCH
+  );
+
+  assert.equal(
+    dropBlockReason({
+      tree,
+      sourceTabIds: [2],
+      targetTabId: 2,
+      position: "after",
+      nodeIdFromTabId,
+      isDescendant
+    }),
+    DROP_BLOCK_REASONS.SELF_TARGET
+  );
 });
 
 test("canDrop accepts valid before/after root moves", () => {

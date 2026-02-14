@@ -18,10 +18,17 @@ import {
   fallbackEdgePositionFromCoordinates,
   getDropPositionFromCoordinates
 } from "./dropGeometryModel.js";
-import { buildDropPayload as buildDropPayloadModel, canDrop as canDropModel } from "./dropModel.js";
+import {
+  buildDropPayload as buildDropPayloadModel,
+  canDrop as canDropModel,
+  DROP_BLOCK_REASONS,
+  dropBlockReason as dropBlockReasonModel
+} from "./dropModel.js";
 import {
   buildMoveGroupBlockPayload,
-  canDropGroup as canDropGroupModel
+  canDropGroup as canDropGroupModel,
+  GROUP_DROP_BLOCK_REASONS,
+  groupDropBlockReason as groupDropBlockReasonModel
 } from "./groupDropModel.js";
 import { orderedExistingGroups as orderedExistingGroupsModel } from "./groupOptionsModel.js";
 import { sendOrThrow } from "./messaging.js";
@@ -1770,6 +1777,67 @@ function adoptDraggedSelection(tabIds, anchorTabId = null) {
   syncRenderedSelectionState();
 }
 
+function resolveDragBlockedReason(tree, groupDrag) {
+  if (!tree || state.dragTarget.valid) {
+    return null;
+  }
+
+  if (groupDrag) {
+    if (!Number.isInteger(state.draggingGroupId)) {
+      return GROUP_DROP_BLOCK_REASONS.INVALID_CONTEXT;
+    }
+    if (state.dragTarget.kind === "group") {
+      return groupDropBlockReasonModel({
+        tree,
+        sourceGroupId: state.draggingGroupId,
+        targetGroupId: state.dragTarget.groupId
+      });
+    }
+    if (state.dragTarget.kind === "tab" && Number.isFinite(state.dragTarget.tabId)) {
+      const targetNode = tree.nodes?.[nodeId(state.dragTarget.tabId)];
+      return groupDropBlockReasonModel({
+        tree,
+        sourceGroupId: state.draggingGroupId,
+        targetGroupId: Number.isInteger(targetNode?.groupId) ? targetNode.groupId : null,
+        targetTabId: state.dragTarget.tabId
+      });
+    }
+    return GROUP_DROP_BLOCK_REASONS.INVALID_CONTEXT;
+  }
+
+  if (!state.draggingTabIds.length) {
+    return DROP_BLOCK_REASONS.INVALID_CONTEXT;
+  }
+  if (state.dragTarget.kind !== "tab" || !Number.isFinite(state.dragTarget.tabId) || !state.dragTarget.position) {
+    return DROP_BLOCK_REASONS.INVALID_CONTEXT;
+  }
+  return dropBlockReasonModel({
+    tree,
+    sourceTabIds: state.draggingTabIds,
+    targetTabId: state.dragTarget.tabId,
+    position: state.dragTarget.position
+  });
+}
+
+function blockedReasonLabel(reason) {
+  if (reason === DROP_BLOCK_REASONS.CYCLE) {
+    return t("dropBlockedCycle", [], "cycle");
+  }
+  if (reason === DROP_BLOCK_REASONS.PINNED_MISMATCH || reason === GROUP_DROP_BLOCK_REASONS.PINNED_TARGET) {
+    return t("dropBlockedPinnedMismatch", [], "pinned mismatch");
+  }
+  if (reason === DROP_BLOCK_REASONS.SELF_TARGET) {
+    return t("dropBlockedSelection", [], "selection conflict");
+  }
+  if (reason === GROUP_DROP_BLOCK_REASONS.NON_ROOT_TARGET) {
+    return t("dropBlockedGroupBoundary", [], "group boundary");
+  }
+  if (reason === GROUP_DROP_BLOCK_REASONS.SAME_GROUP) {
+    return t("dropBlockedSameGroup", [], "same group");
+  }
+  return t("dropBlockedGeneric", [], "blocked");
+}
+
 function updateDragStatusChip() {
   if (!dom.dragStatusChip) {
     return;
@@ -1793,7 +1861,11 @@ function updateDragStatusChip() {
     destination = "Move after";
   }
 
-  const validity = state.dragTarget.valid ? "valid" : "blocked";
+  const tree = currentWindowTree();
+  const reason = resolveDragBlockedReason(tree, groupDrag);
+  const validity = state.dragTarget.valid
+    ? t("dropStatusValid", [], "valid")
+    : blockedReasonLabel(reason);
   if (groupDrag) {
     dom.dragStatusChip.textContent = `${destination} group (${validity})`;
   } else {

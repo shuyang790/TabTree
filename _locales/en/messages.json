@@ -41,6 +41,27 @@
   "dropToTopLevelBottomHint": {
     "message": "Drop here to move to top-level"
   },
+  "dropStatusValid": {
+    "message": "valid"
+  },
+  "dropBlockedGeneric": {
+    "message": "blocked"
+  },
+  "dropBlockedCycle": {
+    "message": "cycle"
+  },
+  "dropBlockedPinnedMismatch": {
+    "message": "pinned mismatch"
+  },
+  "dropBlockedSelection": {
+    "message": "selection conflict"
+  },
+  "dropBlockedGroupBoundary": {
+    "message": "group boundary"
+  },
+  "dropBlockedSameGroup": {
+    "message": "same group"
+  },
   "moveCompleteUndo": {
     "message": "Move complete"
   },

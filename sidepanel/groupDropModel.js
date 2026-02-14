@@ -4,7 +4,16 @@ function defaultNodeIdFromTabId(tabId) {
   return `tab:${tabId}`;
 }
 
-export function canDropGroup({
+export const GROUP_DROP_BLOCK_REASONS = Object.freeze({
+  INVALID_CONTEXT: "invalid-context",
+  MISSING_SOURCE_GROUP: "missing-source-group",
+  SAME_GROUP: "same-group",
+  MISSING_TARGET: "missing-target",
+  PINNED_TARGET: "pinned-target",
+  NON_ROOT_TARGET: "non-root-target"
+});
+
+export function groupDropBlockReason({
   tree,
   sourceGroupId,
   targetGroupId = null,
@@ -12,32 +21,54 @@ export function canDropGroup({
   nodeIdFromTabId = defaultNodeIdFromTabId
 }) {
   if (!tree || typeof nodeIdFromTabId !== "function" || !Number.isInteger(sourceGroupId)) {
-    return false;
+    return GROUP_DROP_BLOCK_REASONS.INVALID_CONTEXT;
   }
 
   const sourceHasRows = Object.values(tree.nodes || {}).some(
     (node) => node.groupId === sourceGroupId && !node.pinned
   );
   if (!sourceHasRows) {
-    return false;
+    return GROUP_DROP_BLOCK_REASONS.MISSING_SOURCE_GROUP;
   }
 
   if (Number.isInteger(targetGroupId) && targetGroupId === sourceGroupId) {
-    return false;
+    return GROUP_DROP_BLOCK_REASONS.SAME_GROUP;
   }
 
   if (!Number.isFinite(targetTabId)) {
-    return true;
+    return null;
   }
 
   const targetNode = tree.nodes?.[nodeIdFromTabId(targetTabId)];
-  if (!targetNode || targetNode.pinned || targetNode.parentNodeId) {
-    return false;
+  if (!targetNode) {
+    return GROUP_DROP_BLOCK_REASONS.MISSING_TARGET;
+  }
+  if (targetNode.pinned) {
+    return GROUP_DROP_BLOCK_REASONS.PINNED_TARGET;
+  }
+  if (targetNode.parentNodeId) {
+    return GROUP_DROP_BLOCK_REASONS.NON_ROOT_TARGET;
   }
   if (targetNode.groupId === sourceGroupId) {
-    return false;
+    return GROUP_DROP_BLOCK_REASONS.SAME_GROUP;
   }
-  return true;
+  return null;
+}
+
+export function canDropGroup({
+  tree,
+  sourceGroupId,
+  targetGroupId = null,
+  targetTabId = null,
+  nodeIdFromTabId = defaultNodeIdFromTabId
+}) {
+  return groupDropBlockReason({
+    tree,
+    sourceGroupId,
+    targetGroupId,
+    targetTabId,
+    nodeIdFromTabId
+  }) === null;
 }
 
 export function buildMoveGroupBlockPayload({
@@ -69,4 +100,3 @@ export function buildMoveGroupBlockPayload({
 
   return payload;
 }
-

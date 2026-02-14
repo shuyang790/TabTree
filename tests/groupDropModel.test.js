@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { TREE_ACTIONS } from "../shared/constants.js";
 import {
   buildMoveGroupBlockPayload,
-  canDropGroup
+  canDropGroup,
+  GROUP_DROP_BLOCK_REASONS,
+  groupDropBlockReason
 } from "../sidepanel/groupDropModel.js";
 
 function sampleTree() {
@@ -53,6 +55,25 @@ test("canDropGroup validates target tab constraints", () => {
   assert.equal(
     canDropGroup({ tree, sourceGroupId: 10, targetTabId: 3 }),
     true
+  );
+});
+
+test("groupDropBlockReason returns specific reason codes", () => {
+  const tree = sampleTree();
+
+  assert.equal(
+    groupDropBlockReason({ tree, sourceGroupId: 10, targetGroupId: 10 }),
+    GROUP_DROP_BLOCK_REASONS.SAME_GROUP
+  );
+
+  assert.equal(
+    groupDropBlockReason({ tree, sourceGroupId: 10, targetTabId: 5 }),
+    GROUP_DROP_BLOCK_REASONS.PINNED_TARGET
+  );
+
+  assert.equal(
+    groupDropBlockReason({ tree, sourceGroupId: 10, targetTabId: 4 }),
+    GROUP_DROP_BLOCK_REASONS.NON_ROOT_TARGET
   );
 });
 
@@ -107,4 +128,3 @@ test("buildMoveGroupBlockPayload rejects invalid inputs", () => {
     null
   );
 });
-

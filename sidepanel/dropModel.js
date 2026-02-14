@@ -19,6 +19,66 @@ function defaultIsDescendant(tree, ancestorNodeId, maybeDescendantNodeId) {
   return false;
 }
 
+export const DROP_BLOCK_REASONS = Object.freeze({
+  INVALID_CONTEXT: "invalid-context",
+  MISSING_TARGET: "missing-target",
+  SELF_TARGET: "self-target",
+  MISSING_SOURCE: "missing-source",
+  CYCLE: "cycle",
+  PINNED_MISMATCH: "pinned-mismatch"
+});
+
+export function dropBlockReason({
+  tree,
+  sourceTabIds,
+  targetTabId,
+  position,
+  nodeIdFromTabId = defaultNodeIdFromTabId,
+  isDescendant = defaultIsDescendant
+}) {
+  if (!tree || typeof nodeIdFromTabId !== "function" || typeof isDescendant !== "function") {
+    return DROP_BLOCK_REASONS.INVALID_CONTEXT;
+  }
+
+  const targetNodeId = nodeIdFromTabId(targetTabId);
+  const targetNode = tree.nodes[targetNodeId];
+  if (!targetNode) {
+    return DROP_BLOCK_REASONS.MISSING_TARGET;
+  }
+
+  const sourceNodeIds = sourceTabIds.map((tabId) => nodeIdFromTabId(tabId));
+  if (sourceNodeIds.includes(targetNodeId)) {
+    return DROP_BLOCK_REASONS.SELF_TARGET;
+  }
+
+  const newParentNodeId = position === "inside"
+    ? targetNodeId
+    : targetNode.parentNodeId;
+  const expectedPinned = (() => {
+    if (newParentNodeId) {
+      return !!tree.nodes[newParentNodeId]?.pinned;
+    }
+    return !!targetNode.pinned;
+  })();
+
+  for (const sourceNodeId of sourceNodeIds) {
+    const sourceNode = tree.nodes[sourceNodeId];
+    if (!sourceNode) {
+      return DROP_BLOCK_REASONS.MISSING_SOURCE;
+    }
+
+    if (newParentNodeId && isDescendant(tree, sourceNodeId, newParentNodeId)) {
+      return DROP_BLOCK_REASONS.CYCLE;
+    }
+
+    if (!!sourceNode.pinned !== expectedPinned) {
+      return DROP_BLOCK_REASONS.PINNED_MISMATCH;
+    }
+  }
+
+  return null;
+}
+
 function defaultSubtreeMaxIndex(tree, rootNodeId) {
   let max = tree.nodes[rootNodeId]?.index ?? 0;
   const stack = [...(tree.nodes[rootNodeId]?.childNodeIds || [])];
@@ -56,48 +116,14 @@ export function canDrop({
   if (!tree || typeof nodeIdFromTabId !== "function" || typeof isDescendant !== "function") {
     return false;
   }
-
-  const targetNodeId = nodeIdFromTabId(targetTabId);
-  const targetNode = tree.nodes[targetNodeId];
-  if (!targetNode) {
-    return false;
-  }
-
-  const sourceNodeIds = sourceTabIds.map((tabId) => nodeIdFromTabId(tabId));
-  if (sourceNodeIds.includes(targetNodeId)) {
-    return false;
-  }
-
-  let newParentNodeId = null;
-  if (position === "inside") {
-    newParentNodeId = targetNodeId;
-  } else {
-    newParentNodeId = targetNode.parentNodeId;
-  }
-
-  const expectedPinned = (() => {
-    if (newParentNodeId) {
-      return !!tree.nodes[newParentNodeId]?.pinned;
-    }
-    return !!targetNode.pinned;
-  })();
-
-  for (const sourceNodeId of sourceNodeIds) {
-    const sourceNode = tree.nodes[sourceNodeId];
-    if (!sourceNode) {
-      return false;
-    }
-
-    if (newParentNodeId && isDescendant(tree, sourceNodeId, newParentNodeId)) {
-      return false;
-    }
-
-    if (!!sourceNode.pinned !== expectedPinned) {
-      return false;
-    }
-  }
-
-  return true;
+  return dropBlockReason({
+    tree,
+    sourceTabIds,
+    targetTabId,
+    position,
+    nodeIdFromTabId,
+    isDescendant
+  }) === null;
 }
 
 export function buildDropPayload({
