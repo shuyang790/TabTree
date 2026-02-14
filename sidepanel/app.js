@@ -309,6 +309,9 @@ const AUTO_SCROLL_EDGE_PX = 56;
 const AUTO_SCROLL_MAX_STEP = 18;
 const SETTINGS_WRITE_DEBOUNCE_MS = 320;
 const UNDO_TOAST_MS = 8000;
+const VIRTUALIZE_MIN_ROWS = 300;
+const VIRTUALIZE_OVERSCAN_PX = 640;
+const VIRTUAL_ROW_BUFFER = 12;
 const DROP_TARGET_CLASSES = [
   "drop-valid-before",
   "drop-valid-after",
@@ -372,7 +375,12 @@ const state = {
   searchActiveTabId: null,
   searchRenderTimer: null,
   renderRafId: null,
+  virtualScrollRafId: null,
   visibleTabIds: [],
+  virtualAllVisibleTabIds: [],
+  virtualModeActive: false,
+  virtualLayout: null,
+  virtualHeightCache: new Map(),
   draggingTabIds: [],
   draggingGroupId: null,
   dragTarget: {
@@ -557,6 +565,13 @@ function visibleTabIdsInOrder() {
 }
 
 function refreshVisibleTabIds() {
+  if (state.virtualModeActive && Array.isArray(state.virtualAllVisibleTabIds) && state.virtualAllVisibleTabIds.length) {
+    state.visibleTabIds = [...state.virtualAllVisibleTabIds];
+    refreshSearchMatches();
+    syncSearchMatchHighlight();
+    return;
+  }
+
   state.visibleTabIds = Array.from(dom.treeRoot.querySelectorAll(".tree-row[data-tab-id]"))
     .map((row) => Number(row.dataset.tabId))
     .filter((id) => Number.isFinite(id));
@@ -684,6 +699,18 @@ function setTreeRowTabStop(preferredTabId = null) {
 }
 
 function focusTreeRow(tabId) {
+  if (Number.isFinite(tabId)) {
+    const existing = dom.treeRoot.querySelector(`.tree-row[data-tab-id="${tabId}"]`);
+    if (!existing && state.virtualModeActive) {
+      const entryKey = state.virtualLayout?.tabIdToEntryKey?.get(tabId);
+      const offset = entryKey ? state.virtualLayout?.entryOffsets?.get(entryKey) : null;
+      if (Number.isFinite(offset)) {
+        dom.treeRoot.scrollTop = Math.max(0, offset - VIRTUAL_ROW_BUFFER * approxRowHeightPx());
+        renderTree();
+      }
+    }
+  }
+
   const row = setTreeRowTabStop(tabId);
   if (row) {
     row.focus();
@@ -2314,23 +2341,26 @@ function createPinnedStrip(tree, pinnedRootNodeIds, query, visibilityByNodeId) {
 function createGroupSection(tree, groupId, rootNodeIds, query, visibilityByNodeId) {
   const group = groupDisplay(tree, groupId);
   const queryMatch = query && group.name.toLowerCase().includes(query);
+  const renderChildren = !group.collapsed || !!query;
 
   const renderableRootIds = rootNodeIds
     .filter((nodeKey) => shouldRenderNode(tree, nodeKey, query, visibilityByNodeId));
 
   const renderedChildren = [];
-  for (const [groupIndex, nodeKey] of renderableRootIds.entries()) {
-    const child = createNodeElement(tree, nodeKey, query, visibilityByNodeId, {
-      showGroupBadge: false,
-      siblingIndex: groupIndex,
-      siblingCount: renderableRootIds.length
-    });
-    if (child) {
-      renderedChildren.push(child);
+  if (renderChildren) {
+    for (const [groupIndex, nodeKey] of renderableRootIds.entries()) {
+      const child = createNodeElement(tree, nodeKey, query, visibilityByNodeId, {
+        showGroupBadge: false,
+        siblingIndex: groupIndex,
+        siblingCount: renderableRootIds.length
+      });
+      if (child) {
+        renderedChildren.push(child);
+      }
     }
   }
 
-  if (!renderedChildren.length && !queryMatch) {
+  if (!renderableRootIds.length && !queryMatch) {
     return null;
   }
 
@@ -2367,7 +2397,7 @@ function createGroupSection(tree, groupId, rootNodeIds, query, visibilityByNodeI
 
   const subtree = document.createElement("div");
   subtree.className = "group-children";
-  if (group.collapsed && !query) {
+  if (!renderChildren) {
     subtree.hidden = true;
   }
   for (const child of renderedChildren) {
@@ -2653,7 +2683,14 @@ function patchGroupSection(existingSection, tree, groupId, rootNodeIds, query, v
 
   const subtree = existingSection.querySelector(":scope > .group-children");
   if (subtree) {
-    subtree.hidden = group.collapsed && !query;
+    const shouldRenderChildren = !group.collapsed || !!query;
+    subtree.hidden = !shouldRenderChildren;
+    if (!shouldRenderChildren) {
+      if (subtree.childElementCount) {
+        subtree.innerHTML = "";
+      }
+      return;
+    }
 
     const renderableRootIds = rootNodeIds
       .filter((nodeKey) => shouldRenderNode(tree, nodeKey, query, visibilityByNodeId));
@@ -2665,8 +2702,266 @@ function patchGroupSection(existingSection, tree, groupId, rootNodeIds, query, v
   }
 }
 
+function approxRowHeightPx() {
+  const cssValue = getComputedStyle(document.documentElement).getPropertyValue("--row-height");
+  const parsed = Number.parseFloat(cssValue);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 34;
+}
+
+function collectSubtreeTabIds(tree, nodeKey, output) {
+  const node = tree.nodes[nodeKey];
+  if (!node) {
+    return;
+  }
+  output.push(node.tabId);
+  for (const childId of node.childNodeIds || []) {
+    collectSubtreeTabIds(tree, childId, output);
+  }
+}
+
+function visibleRowCountForNode(tree, nodeKey, query, visibilityByNodeId) {
+  const node = tree.nodes[nodeKey];
+  if (!node || !shouldRenderNode(tree, nodeKey, query, visibilityByNodeId)) {
+    return 0;
+  }
+
+  let count = 1;
+  if (!node.collapsed || !!query) {
+    for (const childId of node.childNodeIds || []) {
+      count += visibleRowCountForNode(tree, childId, query, visibilityByNodeId);
+    }
+  }
+  return count;
+}
+
+function buildVirtualEntries(tree, query, visibilityByNodeId) {
+  const entries = [];
+  const allVisibleTabIds = [];
+  const rowHeight = approxRowHeightPx();
+  const { pinned, blocks } = rootBuckets(tree);
+
+  if (pinned.length) {
+    const pinnedTabIds = pinned
+      .map((nodeKey) => tree.nodes[nodeKey]?.tabId)
+      .filter((tabId) => Number.isFinite(tabId));
+    allVisibleTabIds.push(...pinnedTabIds);
+    entries.push({
+      key: "pinned-label",
+      estimatedHeight: 24,
+      tabIds: [],
+      createElement() {
+        const pinLabel = document.createElement("div");
+        pinLabel.className = "section-title";
+        pinLabel.dataset.treeKey = "pinned-label";
+        pinLabel.textContent = pinnedSectionLabel(pinned.length);
+        return pinLabel;
+      }
+    });
+    entries.push({
+      key: "pinned-strip",
+      estimatedHeight: rowHeight + 16,
+      tabIds: pinnedTabIds,
+      createElement() {
+        const section = createPinnedStrip(tree, pinned, query, visibilityByNodeId).element;
+        if (!section) {
+          return null;
+        }
+        section.dataset.treeKey = "pinned-strip";
+        return section;
+      }
+    });
+  }
+
+  const rootNodeBlocks = blocks.filter((block) => block.type === "node");
+  const renderableRootNodeIds = rootNodeBlocks
+    .map((block) => block.rootNodeId)
+    .filter((nodeIdKey) => shouldRenderNode(tree, nodeIdKey, query, visibilityByNodeId));
+  let renderableRootNodeCursor = 0;
+
+  for (const block of blocks) {
+    if (block.type === "group") {
+      const group = groupDisplay(tree, block.groupId);
+      const groupTabIds = [];
+      for (const rootNodeId of block.rootNodeIds) {
+        collectSubtreeTabIds(tree, rootNodeId, groupTabIds);
+      }
+      allVisibleTabIds.push(...groupTabIds);
+      const childRows = group.collapsed && !query
+        ? 0
+        : block.rootNodeIds.reduce(
+          (sum, nodeKey) => sum + visibleRowCountForNode(tree, nodeKey, query, visibilityByNodeId),
+          0
+        );
+      entries.push({
+        key: `group:${block.groupId}`,
+        estimatedHeight: Math.max(rowHeight, (childRows + 1) * rowHeight + 8),
+        tabIds: groupTabIds,
+        createElement() {
+          return createGroupSection(tree, block.groupId, block.rootNodeIds, query, visibilityByNodeId);
+        }
+      });
+      continue;
+    }
+
+    const nodeKey = block.rootNodeId;
+    const node = tree.nodes[nodeKey];
+    if (!node || !shouldRenderNode(tree, nodeKey, query, visibilityByNodeId)) {
+      continue;
+    }
+
+    const siblingIndex = renderableRootNodeCursor;
+    renderableRootNodeCursor += 1;
+    const subtreeTabIds = [];
+    collectSubtreeTabIds(tree, nodeKey, subtreeTabIds);
+    allVisibleTabIds.push(...subtreeTabIds);
+    const visibleRows = visibleRowCountForNode(tree, nodeKey, query, visibilityByNodeId);
+    entries.push({
+      key: `node:${node.tabId}`,
+      estimatedHeight: Math.max(rowHeight, visibleRows * rowHeight + 6),
+      tabIds: subtreeTabIds,
+      createElement() {
+        return createNodeElement(tree, nodeKey, query, visibilityByNodeId, {
+          showGroupBadge: true,
+          siblingIndex,
+          siblingCount: renderableRootNodeIds.length
+        });
+      }
+    });
+  }
+
+  return {
+    entries,
+    allVisibleTabIds: allVisibleTabIds.filter((id) => Number.isFinite(id)),
+    totalVisibleRows: allVisibleTabIds.length
+  };
+}
+
+function shouldUseVirtualTreeRender(tree, query, totalVisibleRows) {
+  if (!tree || !!query) {
+    return false;
+  }
+  if (state.draggingTabIds.length || Number.isInteger(state.draggingGroupId)) {
+    return false;
+  }
+  if (!Number.isFinite(totalVisibleRows) || totalVisibleRows < VIRTUALIZE_MIN_ROWS) {
+    return false;
+  }
+  return true;
+}
+
+function createVirtualSpacer(heightPx) {
+  const spacer = document.createElement("div");
+  spacer.className = "virtual-spacer";
+  spacer.style.height = `${Math.max(0, Math.round(heightPx))}px`;
+  spacer.setAttribute("aria-hidden", "true");
+  return spacer;
+}
+
+function renderVirtualTree(tree, query, visibilityByNodeId, summary = null) {
+  dom.treeRoot.innerHTML = "";
+  dom.treeRoot.classList.toggle("hide-favicons", !state.settings?.showFavicons);
+  dom.treeRoot.classList.add("virtualized");
+
+  const { entries, allVisibleTabIds, totalVisibleRows } = summary || buildVirtualEntries(tree, query, visibilityByNodeId);
+  state.virtualAllVisibleTabIds = allVisibleTabIds;
+
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = t("noTabsInWindow", [], "No tabs in this window.");
+    dom.treeRoot.appendChild(empty);
+    state.virtualModeActive = false;
+    state.virtualLayout = null;
+    updateLastRenderedState(tree);
+    refreshVisibleTabIds();
+    setTreeRowTabStop();
+    return;
+  }
+
+  const viewportTop = dom.treeRoot.scrollTop;
+  const viewportHeight = Math.max(dom.treeRoot.clientHeight, approxRowHeightPx() * 6);
+  const viewportStart = Math.max(0, viewportTop - VIRTUALIZE_OVERSCAN_PX);
+  const viewportEnd = viewportTop + viewportHeight + VIRTUALIZE_OVERSCAN_PX;
+
+  const fragment = document.createDocumentFragment();
+  const measuredEntries = [];
+  const tabIdToEntryKey = new Map();
+  const entryOffsets = new Map();
+
+  let offset = 0;
+  let firstVisibleOffset = null;
+  let lastVisibleEnd = null;
+
+  for (const entry of entries) {
+    const estimatedHeight = Math.max(
+      approxRowHeightPx(),
+      Number(state.virtualHeightCache.get(entry.key) || entry.estimatedHeight || approxRowHeightPx())
+    );
+    entryOffsets.set(entry.key, offset);
+
+    const overlaps = offset + estimatedHeight >= viewportStart && offset <= viewportEnd;
+    if (overlaps) {
+      if (firstVisibleOffset === null) {
+        firstVisibleOffset = offset;
+      }
+      const element = entry.createElement();
+      if (element) {
+        if (!element.dataset.treeKey) {
+          element.dataset.treeKey = entry.key;
+        }
+        fragment.appendChild(element);
+        measuredEntries.push({ key: entry.key, element });
+        lastVisibleEnd = offset + estimatedHeight;
+      }
+    }
+
+    for (const tabId of entry.tabIds || []) {
+      if (!tabIdToEntryKey.has(tabId)) {
+        tabIdToEntryKey.set(tabId, entry.key);
+      }
+    }
+
+    offset += estimatedHeight;
+  }
+
+  if (firstVisibleOffset && firstVisibleOffset > 0) {
+    dom.treeRoot.appendChild(createVirtualSpacer(firstVisibleOffset));
+  }
+  dom.treeRoot.appendChild(fragment);
+  if (lastVisibleEnd !== null && offset > lastVisibleEnd) {
+    dom.treeRoot.appendChild(createVirtualSpacer(offset - lastVisibleEnd));
+  }
+
+  if (measuredEntries.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = t("noTabsInWindow", [], "No tabs in this window.");
+    dom.treeRoot.appendChild(empty);
+  }
+
+  for (const { key, element } of measuredEntries) {
+    const measuredHeight = element.offsetHeight;
+    if (Number.isFinite(measuredHeight) && measuredHeight > 0) {
+      state.virtualHeightCache.set(key, measuredHeight);
+    }
+  }
+
+  state.virtualLayout = {
+    entryOffsets,
+    tabIdToEntryKey,
+    totalVisibleRows
+  };
+  state.virtualModeActive = shouldUseVirtualTreeRender(tree, query, totalVisibleRows);
+  updateLastRenderedState(tree);
+  refreshVisibleTabIds();
+  setTreeRowTabStop(state.focusedTabId);
+}
+
 function shouldFullRebuild(tree) {
   if (!tree) {
+    return true;
+  }
+  if (dom.treeRoot.classList.contains("virtualized")) {
     return true;
   }
   if (dom.treeRoot.children.length === 0) {
@@ -2697,6 +2992,10 @@ function updateLastRenderedState(tree) {
 function fullRebuildTree() {
   dom.treeRoot.innerHTML = "";
   dom.treeRoot.classList.toggle("hide-favicons", !state.settings?.showFavicons);
+  dom.treeRoot.classList.remove("virtualized");
+  state.virtualModeActive = false;
+  state.virtualLayout = null;
+  state.virtualAllVisibleTabIds = [];
   state.visibleTabIds = [];
   const tree = currentWindowTree();
   if (!tree) {
@@ -2778,6 +3077,10 @@ function fullRebuildTree() {
 function patchTree() {
   const tree = currentWindowTree();
   dom.treeRoot.classList.toggle("hide-favicons", !state.settings?.showFavicons);
+  dom.treeRoot.classList.remove("virtualized");
+  state.virtualModeActive = false;
+  state.virtualLayout = null;
+  state.virtualAllVisibleTabIds = [];
 
   if (!tree) {
     dom.treeRoot.innerHTML = "";
@@ -2943,7 +3246,17 @@ function patchTree() {
 }
 
 function renderTree() {
-  if (shouldFullRebuild(currentWindowTree())) {
+  const tree = currentWindowTree();
+  const query = state.search.trim().toLowerCase();
+  const visibilityByNodeId = tree ? buildVisibilityMap(tree, query) : null;
+  const virtualSummary = tree && visibilityByNodeId ? buildVirtualEntries(tree, query, visibilityByNodeId) : null;
+
+  if (tree && visibilityByNodeId && virtualSummary && shouldUseVirtualTreeRender(tree, query, virtualSummary.totalVisibleRows)) {
+    renderVirtualTree(tree, query, visibilityByNodeId, virtualSummary);
+    return;
+  }
+
+  if (shouldFullRebuild(tree)) {
     fullRebuildTree();
   } else {
     patchTree();
@@ -3714,6 +4027,16 @@ function bindEvents() {
 
   dom.treeRoot.addEventListener("scroll", () => {
     closeContextMenu();
+    if (!state.virtualModeActive) {
+      return;
+    }
+    if (state.virtualScrollRafId) {
+      return;
+    }
+    state.virtualScrollRafId = requestAnimationFrame(() => {
+      state.virtualScrollRafId = null;
+      renderTree();
+    });
   }, { passive: true });
 
   document.addEventListener("pointerdown", (event) => {
@@ -3816,6 +4139,10 @@ function bindEvents() {
     closeContextMenu();
   });
   window.addEventListener("beforeunload", () => {
+    if (state.virtualScrollRafId) {
+      cancelAnimationFrame(state.virtualScrollRafId);
+      state.virtualScrollRafId = null;
+    }
     hideUndoToast();
     flushPendingSettingsPatchSoon();
   });

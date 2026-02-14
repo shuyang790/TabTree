@@ -178,6 +178,15 @@ button:focus-visible {
   padding: var(--tree-pad-y) 8px 24px;
 }
 
+.tree-root.virtualized {
+  contain: layout style paint;
+}
+
+.virtual-spacer {
+  width: 100%;
+  pointer-events: none;
+}
+
 .bottom-root-drop-zone {
   margin: 0 8px 8px;
   min-height: 28px;
