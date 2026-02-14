@@ -2394,6 +2394,86 @@ test.describe("TabTree extension", () => {
         return document.querySelectorAll(".tree-row[data-tab-id]").length;
       });
       expect(renderedRows).toBeLessThan(total);
+
+      const sourceTitle = `${prefix}8`;
+      const targetTitle = `${prefix}15`;
+      const sourceRow = rowByTitle(sidePanelPage, sourceTitle);
+      const targetRow = rowByTitle(sidePanelPage, targetTitle);
+      await expect(sourceRow).toBeVisible();
+      await expect(targetRow).toBeVisible();
+      await sidePanelPage.evaluate(({ sourceTitle, targetTitle }) => {
+        const rows = Array.from(document.querySelectorAll(".tree-row[data-tab-id]"));
+        const findRow = (title) => rows.find((row) => row.querySelector(".title")?.textContent?.trim() === title);
+        const source = findRow(sourceTitle);
+        const target = findRow(targetTitle);
+        if (!source || !target) {
+          throw new Error("Could not resolve virtualized drag rows");
+        }
+
+        const targetRect = target.getBoundingClientRect();
+        const dataTransfer = new DataTransfer();
+        source.dispatchEvent(new DragEvent("dragstart", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer
+        }));
+        target.dispatchEvent(new DragEvent("dragover", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          clientY: Math.floor(targetRect.top + 2)
+        }));
+      }, { sourceTitle, targetTitle });
+
+      await expect.poll(async () => {
+        return sidePanelPage.evaluate((title) => {
+          const anchor = document.querySelector("#drag-anchor-chip");
+          const text = anchor?.textContent || "";
+          return {
+            visible: !anchor?.hidden,
+            containsTarget: text.includes(title),
+            virtualized: document.querySelector("#tree-root")?.classList?.contains("virtualized") || false
+          };
+        }, targetTitle);
+      }).toEqual({
+        visible: true,
+        containsTarget: true,
+        virtualized: true
+      });
+
+      await sidePanelPage.evaluate(() => {
+        const treeRoot = document.querySelector("#tree-root");
+        if (treeRoot) {
+          treeRoot.scrollTop += 260;
+        }
+      });
+
+      await expect.poll(async () => {
+        return sidePanelPage.evaluate(() => {
+          const anchor = document.querySelector("#drag-anchor-chip");
+          return {
+            visible: !anchor?.hidden,
+            hasLabel: !!anchor?.textContent?.trim()
+          };
+        });
+      }).toEqual({
+        visible: true,
+        hasLabel: true
+      });
+
+      await sidePanelPage.evaluate((sourceTitle) => {
+        const rows = Array.from(document.querySelectorAll(".tree-row[data-tab-id]"));
+        const source = rows.find((row) => row.querySelector(".title")?.textContent?.trim() === sourceTitle);
+        if (!source) {
+          return;
+        }
+        const dataTransfer = new DataTransfer();
+        source.dispatchEvent(new DragEvent("dragend", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer
+        }));
+      }, sourceTitle);
     } finally {
       await closeTabsByPrefix(sidePanelPage, prefix);
     }

@@ -472,6 +472,7 @@ const dom = {
   contextMenu: document.getElementById("context-menu"),
   bottomRootDropZone: document.getElementById("bottom-root-drop-zone"),
   dragStatusChip: document.getElementById("drag-status-chip"),
+  dragAnchorChip: document.getElementById("drag-anchor-chip"),
   undoToast: document.getElementById("undo-toast"),
   undoLastMove: document.getElementById("undo-last-move")
 };
@@ -1845,6 +1846,80 @@ function blockedReasonLabel(reason) {
   return t("dropBlockedGeneric", [], "blocked");
 }
 
+function dragDestinationLabel() {
+  if (state.dragTarget.kind === "root") {
+    return t("dropToTopLevelHint", [], "Move to top-level");
+  }
+  if (state.dragTarget.position === "inside") {
+    return "Move inside";
+  }
+  if (state.dragTarget.position === "before") {
+    return "Move before";
+  }
+  if (state.dragTarget.position === "after") {
+    return "Move after";
+  }
+  return "Move";
+}
+
+function dragAnchorPositionLabel() {
+  if (state.dragTarget.position === "inside") {
+    return "Inside";
+  }
+  if (state.dragTarget.position === "before") {
+    return "Before";
+  }
+  if (state.dragTarget.position === "after") {
+    return "After";
+  }
+  return "Target";
+}
+
+function dragAnchorTargetLabel(tree) {
+  if (!tree) {
+    return null;
+  }
+  if (state.dragTarget.kind === "tab" && Number.isFinite(state.dragTarget.tabId)) {
+    const node = tree.nodes?.[nodeId(state.dragTarget.tabId)];
+    return node?.lastKnownTitle || null;
+  }
+  if (state.dragTarget.kind === "group" && Number.isInteger(state.dragTarget.groupId)) {
+    return groupDisplay(tree, state.dragTarget.groupId).name;
+  }
+  if (state.dragTarget.kind === "root") {
+    return t("dropToTopLevelHint", [], "Top-level");
+  }
+  return null;
+}
+
+function updateDragAnchorChip(tree, groupDrag, reason) {
+  if (!dom.dragAnchorChip) {
+    return;
+  }
+
+  const dragging = groupDrag || state.draggingTabIds.length > 0;
+  const shouldShow = dragging
+    && state.virtualModeActive
+    && state.dragTarget.kind !== null;
+  if (!shouldShow) {
+    dom.dragAnchorChip.hidden = true;
+    dom.dragAnchorChip.textContent = "";
+    return;
+  }
+
+  const targetLabel = dragAnchorTargetLabel(tree);
+  if (!targetLabel) {
+    dom.dragAnchorChip.hidden = true;
+    dom.dragAnchorChip.textContent = "";
+    return;
+  }
+
+  const suffix = state.dragTarget.valid ? "" : ` (${blockedReasonLabel(reason)})`;
+  dom.dragAnchorChip.textContent = `${dragAnchorPositionLabel()}: ${targetLabel}${suffix}`;
+  dom.dragAnchorChip.dataset.valid = state.dragTarget.valid ? "true" : "false";
+  dom.dragAnchorChip.hidden = false;
+}
+
 function updateDragStatusChip() {
   if (!dom.dragStatusChip) {
     return;
@@ -1854,19 +1929,14 @@ function updateDragStatusChip() {
   if (!groupDrag && tabCount === 0) {
     dom.dragStatusChip.hidden = true;
     dom.dragStatusChip.textContent = "";
+    if (dom.dragAnchorChip) {
+      dom.dragAnchorChip.hidden = true;
+      dom.dragAnchorChip.textContent = "";
+    }
     return;
   }
 
-  let destination = "Move";
-  if (state.dragTarget.kind === "root") {
-    destination = t("dropToTopLevelHint", [], "Move to top-level");
-  } else if (state.dragTarget.position === "inside") {
-    destination = "Move inside";
-  } else if (state.dragTarget.position === "before") {
-    destination = "Move before";
-  } else if (state.dragTarget.position === "after") {
-    destination = "Move after";
-  }
+  const destination = dragDestinationLabel();
 
   const tree = currentWindowTree();
   const reason = resolveDragBlockedReason(tree, groupDrag);
@@ -1880,6 +1950,7 @@ function updateDragStatusChip() {
     dom.dragStatusChip.textContent = `${destination} ${countLabel} (${validity})`;
   }
   dom.dragStatusChip.hidden = false;
+  updateDragAnchorChip(tree, groupDrag, reason);
 }
 
 function updateSearchDropAffordance() {

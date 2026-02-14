@@ -222,6 +222,31 @@ button:focus-visible {
   box-shadow: var(--shadow);
 }
 
+.drag-anchor-chip {
+  position: absolute;
+  top: 82px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  pointer-events: none;
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent), transparent 56%);
+  background: color-mix(in srgb, var(--bg-elev), var(--accent) 4%);
+  color: var(--text-muted);
+  font-size: 0.69rem;
+  box-shadow: var(--shadow);
+}
+
+.drag-anchor-chip[data-valid="true"] {
+  border-color: color-mix(in srgb, var(--accent), transparent 30%);
+  color: var(--text);
+}
+
 .undo-toast {
   position: absolute;
   bottom: 40px;
