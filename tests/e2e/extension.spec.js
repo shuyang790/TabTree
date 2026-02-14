@@ -2132,6 +2132,52 @@ test.describe("TabTree extension", () => {
     await tail.close().catch(() => {});
   });
 
+  test("dragging an unselected row adopts dragged selection for quick back-and-forth moves", async ({ context, sidePanelPage }) => {
+    const staleA = await createTitledTab(context, "Drag Select Stale A");
+    const staleB = await createTitledTab(context, "Drag Select Stale B");
+    const source = await createTitledTab(context, "Drag Select Source");
+    const target = await createTitledTab(context, "Drag Select Target");
+
+    const rowStaleA = rowByTitle(sidePanelPage, "Drag Select Stale A");
+    const rowStaleB = rowByTitle(sidePanelPage, "Drag Select Stale B");
+    await rowStaleA.click();
+    await rowStaleB.click({ modifiers: ["Shift"] });
+
+    await dragRowToRow(sidePanelPage, "Drag Select Source", "Drag Select Target", "after");
+    await expectTreeAndNativeOrderMatch(
+      sidePanelPage,
+      ["Drag Select Stale A", "Drag Select Stale B", "Drag Select Target", "Drag Select Source"],
+      ["Drag Select Stale A", "Drag Select Stale B", "Drag Select Target", "Drag Select Source"]
+    );
+
+    await expect.poll(async () => {
+      return sidePanelPage.evaluate(() => {
+        return Array.from(document.querySelectorAll(".tree-row.selected .title"))
+          .map((el) => el.textContent?.trim() || "")
+          .filter((title) => title.startsWith("Drag Select "));
+      });
+    }).toEqual(["Drag Select Source"]);
+
+    await dragRowToRow(sidePanelPage, "Drag Select Source", "Drag Select Target", "before");
+    await expectTreeAndNativeOrderMatch(
+      sidePanelPage,
+      ["Drag Select Stale A", "Drag Select Stale B", "Drag Select Source", "Drag Select Target"],
+      ["Drag Select Stale A", "Drag Select Stale B", "Drag Select Source", "Drag Select Target"]
+    );
+    await expect.poll(async () => {
+      return sidePanelPage.evaluate(() => {
+        return Array.from(document.querySelectorAll(".tree-row.selected .title"))
+          .map((el) => el.textContent?.trim() || "")
+          .filter((title) => title.startsWith("Drag Select "));
+      });
+    }).toEqual(["Drag Select Source"]);
+
+    await staleA.close().catch(() => {});
+    await staleB.close().catch(() => {});
+    await source.close().catch(() => {});
+    await target.close().catch(() => {});
+  });
+
   test("multiselect drop on search row moves ordered block to root end", async ({ context, sidePanelPage }) => {
     const parent = await createTitledTab(context, "Batch Root Parent");
     const sourceA = await createTitledTab(context, "Batch Root Source A");

@@ -1760,6 +1760,16 @@ function orderedDragSelection(sourceTabId) {
   });
 }
 
+function adoptDraggedSelection(tabIds, anchorTabId = null) {
+  if (!Array.isArray(tabIds) || !tabIds.length) {
+    return;
+  }
+  const focusTabId = Number.isFinite(anchorTabId) ? anchorTabId : tabIds[0];
+  replaceSelection(tabIds, focusTabId);
+  state.focusedTabId = focusTabId;
+  syncRenderedSelectionState();
+}
+
 function updateDragStatusChip() {
   if (!dom.dragStatusChip) {
     return;
@@ -2104,6 +2114,7 @@ async function dropToRoot(tree) {
     return;
   }
 
+  const movedTabIds = [...state.draggingTabIds];
   const payload = buildRootDropPayloadModel({
     tree,
     draggingTabIds: state.draggingTabIds
@@ -2115,6 +2126,7 @@ async function dropToRoot(tree) {
     return;
   }
   await sendTreeActionWithUndo(payload);
+  adoptDraggedSelection(movedTabIds, movedTabIds[0]);
 
   state.draggingTabIds = [];
   resetInsideDropHover();
@@ -3724,6 +3736,7 @@ function bindEvents() {
     const selection = orderedDragSelection(tabId);
 
     state.draggingTabIds = selection;
+    adoptDraggedSelection(selection, tabId);
     resetInsideDropHover();
     stopAutoScroll();
     setDragTarget(null, null);
@@ -3944,7 +3957,9 @@ function bindEvents() {
       return;
     }
 
+    const movedTabIds = [...state.draggingTabIds];
     await sendTreeActionWithUndo(payload);
+    adoptDraggedSelection(movedTabIds, movedTabIds[0]);
     state.draggingTabIds = [];
     resetInsideDropHover();
     clearDropClasses();
