@@ -14,6 +14,9 @@
   "cmdFocusPanelDescription": {
     "message": "聚焦 TabTree 边栏"
   },
+  "cmdFocusSearchDescription": {
+    "message": "聚焦 TabTree 搜索框"
+  },
   "cmdPromoteTabLevelDescription": {
     "message": "将活动标签页提升一级"
   },
@@ -138,7 +141,7 @@
     "message": "标签页操作"
   },
   "shortcutHintText": {
-    "message": "Shift+单击可范围选择。右键查看更多操作。拖拽搜索栏可移动到顶层。"
+    "message": "可用 Chrome 快捷键聚焦边栏/搜索。搜索框中可用上下方向键切换结果，回车跳转。"
   },
   "selectedCount": {
     "message": "已选择 $1 项"

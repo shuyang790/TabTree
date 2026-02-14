@@ -1369,6 +1369,14 @@ async function focusSidePanel() {
   }
 }
 
+function requestSidePanelSearchFocus() {
+  chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.FOCUS_SEARCH
+  }).catch(() => {
+    // Side panel not open yet.
+  });
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
   await ensureInitialized();
 });
@@ -1401,6 +1409,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     if (message?.type === MESSAGE_TYPES.TREE_ACTION) {
       await handleTreeAction(message.payload);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === MESSAGE_TYPES.FOCUS_SEARCH) {
       sendResponse({ ok: true });
       return;
     }
@@ -1536,6 +1549,13 @@ chrome.commands.onCommand.addListener(async (command) => {
 
   if (command === "focus-side-panel") {
     await focusSidePanel();
+    return;
+  }
+
+  if (command === "focus-search") {
+    await focusSidePanel();
+    requestSidePanelSearchFocus();
+    setTimeout(requestSidePanelSearchFocus, 150);
     return;
   }
 

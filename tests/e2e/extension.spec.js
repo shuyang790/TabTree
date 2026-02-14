@@ -7,6 +7,16 @@ async function createTitledTab(context, title) {
   return page;
 }
 
+async function dispatchFocusSearchFromServiceWorker(context) {
+  let [serviceWorker] = context.serviceWorkers();
+  if (!serviceWorker) {
+    serviceWorker = await context.waitForEvent("serviceworker");
+  }
+  await serviceWorker.evaluate(async () => {
+    await chrome.runtime.sendMessage({ type: "FOCUS_SEARCH" });
+  });
+}
+
 function rowByTitle(sidePanelPage, title) {
   return sidePanelPage
     .locator(".tree-row")
@@ -132,6 +142,62 @@ test.describe("TabTree extension", () => {
     await expect(sidePanelPage.locator("#open-settings")).toBeVisible();
     await expect(sidePanelPage.locator("#add-child-global")).toBeVisible();
     await expect(sidePanelPage.locator(".tree-root")).toBeVisible();
+  });
+
+  test("focus-search command path focuses search and supports arrow/enter navigation", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const titles = [
+        "E2E FocusSearch Alpha",
+        "E2E FocusSearch Beta",
+        "E2E FocusSearch Gamma"
+      ];
+      for (const title of titles) {
+        pages.push(await createTitledTab(context, title));
+      }
+
+      await sidePanelPage.locator("#open-settings").focus();
+      await dispatchFocusSearchFromServiceWorker(context);
+      await expect(sidePanelPage.locator("#search")).toBeFocused();
+
+      await sidePanelPage.locator("#search").fill("E2E FocusSearch");
+
+      await expect.poll(async () => sidePanelPage.evaluate(() => {
+        return Array.from(document.querySelectorAll(".tree-row[data-tab-id] .title"))
+          .map((el) => el.textContent?.trim() || "")
+          .filter((text) => text.startsWith("E2E FocusSearch")).length;
+      })).toBe(3);
+
+      const orderedTitles = await sidePanelPage.evaluate(() => {
+        return Array.from(document.querySelectorAll(".tree-row[data-tab-id] .title"))
+          .map((el) => el.textContent?.trim() || "")
+          .filter((text) => text.startsWith("E2E FocusSearch"));
+      });
+      expect(orderedTitles.length).toBe(3);
+
+      const [first, second] = orderedTitles;
+
+      const activeSearchTitle = async () => sidePanelPage.evaluate(() => {
+        const row = document.querySelector(".tree-row.search-match-active");
+        return row?.querySelector(".title")?.textContent?.trim() || null;
+      });
+
+      await expect.poll(activeSearchTitle).toBe(first);
+      await sidePanelPage.locator("#search").press("ArrowDown");
+      await expect.poll(activeSearchTitle).toBe(second);
+      await sidePanelPage.locator("#search").press("ArrowUp");
+      await expect.poll(activeSearchTitle).toBe(first);
+
+      await sidePanelPage.locator("#search").press("Enter");
+      await expect.poll(async () => sidePanelPage.evaluate(async () => {
+        const tabs = await chrome.tabs.query({ currentWindow: true, active: true });
+        return tabs[0]?.title || null;
+      })).toBe(first);
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
   });
 
   test("opens settings panel and persists a setting", async ({ sidePanelPage }) => {

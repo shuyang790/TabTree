@@ -87,6 +87,7 @@ Configure all shortcuts at `chrome://extensions/shortcuts`.
 | --- | --- | --- |
 | `add-child-tab` | Add a child tab under the active tab | Not set by default |
 | `focus-side-panel` | Focus TabTree side panel | `Ctrl+Shift+Y` (Windows/Linux), `Command+Shift+Y` (macOS) |
+| `focus-search` | Focus TabTree search | `Ctrl+Shift+E` (Windows/Linux), `Command+Shift+E` (macOS) |
 | `promote-tab-level` | Promote active tab one tree level | Not set by default |
 | `toggle-collapse-node` | Toggle collapse for active tab node | Not set by default |
 | `move-tab-under-previous-sibling` | Reparent active tab under previous root sibling | Not set by default |

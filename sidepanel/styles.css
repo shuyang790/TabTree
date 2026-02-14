@@ -260,6 +260,11 @@ button:focus-visible {
   background: color-mix(in srgb, var(--accent), transparent 92%);
 }
 
+.tree-row.search-match-active:not(.active) {
+  border-color: color-mix(in srgb, var(--accent), transparent 64%);
+  background: color-mix(in srgb, var(--accent), transparent 94%);
+}
+
 .tree-row.active.selected {
   background: color-mix(in srgb, var(--accent), transparent 86%);
 }

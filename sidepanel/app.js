@@ -351,6 +351,9 @@ const state = {
   panelWindowId: null,
   focusedWindowId: null,
   search: "",
+  searchMatchTabIds: [],
+  searchActiveMatchIndex: -1,
+  searchActiveTabId: null,
   searchRenderTimer: null,
   renderRafId: null,
   visibleTabIds: [],
@@ -530,6 +533,99 @@ function refreshVisibleTabIds() {
   state.visibleTabIds = Array.from(dom.treeRoot.querySelectorAll(".tree-row[data-tab-id]"))
     .map((row) => Number(row.dataset.tabId))
     .filter((id) => Number.isFinite(id));
+  refreshSearchMatches();
+  syncSearchMatchHighlight();
+}
+
+function refreshSearchMatches() {
+  const query = state.search.trim();
+  if (!query) {
+    state.searchMatchTabIds = [];
+    state.searchActiveMatchIndex = -1;
+    state.searchActiveTabId = null;
+    return;
+  }
+
+  const nextMatches = visibleTabIdsInOrder();
+  state.searchMatchTabIds = nextMatches;
+
+  if (!nextMatches.length) {
+    state.searchActiveMatchIndex = -1;
+    state.searchActiveTabId = null;
+    return;
+  }
+
+  const activeMatchIndex = Number.isFinite(state.searchActiveTabId)
+    ? nextMatches.indexOf(state.searchActiveTabId)
+    : -1;
+  if (activeMatchIndex >= 0) {
+    state.searchActiveMatchIndex = activeMatchIndex;
+    return;
+  }
+
+  if (state.searchActiveMatchIndex >= 0 && state.searchActiveMatchIndex < nextMatches.length) {
+    state.searchActiveTabId = nextMatches[state.searchActiveMatchIndex];
+    return;
+  }
+
+  state.searchActiveMatchIndex = 0;
+  state.searchActiveTabId = nextMatches[0];
+}
+
+function syncSearchMatchHighlight() {
+  const query = state.search.trim();
+  const activeTabId = query ? state.searchActiveTabId : null;
+  for (const row of dom.treeRoot.querySelectorAll(".tree-row[data-tab-id]")) {
+    const tabId = Number(row.dataset.tabId);
+    const isActiveMatch = Number.isFinite(tabId) && Number.isFinite(activeTabId) && tabId === activeTabId;
+    row.classList.toggle("search-match-active", isActiveMatch);
+  }
+}
+
+function scrollSearchMatchIntoView(tabId) {
+  if (!Number.isFinite(tabId)) {
+    return;
+  }
+  const row = dom.treeRoot.querySelector(`.tree-row[data-tab-id="${tabId}"]`);
+  row?.scrollIntoView({ block: "nearest" });
+}
+
+function stepSearchMatch(step) {
+  const matches = state.searchMatchTabIds;
+  if (!matches.length) {
+    return;
+  }
+  const size = matches.length;
+  const baseIndex = state.searchActiveMatchIndex >= 0 ? state.searchActiveMatchIndex : 0;
+  const nextIndex = (baseIndex + step + size) % size;
+  state.searchActiveMatchIndex = nextIndex;
+  state.searchActiveTabId = matches[nextIndex];
+  syncSearchMatchHighlight();
+  scrollSearchMatchIntoView(state.searchActiveTabId);
+}
+
+async function activateSearchMatch() {
+  if (!state.searchMatchTabIds.length) {
+    return;
+  }
+
+  if (state.searchActiveMatchIndex < 0 || state.searchActiveMatchIndex >= state.searchMatchTabIds.length) {
+    state.searchActiveMatchIndex = 0;
+    state.searchActiveTabId = state.searchMatchTabIds[0];
+  }
+
+  const tabId = state.searchMatchTabIds[state.searchActiveMatchIndex];
+  if (!Number.isFinite(tabId)) {
+    return;
+  }
+
+  state.focusedTabId = tabId;
+  replaceSelection([tabId], tabId);
+  syncRenderedSelectionState();
+  await send(MESSAGE_TYPES.TREE_ACTION, {
+    type: TREE_ACTIONS.ACTIVATE_TAB,
+    tabId
+  });
 }
 
 function selectedExistingTabIds(tree = currentWindowTree()) {
@@ -579,6 +675,7 @@ function syncRenderedSelectionState() {
     row.setAttribute("aria-selected", selected ? "true" : "false");
   }
   setTreeRowTabStop(state.focusedTabId);
+  syncSearchMatchHighlight();
 }
 
 function replaceSelection(tabIds, anchorTabId = null) {
@@ -2677,6 +2774,16 @@ function scheduleRender() {
   });
 }
 
+function flushPendingSearchRender() {
+  if (!state.searchRenderTimer) {
+    return;
+  }
+  clearTimeout(state.searchRenderTimer);
+  state.searchRenderTimer = null;
+  renderTree();
+  renderContextMenu();
+}
+
 async function bootstrap() {
   try {
     state.panelWindowId = await resolvePanelWindowId();
@@ -2708,6 +2815,8 @@ function bindEvents() {
 
   dom.search.addEventListener("input", () => {
     state.search = dom.search.value;
+    state.searchActiveMatchIndex = -1;
+    state.searchActiveTabId = null;
     if (state.searchRenderTimer) {
       clearTimeout(state.searchRenderTimer);
     }
@@ -2716,6 +2825,43 @@ function bindEvents() {
       renderTree();
       renderContextMenu();
     }, 90);
+  });
+
+  dom.search.addEventListener("keydown", async (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      flushPendingSearchRender();
+      stepSearchMatch(1);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      flushPendingSearchRender();
+      stepSearchMatch(-1);
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      flushPendingSearchRender();
+      await activateSearchMatch();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (dom.search.value) {
+        dom.search.value = "";
+        state.search = "";
+        state.searchActiveMatchIndex = -1;
+        state.searchActiveTabId = null;
+        renderTree();
+        renderContextMenu();
+        return;
+      }
+      focusTreeRow(state.focusedTabId || currentActiveTabId());
+    }
   });
 
   dom.searchWrap.addEventListener("dragover", (event) => {
@@ -3452,6 +3598,12 @@ function bindEvents() {
   });
 
   chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type === MESSAGE_TYPES.FOCUS_SEARCH) {
+      dom.search.focus();
+      dom.search.select();
+      return;
+    }
+
     if (message?.type !== MESSAGE_TYPES.STATE_UPDATED) {
       return;
     }

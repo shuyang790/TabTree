@@ -14,6 +14,9 @@
   "cmdFocusPanelDescription": {
     "message": "聚焦 TabTree 側欄"
   },
+  "cmdFocusSearchDescription": {
+    "message": "聚焦 TabTree 搜尋框"
+  },
   "cmdPromoteTabLevelDescription": {
     "message": "將目前分頁提升一層"
   },
@@ -138,7 +141,7 @@
     "message": "分頁操作"
   },
   "shortcutHintText": {
-    "message": "Shift+點擊可做範圍選取。右鍵可查看更多操作。拖曳搜尋列可移到頂層。"
+    "message": "可用 Chrome 快捷鍵聚焦側欄/搜尋。搜尋框中可用上下方向鍵切換結果，按 Enter 跳轉。"
   },
   "selectedCount": {
     "message": "已選取 $1 項"

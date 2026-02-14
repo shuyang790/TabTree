@@ -14,6 +14,9 @@
   "cmdFocusPanelDescription": {
     "message": "Focus TabTree side panel"
   },
+  "cmdFocusSearchDescription": {
+    "message": "Focus TabTree search"
+  },
   "cmdPromoteTabLevelDescription": {
     "message": "Promote active tab one tree level"
   },
@@ -138,7 +141,7 @@
     "message": "Tab actions"
   },
   "shortcutHintText": {
-    "message": "Shift+Click selects range. Right-click for actions. Drag search bar to move to top-level."
+    "message": "Use Chrome shortcuts to focus panel/search. In search, use Up/Down to navigate results and Enter to jump."
   },
   "selectedCount": {
     "message": "$1 selected"

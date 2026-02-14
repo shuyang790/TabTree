@@ -39,6 +39,13 @@
         "mac": "Command+Shift+Y"
       }
     },
+    "focus-search": {
+      "description": "__MSG_cmdFocusSearchDescription__",
+      "suggested_key": {
+        "default": "Ctrl+Shift+E",
+        "mac": "Command+Shift+E"
+      }
+    },
     "promote-tab-level": {
       "description": "__MSG_cmdPromoteTabLevelDescription__"
     },
