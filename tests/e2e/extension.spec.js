@@ -625,6 +625,76 @@ test.describe("TabTree extension", () => {
     }
   });
 
+  test("native activation of a child tab expands collapsed ancestors and selects the child row", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const parentTitle = "Reveal Parent Root";
+      const childTitle = "Reveal Hidden Child";
+      const siblingTitle = "Reveal Sibling";
+      for (const title of [parentTitle, childTitle, siblingTitle]) {
+        pages.push(await createTitledTab(context, title));
+      }
+
+      const parentTabId = await tabIdByTitle(sidePanelPage, parentTitle);
+      const childTabId = await tabIdByTitle(sidePanelPage, childTitle);
+      expect(Number.isInteger(parentTabId)).toBeTruthy();
+      expect(Number.isInteger(childTabId)).toBeTruthy();
+
+      await sidePanelPage.evaluate(async ({ parentTabId, childTabId }) => {
+        await chrome.runtime.sendMessage({
+          type: "TREE_ACTION",
+          payload: {
+            type: "REPARENT_TAB",
+            tabId: childTabId,
+            newParentTabId: parentTabId
+          }
+        });
+      }, { parentTabId, childTabId });
+
+      await expect.poll(async () => {
+        const tree = await getCurrentWindowTree(sidePanelPage);
+        return childTitles(tree, parentTitle);
+      }).toEqual([childTitle]);
+
+      const parentRow = rowByTitle(sidePanelPage, parentTitle);
+      await parentRow.locator('[data-action="toggle-collapse"]').click();
+      await expect.poll(async () => {
+        const tree = await getCurrentWindowTree(sidePanelPage);
+        const parentNode = nodeByTitle(tree, parentTitle);
+        return !!parentNode?.collapsed;
+      }).toBe(true);
+      await expect(rowByTitle(sidePanelPage, childTitle)).toHaveCount(0);
+
+      await sidePanelPage.evaluate(async (tabId) => {
+        await chrome.tabs.update(tabId, { active: true });
+      }, childTabId);
+
+      const childRow = rowByTitle(sidePanelPage, childTitle);
+      await expect(childRow).toBeVisible();
+      await expect.poll(() => activeChromeTabTitle(sidePanelPage)).toBe(childTitle);
+      await expect.poll(() => activeTreeRowTitle(sidePanelPage)).toBe(childTitle);
+      await expect.poll(async () => {
+        return childRow.evaluate((row) => ({
+          active: row.classList.contains("active"),
+          selected: row.classList.contains("selected")
+        }));
+      }).toEqual({
+        active: true,
+        selected: true
+      });
+
+      await expect.poll(async () => {
+        const tree = await getCurrentWindowTree(sidePanelPage);
+        const parentNode = nodeByTitle(tree, parentTitle);
+        return !!parentNode?.collapsed;
+      }).toBe(false);
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
   test("native tab moves are reflected in tree order", async ({ context, sidePanelPage }) => {
     const pages = [];
     try {

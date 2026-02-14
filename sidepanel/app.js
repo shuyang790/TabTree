@@ -3626,7 +3626,11 @@ function bindEvents() {
     }
 
     const activeTabId = currentActiveTabId();
-    if (state.selectedTabIds.size === 0 && activeTabId) {
+    const shouldSyncSingleSelectionToActive = Number.isFinite(activeTabId) && (
+      state.selectedTabIds.size === 0
+      || (state.selectedTabIds.size === 1 && !state.selectedTabIds.has(activeTabId))
+    );
+    if (shouldSyncSingleSelectionToActive) {
       replaceSelection([activeTabId], activeTabId);
     }
 

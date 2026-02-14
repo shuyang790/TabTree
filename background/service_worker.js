@@ -393,6 +393,9 @@ async function syncWindowOrdering(windowId) {
   next = { ...next, groups: groupMap };
 
   setWindowTree(next);
+  if (Number.isInteger(activeTabId)) {
+    await ensureSelectedTabVisible(windowId, activeTabId);
+  }
 }
 
 function resolveStaleWindowIdByNodeId(targetNodeId) {
@@ -422,6 +425,59 @@ async function resolveGroupWindowIdFromEvent(group) {
     return null;
   }
   return resolveGroupWindowId(group.id, null);
+}
+
+async function ensureSelectedTabVisible(windowId, tabId) {
+  if (!Number.isInteger(windowId) || !Number.isInteger(tabId)) {
+    return;
+  }
+
+  const selectedNodeId = nodeIdFromTabId(tabId);
+  const tree = windowTree(windowId);
+  const selectedNode = tree.nodes[selectedNodeId];
+  if (!selectedNode) {
+    return;
+  }
+
+  let next = tree;
+  let changed = false;
+  let ancestorNodeId = selectedNode.parentNodeId;
+  while (ancestorNodeId) {
+    const ancestorNode = next.nodes[ancestorNodeId];
+    if (!ancestorNode) {
+      break;
+    }
+    if (ancestorNode.collapsed) {
+      next = toggleNodeCollapsed(next, ancestorNodeId);
+      changed = true;
+    }
+    ancestorNodeId = next.nodes[ancestorNodeId]?.parentNodeId || null;
+  }
+  if (changed) {
+    setWindowTree(next);
+  }
+
+  const effectiveTree = changed ? next : tree;
+  const groupId = Number.isInteger(selectedNode.groupId) && selectedNode.groupId >= 0
+    ? selectedNode.groupId
+    : null;
+  if (!Number.isInteger(groupId)) {
+    return;
+  }
+
+  const group = effectiveTree.groups?.[groupId];
+  if (!group?.collapsed) {
+    return;
+  }
+
+  try {
+    await chrome.tabGroups.update(groupId, { collapsed: false });
+  } catch (error) {
+    logUnexpectedFailure("ensureSelectedTabVisible.expandGroup", error, { windowId, tabId, groupId });
+    return;
+  }
+
+  await refreshGroupMetadata(windowId);
 }
 
 const ensureInitialized = createInitCoordinator({
@@ -1466,6 +1522,9 @@ chrome.tabs.onUpdated.addListener(async (tabId, _changeInfo, tab) => {
     next = setActiveTab(next, tabId);
   }
   setWindowTree(next);
+  if (tab.active) {
+    await ensureSelectedTabVisible(tab.windowId, tabId);
+  }
 });
 
 chrome.tabs.onMoved.addListener(async (tabId) => {
@@ -1481,6 +1540,7 @@ chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
   await ensureInitialized();
   const tree = windowTree(windowId);
   setWindowTree(setActiveTab(tree, tabId));
+  await ensureSelectedTabVisible(windowId, tabId);
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
