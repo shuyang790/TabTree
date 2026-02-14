@@ -53,6 +53,11 @@ test("normalizeSettings clamps ranges and rejects invalid enum/color/boolean val
     fontScale: 2,
     indentPx: -100,
     radiusPx: "999",
+    dragExpandDelayMs: "9999",
+    dragInsideDwellMs: "0",
+    dragEdgeRatio: "2.2",
+    dragExpandOnHover: "true",
+    showBottomRootDropZone: "false",
     showFavicons: "true",
     showCloseButton: 1,
     showGroupHeaders: null,
@@ -68,6 +73,11 @@ test("normalizeSettings clamps ranges and rejects invalid enum/color/boolean val
   assert.equal(normalized.fontScale, 1.2);
   assert.equal(normalized.indentPx, 10);
   assert.equal(normalized.radiusPx, 16);
+  assert.equal(normalized.dragExpandDelayMs, 1200);
+  assert.equal(normalized.dragInsideDwellMs, 120);
+  assert.equal(normalized.dragEdgeRatio, 0.4);
+  assert.equal(normalized.dragExpandOnHover, DEFAULT_SETTINGS.dragExpandOnHover);
+  assert.equal(normalized.showBottomRootDropZone, DEFAULT_SETTINGS.showBottomRootDropZone);
   assert.equal(normalized.showFavicons, DEFAULT_SETTINGS.showFavicons);
   assert.equal(normalized.showCloseButton, DEFAULT_SETTINGS.showCloseButton);
   assert.equal(normalized.showGroupHeaders, DEFAULT_SETTINGS.showGroupHeaders);

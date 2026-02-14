@@ -72,13 +72,13 @@ export async function handleReparentTabAction({ payload, tab, tree, nodeId }, de
 
   const parentNodeId = payload.newParentTabId ? nodeIdFromTabId(payload.newParentTabId) : null;
   if (!canReparent(tree, nodeId, parentNodeId)) {
-    return;
+    return false;
   }
   if (!parentNodeId && payload.targetTabId) {
     const targetNode = tree.nodes[nodeIdFromTabId(payload.targetTabId)];
     const sourceNode = tree.nodes[nodeId];
     if (targetNode && sourceNode && !!targetNode.pinned !== !!sourceNode.pinned) {
-      return;
+      return false;
     }
   }
 
@@ -120,6 +120,7 @@ export async function handleReparentTabAction({ payload, tab, tree, nodeId }, de
     }
   }
   await syncWindowOrdering(tab.windowId);
+  return movedInBrowser;
 }
 
 export async function handleMoveToRootAction({ payload, tab, tree, nodeId }, deps) {
@@ -154,5 +155,5 @@ export async function handleMoveToRootAction({ payload, tab, tree, nodeId }, dep
     setWindowTree(next);
   }
   await syncWindowOrdering(tab.windowId);
+  return movedInBrowser;
 }
-

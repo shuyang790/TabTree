@@ -14,6 +14,11 @@ export const DEFAULT_SETTINGS = {
   fontScale: 1,
   indentPx: 16,
   radiusPx: 8,
+  dragExpandOnHover: true,
+  dragExpandDelayMs: 450,
+  showBottomRootDropZone: true,
+  dragInsideDwellMs: 220,
+  dragEdgeRatio: 0.24,
   showFavicons: true,
   showCloseButton: true,
   showGroupHeaders: true,
@@ -63,7 +68,10 @@ export const THEME_PRESET_DARK_KEYS = [
 export const SETTINGS_NUMERIC_RANGES = {
   fontScale: { min: 0.9, max: 1.2 },
   indentPx: { min: 10, max: 28 },
-  radiusPx: { min: 2, max: 16 }
+  radiusPx: { min: 2, max: 16 },
+  dragExpandDelayMs: { min: 200, max: 1200 },
+  dragInsideDwellMs: { min: 120, max: 800 },
+  dragEdgeRatio: { min: 0.1, max: 0.4 }
 };
 
 export const MESSAGE_TYPES = {
@@ -88,6 +96,7 @@ export const TREE_ACTIONS = {
   BATCH_CLOSE_SUBTREES: "BATCH_CLOSE_SUBTREES",
   BATCH_MOVE_TO_ROOT: "BATCH_MOVE_TO_ROOT",
   BATCH_REPARENT: "BATCH_REPARENT",
+  UNDO_LAST_TREE_MOVE: "UNDO_LAST_TREE_MOVE",
   MOVE_GROUP_BLOCK: "MOVE_GROUP_BLOCK",
   RENAME_GROUP: "RENAME_GROUP",
   SET_GROUP_COLOR: "SET_GROUP_COLOR"

@@ -103,7 +103,27 @@ export function normalizeSettings(candidate) {
     SETTINGS_NUMERIC_RANGES.radiusPx,
     DEFAULT_SETTINGS.radiusPx
   ));
+  normalized.dragExpandDelayMs = Math.round(clampNumber(
+    normalized.dragExpandDelayMs,
+    SETTINGS_NUMERIC_RANGES.dragExpandDelayMs,
+    DEFAULT_SETTINGS.dragExpandDelayMs
+  ));
+  normalized.dragInsideDwellMs = Math.round(clampNumber(
+    normalized.dragInsideDwellMs,
+    SETTINGS_NUMERIC_RANGES.dragInsideDwellMs,
+    DEFAULT_SETTINGS.dragInsideDwellMs
+  ));
+  normalized.dragEdgeRatio = clampNumber(
+    normalized.dragEdgeRatio,
+    SETTINGS_NUMERIC_RANGES.dragEdgeRatio,
+    DEFAULT_SETTINGS.dragEdgeRatio
+  );
 
+  normalized.dragExpandOnHover = normalizeBoolean(normalized.dragExpandOnHover, DEFAULT_SETTINGS.dragExpandOnHover);
+  normalized.showBottomRootDropZone = normalizeBoolean(
+    normalized.showBottomRootDropZone,
+    DEFAULT_SETTINGS.showBottomRootDropZone
+  );
   normalized.showFavicons = normalizeBoolean(normalized.showFavicons, DEFAULT_SETTINGS.showFavicons);
   normalized.showCloseButton = normalizeBoolean(normalized.showCloseButton, DEFAULT_SETTINGS.showCloseButton);
   normalized.showGroupHeaders = normalizeBoolean(normalized.showGroupHeaders, DEFAULT_SETTINGS.showGroupHeaders);

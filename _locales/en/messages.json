@@ -38,6 +38,15 @@
   "dropToTopLevelHint": {
     "message": "Drop here to move to top-level"
   },
+  "dropToTopLevelBottomHint": {
+    "message": "Drop here to move to top-level"
+  },
+  "moveCompleteUndo": {
+    "message": "Move complete"
+  },
+  "undoAction": {
+    "message": "Undo"
+  },
   "tabTreeAriaLabel": {
     "message": "Tab tree"
   },

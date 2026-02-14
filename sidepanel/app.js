@@ -76,7 +76,17 @@ const CONTEXT_GROUP_SEARCH_MIN = 7;
 const MAX_VISUAL_DEPTH = 8;
 const SETTINGS_SECTION_KEYS = {
   appearance: ["themePresetLight", "themePresetDark", "accentColor", "density", "fontScale", "indentPx", "radiusPx"],
-  behavior: ["showFavicons", "showCloseButton", "showGroupHeaders", "shortcutHintsEnabled"],
+  behavior: [
+    "dragExpandOnHover",
+    "dragExpandDelayMs",
+    "showBottomRootDropZone",
+    "dragInsideDwellMs",
+    "dragEdgeRatio",
+    "showFavicons",
+    "showCloseButton",
+    "showGroupHeaders",
+    "shortcutHintsEnabled"
+  ],
   safety: ["confirmCloseSubtree", "confirmCloseBatch"]
 };
 
@@ -295,11 +305,10 @@ const THEME_PRESETS = {
 const BASE_LIGHT_PRESET = "base-light";
 const BASE_DARK_PRESET = "base-dark";
 const DEFAULT_ACCENT = "#0b57d0";
-const DROP_EDGE_RATIO = 0.2;
-const INSIDE_DROP_DWELL_MS = 180;
 const AUTO_SCROLL_EDGE_PX = 56;
 const AUTO_SCROLL_MAX_STEP = 18;
 const SETTINGS_WRITE_DEBOUNCE_MS = 320;
+const UNDO_TOAST_MS = 8000;
 const DROP_TARGET_CLASSES = [
   "drop-valid-before",
   "drop-valid-after",
@@ -312,6 +321,13 @@ const DROP_TARGET_CLASSES = [
   "group-drop-before",
   "group-drop-after"
 ];
+const UNDOABLE_MOVE_ACTIONS = new Set([
+  TREE_ACTIONS.REPARENT_TAB,
+  TREE_ACTIONS.MOVE_TO_ROOT,
+  TREE_ACTIONS.BATCH_REPARENT,
+  TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
+  TREE_ACTIONS.MOVE_GROUP_BLOCK
+]);
 
 const DENSITY_PRESETS = {
   compact: {
@@ -372,11 +388,18 @@ const state = {
     id: null,
     since: 0
   },
+  dragExpandHover: {
+    tabId: null,
+    since: 0,
+    pendingTabId: null
+  },
   dragAutoScroll: {
     active: false,
     clientY: 0,
     rafId: null
   },
+  undoToastTimer: null,
+  pendingUndoMove: null,
   selectedTabIds: new Set(),
   selectionAnchorTabId: null,
   focusedTabId: null,
@@ -424,7 +447,11 @@ const dom = {
   confirmSkip: document.getElementById("confirm-skip"),
   confirmCancel: document.getElementById("confirm-cancel"),
   confirmOk: document.getElementById("confirm-ok"),
-  contextMenu: document.getElementById("context-menu")
+  contextMenu: document.getElementById("context-menu"),
+  bottomRootDropZone: document.getElementById("bottom-root-drop-zone"),
+  dragStatusChip: document.getElementById("drag-status-chip"),
+  undoToast: document.getElementById("undo-toast"),
+  undoLastMove: document.getElementById("undo-last-move")
 };
 
 if (dom.contextMenu) {
@@ -1125,7 +1152,11 @@ async function executeContextMenuAction(action) {
     if (!intent.payload) {
       return;
     }
-    await send(MESSAGE_TYPES.TREE_ACTION, intent.payload);
+    if (UNDOABLE_MOVE_ACTIONS.has(intent.payload.type)) {
+      await sendTreeActionWithUndo(intent.payload);
+    } else {
+      await send(MESSAGE_TYPES.TREE_ACTION, intent.payload);
+    }
     return;
   }
 
@@ -1588,6 +1619,45 @@ async function send(type, payload = {}) {
   return sendOrThrow(type, payload);
 }
 
+function hideUndoToast() {
+  if (state.undoToastTimer) {
+    clearTimeout(state.undoToastTimer);
+    state.undoToastTimer = null;
+  }
+  state.pendingUndoMove = null;
+  if (dom.undoToast) {
+    dom.undoToast.hidden = true;
+  }
+}
+
+function showUndoToast(undo) {
+  if (!undo || !Number.isInteger(undo.windowId) || typeof undo.token !== "string") {
+    return;
+  }
+  state.pendingUndoMove = {
+    windowId: undo.windowId,
+    token: undo.token
+  };
+  if (dom.undoToast) {
+    dom.undoToast.hidden = false;
+  }
+  if (state.undoToastTimer) {
+    clearTimeout(state.undoToastTimer);
+  }
+  state.undoToastTimer = setTimeout(() => {
+    state.undoToastTimer = null;
+    hideUndoToast();
+  }, UNDO_TOAST_MS);
+}
+
+async function sendTreeActionWithUndo(payload) {
+  const response = await send(MESSAGE_TYPES.TREE_ACTION, payload);
+  if (response?.payload?.undo) {
+    showUndoToast(response.payload.undo);
+  }
+  return response;
+}
+
 function groupDisplay(tree, groupId) {
   const group = tree.groups?.[groupId] || null;
   return {
@@ -1605,7 +1675,7 @@ function getDropPosition(event, row, options = {}) {
     rectTop: rect.top,
     rectHeight: rect.height,
     allowInside,
-    edgeRatio: DROP_EDGE_RATIO
+    edgeRatio: Math.min(0.4, Math.max(0.1, Number(state.settings?.dragEdgeRatio ?? DEFAULT_SETTINGS.dragEdgeRatio)))
   });
 }
 
@@ -1620,6 +1690,80 @@ function resetInsideDropHover() {
   state.dragInsideHover.kind = null;
   state.dragInsideHover.id = null;
   state.dragInsideHover.since = 0;
+  state.dragExpandHover.tabId = null;
+  state.dragExpandHover.since = 0;
+  state.dragExpandHover.pendingTabId = null;
+}
+
+function dragInsideDwellMs() {
+  const raw = Number(state.settings?.dragInsideDwellMs ?? DEFAULT_SETTINGS.dragInsideDwellMs);
+  if (!Number.isFinite(raw)) {
+    return DEFAULT_SETTINGS.dragInsideDwellMs;
+  }
+  return Math.max(120, Math.min(800, Math.round(raw)));
+}
+
+function dragExpandDelayMs() {
+  const raw = Number(state.settings?.dragExpandDelayMs ?? DEFAULT_SETTINGS.dragExpandDelayMs);
+  if (!Number.isFinite(raw)) {
+    return DEFAULT_SETTINGS.dragExpandDelayMs;
+  }
+  return Math.max(200, Math.min(1200, Math.round(raw)));
+}
+
+function orderedDragSelection(sourceTabId) {
+  const selected = state.selectedTabIds.has(sourceTabId) && state.selectedTabIds.size > 1
+    ? selectedTabIdsArray()
+    : [sourceTabId];
+  const visibleOrder = visibleTabIdsInOrder();
+  const orderMap = new Map(visibleOrder.map((tabId, index) => [tabId, index]));
+  return [...selected].sort((a, b) => {
+    const aIndex = orderMap.get(a);
+    const bIndex = orderMap.get(b);
+    if (!Number.isInteger(aIndex) && !Number.isInteger(bIndex)) {
+      return 0;
+    }
+    if (!Number.isInteger(aIndex)) {
+      return 1;
+    }
+    if (!Number.isInteger(bIndex)) {
+      return -1;
+    }
+    return aIndex - bIndex;
+  });
+}
+
+function updateDragStatusChip() {
+  if (!dom.dragStatusChip) {
+    return;
+  }
+  const tabCount = state.draggingTabIds.length;
+  const groupDrag = Number.isInteger(state.draggingGroupId);
+  if (!groupDrag && tabCount === 0) {
+    dom.dragStatusChip.hidden = true;
+    dom.dragStatusChip.textContent = "";
+    return;
+  }
+
+  let destination = "Move";
+  if (state.dragTarget.kind === "root") {
+    destination = t("dropToTopLevelHint", [], "Move to top-level");
+  } else if (state.dragTarget.position === "inside") {
+    destination = "Move inside";
+  } else if (state.dragTarget.position === "before") {
+    destination = "Move before";
+  } else if (state.dragTarget.position === "after") {
+    destination = "Move after";
+  }
+
+  const validity = state.dragTarget.valid ? "valid" : "blocked";
+  if (groupDrag) {
+    dom.dragStatusChip.textContent = `${destination} group (${validity})`;
+  } else {
+    const countLabel = tabCount === 1 ? "1 tab" : `${tabCount} tabs`;
+    dom.dragStatusChip.textContent = `${destination} ${countLabel} (${validity})`;
+  }
+  dom.dragStatusChip.hidden = false;
 }
 
 function updateSearchDropAffordance() {
@@ -1628,6 +1772,15 @@ function updateSearchDropAffordance() {
   dom.searchWrap.dataset.dropActive = active ? "true" : "false";
   dom.searchWrap.dataset.dropFocused = focused ? "true" : "false";
   dom.searchDropHint.hidden = !active;
+
+  if (dom.bottomRootDropZone) {
+    const enabled = !!state.settings?.showBottomRootDropZone;
+    const shouldShow = enabled && active;
+    dom.bottomRootDropZone.hidden = !shouldShow;
+    dom.bottomRootDropZone.dataset.dropFocused = focused ? "true" : "false";
+  }
+
+  updateDragStatusChip();
 }
 
 function setDragTarget(target = null, element = null) {
@@ -1715,7 +1868,7 @@ function canActivateInsideDrop(kind, id) {
     state.dragInsideHover.since = now;
     return false;
   }
-  return now - state.dragInsideHover.since >= INSIDE_DROP_DWELL_MS;
+  return now - state.dragInsideHover.since >= dragInsideDwellMs();
 }
 
 function fallbackEdgePosition(event, row) {
@@ -1759,6 +1912,52 @@ function resolveTabDropIntent(tree, row, targetTabId, event) {
   };
 }
 
+function maybeAutoExpandDropTarget(tree, targetTabId, intentPosition) {
+  if (!state.settings?.dragExpandOnHover || intentPosition !== "inside") {
+    state.dragExpandHover.tabId = null;
+    state.dragExpandHover.since = 0;
+    return;
+  }
+
+  const targetNode = tree.nodes[nodeId(targetTabId)];
+  if (!targetNode || !targetNode.childNodeIds.length || !targetNode.collapsed) {
+    state.dragExpandHover.tabId = null;
+    state.dragExpandHover.since = 0;
+    return;
+  }
+
+  if (!canDrop(tree, state.draggingTabIds, targetTabId, "inside")) {
+    state.dragExpandHover.tabId = null;
+    state.dragExpandHover.since = 0;
+    return;
+  }
+
+  const now = Date.now();
+  if (state.dragExpandHover.tabId !== targetTabId) {
+    state.dragExpandHover.tabId = targetTabId;
+    state.dragExpandHover.since = now;
+    return;
+  }
+
+  if (state.dragExpandHover.pendingTabId === targetTabId) {
+    return;
+  }
+
+  if (now - state.dragExpandHover.since < dragExpandDelayMs()) {
+    return;
+  }
+
+  state.dragExpandHover.pendingTabId = targetTabId;
+  void send(MESSAGE_TYPES.TREE_ACTION, {
+    type: TREE_ACTIONS.TOGGLE_COLLAPSE,
+    tabId: targetTabId
+  }).finally(() => {
+    if (state.dragExpandHover.pendingTabId === targetTabId) {
+      state.dragExpandHover.pendingTabId = null;
+    }
+  });
+}
+
 function canDropGroup(tree, sourceGroupId, options = {}) {
   return canDropGroupModel({
     tree,
@@ -1779,7 +1978,7 @@ async function moveGroupBlockToTarget(tree, target, position) {
     return;
   }
 
-  await send(MESSAGE_TYPES.TREE_ACTION, payload);
+  await sendTreeActionWithUndo(payload);
 }
 
 async function executeCloseAction(action) {
@@ -1888,7 +2087,7 @@ async function dropToRoot(tree) {
     clearDropClasses();
     return;
   }
-  await send(MESSAGE_TYPES.TREE_ACTION, payload);
+  await sendTreeActionWithUndo(payload);
 
   state.draggingTabIds = [];
   resetInsideDropHover();
@@ -2762,6 +2961,7 @@ function render() {
   updateShortcutHint();
   renderTree();
   renderContextMenu();
+  updateSearchDropAffordance();
 }
 
 function scheduleRender() {
@@ -2887,6 +3087,47 @@ function bindEvents() {
 
   dom.searchWrap.addEventListener("drop", async (event) => {
     if (!state.draggingTabIds.length || Number.isInteger(state.draggingGroupId)) {
+      return;
+    }
+    event.preventDefault();
+    stopAutoScroll();
+    const tree = currentWindowTree();
+    if (!tree) {
+      return;
+    }
+    await dropToRoot(tree);
+    clearDropClasses();
+  });
+
+  dom.bottomRootDropZone?.addEventListener("dragover", (event) => {
+    if (!state.draggingTabIds.length || Number.isInteger(state.draggingGroupId)) {
+      return;
+    }
+    if (!state.settings?.showBottomRootDropZone) {
+      return;
+    }
+    event.preventDefault();
+    setDragTarget({
+      kind: "root",
+      position: "inside",
+      valid: true
+    }, dom.bottomRootDropZone);
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+  });
+
+  dom.bottomRootDropZone?.addEventListener("dragleave", (event) => {
+    if (!dom.bottomRootDropZone.contains(event.relatedTarget) && state.dragTarget.kind === "root") {
+      setDragTarget(null, null);
+    }
+  });
+
+  dom.bottomRootDropZone?.addEventListener("drop", async (event) => {
+    if (!state.draggingTabIds.length || Number.isInteger(state.draggingGroupId)) {
+      return;
+    }
+    if (!state.settings?.showBottomRootDropZone) {
       return;
     }
     event.preventDefault();
@@ -3159,9 +3400,7 @@ function bindEvents() {
       return;
     }
 
-    const selection = state.selectedTabIds.has(tabId) && state.selectedTabIds.size > 1
-      ? selectedTabIdsArray()
-      : [tabId];
+    const selection = orderedDragSelection(tabId);
 
     state.draggingTabIds = selection;
     resetInsideDropHover();
@@ -3282,6 +3521,7 @@ function bindEvents() {
     }
 
     const intent = resolveTabDropIntent(tree, row, tabId, event);
+    maybeAutoExpandDropTarget(tree, tabId, intent.position);
     setDragTarget({
       kind: "tab",
       tabId,
@@ -3383,7 +3623,7 @@ function bindEvents() {
       return;
     }
 
-    await send(MESSAGE_TYPES.TREE_ACTION, payload);
+    await sendTreeActionWithUndo(payload);
     state.draggingTabIds = [];
     resetInsideDropHover();
     clearDropClasses();
@@ -3453,6 +3693,23 @@ function bindEvents() {
 
     closeConfirmDialog();
     await executeCloseAction(pending.action);
+  });
+
+  dom.undoLastMove?.addEventListener("click", async () => {
+    const pendingUndo = state.pendingUndoMove;
+    if (!pendingUndo || !Number.isInteger(pendingUndo.windowId) || typeof pendingUndo.token !== "string") {
+      hideUndoToast();
+      return;
+    }
+    try {
+      await send(MESSAGE_TYPES.TREE_ACTION, {
+        type: TREE_ACTIONS.UNDO_LAST_TREE_MOVE,
+        windowId: pendingUndo.windowId,
+        token: pendingUndo.token
+      });
+    } finally {
+      hideUndoToast();
+    }
   });
 
   dom.treeRoot.addEventListener("scroll", () => {
@@ -3559,6 +3816,7 @@ function bindEvents() {
     closeContextMenu();
   });
   window.addEventListener("beforeunload", () => {
+    hideUndoToast();
     flushPendingSettingsPatchSoon();
   });
   window.addEventListener("resize", () => {

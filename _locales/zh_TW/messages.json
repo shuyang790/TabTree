@@ -38,6 +38,15 @@
   "dropToTopLevelHint": {
     "message": "拖放到這裡可移到頂層"
   },
+  "dropToTopLevelBottomHint": {
+    "message": "拖放到這裡可移到頂層"
+  },
+  "moveCompleteUndo": {
+    "message": "移動完成"
+  },
+  "undoAction": {
+    "message": "復原"
+  },
   "tabTreeAriaLabel": {
     "message": "分頁樹"
   },

@@ -49,7 +49,8 @@ const state = {
   settings: null,
   windows: {},
   initialized: false,
-  syncSnapshot: null
+  syncSnapshot: null,
+  lastMoveByWindow: {}
 };
 
 const TAB_GROUP_COLORS = new Set(["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"]);
@@ -249,6 +250,60 @@ function canReparent(tree, movingNodeId, parentNodeId) {
   return true;
 }
 
+function createUndoToken() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function setLastMove(windowId, undoPayload) {
+  if (!Number.isInteger(windowId) || !undoPayload) {
+    return null;
+  }
+  const token = createUndoToken();
+  state.lastMoveByWindow[windowId] = {
+    token,
+    undoPayload
+  };
+  return token;
+}
+
+function clearLastMove(windowId) {
+  if (!Number.isInteger(windowId)) {
+    return;
+  }
+  delete state.lastMoveByWindow[windowId];
+}
+
+function captureTabMoveRecord(tree, tabId) {
+  if (!tree || !Number.isFinite(tabId)) {
+    return null;
+  }
+  const sourceNodeId = nodeIdFromTabId(tabId);
+  const sourceNode = tree.nodes[sourceNodeId];
+  if (!sourceNode) {
+    return null;
+  }
+  const siblings = sourceNode.parentNodeId
+    ? (tree.nodes[sourceNode.parentNodeId]?.childNodeIds || [])
+    : tree.rootNodeIds;
+  return {
+    tabId: sourceNode.tabId,
+    parentTabId: sourceNode.parentNodeId ? tree.nodes[sourceNode.parentNodeId]?.tabId || null : null,
+    childIndex: Math.max(0, siblings.indexOf(sourceNodeId)),
+    browserIndex: Number.isFinite(sourceNode.index) ? sourceNode.index : 0
+  };
+}
+
+function captureTabMoveRecords(tree, tabIds) {
+  const records = [];
+  for (const tabId of uniqueFiniteTabIdsInOrder(tabIds || [])) {
+    const record = captureTabMoveRecord(tree, tabId);
+    if (record) {
+      records.push(record);
+    }
+  }
+  return records;
+}
+
 async function groupLiveTabIdsByWindowInRequestOrder(tabIds) {
   const grouped = new Map();
   const uniqueTabIds = uniqueFiniteTabIdsInOrder(tabIds);
@@ -329,6 +384,186 @@ async function moveTabsRelativeToTarget(windowId, moveTabIds, targetTabId, place
   }
 
   return true;
+}
+
+async function restoreTabPlacements(windowId, records) {
+  if (!Number.isInteger(windowId) || !Array.isArray(records) || !records.length) {
+    return false;
+  }
+
+  const orderedRecords = [...records]
+    .filter((record) => Number.isFinite(record?.tabId))
+    .sort((a, b) => (a.browserIndex ?? 0) - (b.browserIndex ?? 0));
+  if (!orderedRecords.length) {
+    return false;
+  }
+
+  let next = windowTree(windowId);
+  let changed = false;
+
+  for (const record of orderedRecords) {
+    const tab = await getTab(record.tabId);
+    if (!tab || tab.windowId !== windowId) {
+      continue;
+    }
+
+    const sourceNodeId = nodeIdFromTabId(record.tabId);
+    if (!next.nodes[sourceNodeId]) {
+      continue;
+    }
+
+    const desiredParentNodeId = Number.isFinite(record.parentTabId)
+      ? nodeIdFromTabId(record.parentTabId)
+      : null;
+    const parentNodeId = desiredParentNodeId && next.nodes[desiredParentNodeId]
+      ? desiredParentNodeId
+      : null;
+
+    const siblings = parentNodeId
+      ? (next.nodes[parentNodeId]?.childNodeIds || [])
+      : next.rootNodeIds;
+    const targetIndex = Number.isInteger(record.childIndex)
+      ? Math.max(0, Math.min(record.childIndex, siblings.length))
+      : null;
+
+    next = moveNode(next, sourceNodeId, parentNodeId, targetIndex);
+    changed = true;
+
+    const browserIndex = await resolveBrowserMoveIndex(windowId, record.browserIndex);
+    if (browserIndex !== null) {
+      try {
+        await chrome.tabs.move(record.tabId, { index: browserIndex });
+      } catch (error) {
+        logUnexpectedFailure("undo.restoreTab.move", error, {
+          windowId,
+          tabId: record.tabId,
+          browserIndex
+        });
+      }
+    }
+
+    if (parentNodeId) {
+      const parentTabId = next.nodes[parentNodeId]?.tabId;
+      const parentTab = Number.isFinite(parentTabId) ? await getTab(parentTabId) : null;
+      if (Number.isInteger(parentTab?.groupId) && parentTab.groupId >= 0) {
+        try {
+          await chrome.tabs.group({ groupId: parentTab.groupId, tabIds: [record.tabId] });
+        } catch (error) {
+          logUnexpectedFailure("undo.restoreTab.group", error, {
+            windowId,
+            tabId: record.tabId,
+            groupId: parentTab.groupId
+          });
+        }
+      }
+    }
+  }
+
+  if (changed) {
+    setWindowTree(sortTreeByIndex(next));
+    await syncWindowOrdering(windowId);
+  }
+
+  return changed;
+}
+
+async function moveGroupToIndex(windowId, sourceGroupId, index) {
+  if (!Number.isInteger(windowId) || !Number.isInteger(sourceGroupId) || !Number.isFinite(index)) {
+    return false;
+  }
+
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ windowId });
+  } catch {
+    return false;
+  }
+
+  const sourceTabs = tabs
+    .filter((tab) => tab.groupId === sourceGroupId)
+    .sort((a, b) => a.index - b.index);
+  const sourceTabIds = sourceTabs.map((tab) => tab.id);
+  if (!sourceTabIds.length) {
+    return false;
+  }
+
+  let moved = false;
+  try {
+    await chrome.tabGroups.move(sourceGroupId, { index });
+    moved = true;
+  } catch (error) {
+    logUnexpectedFailure("moveGroupToIndex.moveGroup", error, {
+      windowId,
+      sourceGroupId,
+      index
+    });
+  }
+
+  if (!moved) {
+    try {
+      await chrome.tabs.move(sourceTabIds, { index });
+      moved = true;
+    } catch (error) {
+      logUnexpectedFailure("moveGroupToIndex.moveTabs", error, {
+        windowId,
+        sourceGroupId,
+        tabIds: sourceTabIds,
+        index
+      });
+      return false;
+    }
+  }
+
+  try {
+    await chrome.tabs.group({ groupId: sourceGroupId, tabIds: sourceTabIds });
+  } catch (error) {
+    logUnexpectedFailure("moveGroupToIndex.regroupTabs", error, {
+      windowId,
+      sourceGroupId,
+      tabIds: sourceTabIds
+    });
+  }
+
+  await syncWindowOrdering(windowId);
+  await refreshGroupMetadata(windowId);
+  return true;
+}
+
+async function undoLastTreeMove(windowIdHint = null, expectedToken = null) {
+  let windowId = Number.isInteger(windowIdHint) ? windowIdHint : null;
+  if (!Number.isInteger(windowId)) {
+    const active = await getActiveTab();
+    if (Number.isInteger(active?.windowId)) {
+      windowId = active.windowId;
+    }
+  }
+  if (!Number.isInteger(windowId)) {
+    return null;
+  }
+
+  const entry = state.lastMoveByWindow[windowId];
+  if (!entry?.undoPayload) {
+    return null;
+  }
+  if (typeof expectedToken === "string" && entry.token !== expectedToken) {
+    return null;
+  }
+
+  let undone = false;
+  if (entry.undoPayload.kind === "tabs") {
+    undone = await restoreTabPlacements(windowId, entry.undoPayload.records || []);
+  } else if (entry.undoPayload.kind === "group-block") {
+    undone = await moveGroupToIndex(windowId, entry.undoPayload.sourceGroupId, entry.undoPayload.previousIndex);
+  }
+
+  if (undone) {
+    clearLastMove(windowId);
+  }
+
+  return {
+    windowId,
+    undone
+  };
 }
 
 function removeTabIdsFromWindowTree(windowId, tabIds) {
@@ -834,6 +1069,7 @@ async function batchMoveToRoot(tabIds, options = {}) {
   const targetTabId = Number.isFinite(options.targetTabId) ? options.targetTabId : null;
 
   const grouped = await groupLiveTabIdsByWindowInRequestOrder(tabIds);
+  const undoByWindow = [];
   for (const [windowId, orderedTabIds] of grouped.entries()) {
     const tree = windowTree(windowId);
     let orderedNodeIds = orderedTabIds
@@ -876,6 +1112,11 @@ async function batchMoveToRoot(tabIds, options = {}) {
     if (!orderedNodeIds.length) {
       continue;
     }
+
+    const moveRecords = captureTabMoveRecords(
+      tree,
+      orderedNodeIds.map((nodeId) => tree.nodes[nodeId]?.tabId).filter((id) => Number.isFinite(id))
+    );
 
     let next = tree;
     for (const nodeId of orderedNodeIds) {
@@ -920,9 +1161,20 @@ async function batchMoveToRoot(tabIds, options = {}) {
 
     if (movedInBrowser) {
       setWindowTree(next);
+      if (moveRecords.length) {
+        const token = setLastMove(windowId, {
+          kind: "tabs",
+          records: moveRecords
+        });
+        if (token) {
+          undoByWindow.push({ windowId, token });
+        }
+      }
     }
     await syncWindowOrdering(windowId);
   }
+
+  return undoByWindow[0] || null;
 }
 
 async function batchReparent(tabIds, newParentTabId, options = {}) {
@@ -959,6 +1211,11 @@ async function batchReparent(tabIds, newParentTabId, options = {}) {
   if (!reparentableNodeIds.length) {
     return;
   }
+
+  const moveRecords = captureTabMoveRecords(
+    tree,
+    reparentableNodeIds.map((nodeId) => tree.nodes[nodeId]?.tabId).filter((id) => Number.isFinite(id))
+  );
 
   let browserMoveIndex = childInsertIndex(tree, parentNodeId, parentTab.index + 1);
   let targetNodeId = null;
@@ -1056,6 +1313,21 @@ async function batchReparent(tabIds, newParentTabId, options = {}) {
   }
 
   await syncWindowOrdering(parentTab.windowId);
+
+  if (movedInBrowser && moveRecords.length) {
+    const token = setLastMove(parentTab.windowId, {
+      kind: "tabs",
+      records: moveRecords
+    });
+    if (token) {
+      return {
+        windowId: parentTab.windowId,
+        token
+      };
+    }
+  }
+
+  return null;
 }
 
 async function moveGroupBlock(payload) {
@@ -1084,6 +1356,7 @@ async function moveGroupBlock(payload) {
   if (!sourceTabIds.length) {
     return;
   }
+  const previousIndex = sourceTabs[0].index;
 
   if (Number.isFinite(payload.targetTabId) && sourceTabIds.includes(payload.targetTabId)) {
     return;
@@ -1109,6 +1382,7 @@ async function moveGroupBlock(payload) {
   if (!moved) {
     try {
       await chrome.tabs.move(sourceTabIds, { index });
+      moved = true;
     } catch (error) {
       logUnexpectedFailure("moveGroupBlock.moveTabsFallback", error, {
         windowId,
@@ -1116,6 +1390,7 @@ async function moveGroupBlock(payload) {
         tabIds: sourceTabIds,
         index
       });
+      return null;
     }
   }
 
@@ -1132,6 +1407,12 @@ async function moveGroupBlock(payload) {
 
   await syncWindowOrdering(windowId);
   await refreshGroupMetadata(windowId);
+  const token = setLastMove(windowId, {
+    kind: "group-block",
+    sourceGroupId,
+    previousIndex
+  });
+  return token ? { windowId, token } : null;
 }
 
 async function resolveGroupWindowId(groupId, windowIdHint = null) {
@@ -1240,66 +1521,83 @@ async function setGroupColor(groupId, color, windowIdHint = null, tabIds = []) {
 async function handleTreeAction(payload) {
   const { type } = payload;
   if (type === TREE_ACTIONS.ADD_CHILD_TAB) {
-    return addChildTab(payload.parentTabId);
+    await addChildTab(payload.parentTabId);
+    return null;
   }
 
   if (type === TREE_ACTIONS.ACTIVATE_TAB) {
-    return activateTab(payload.tabId);
+    await activateTab(payload.tabId);
+    return null;
   }
 
   if (type === TREE_ACTIONS.BATCH_CLOSE_TABS) {
-    return batchCloseTabs(payload.tabIds || []);
+    await batchCloseTabs(payload.tabIds || []);
+    return null;
   }
 
   if (type === TREE_ACTIONS.BATCH_GROUP_NEW) {
-    return batchGroupNew(payload.tabIds || []);
+    await batchGroupNew(payload.tabIds || []);
+    return null;
   }
 
   if (type === TREE_ACTIONS.BATCH_GROUP_EXISTING) {
-    return batchGroupExisting(payload.tabIds || [], payload.groupId, payload.windowId ?? null);
+    await batchGroupExisting(payload.tabIds || [], payload.groupId, payload.windowId ?? null);
+    return null;
   }
 
   if (type === TREE_ACTIONS.BATCH_CLOSE_SUBTREES) {
-    return batchCloseSubtrees(payload.tabIds || []);
+    await batchCloseSubtrees(payload.tabIds || []);
+    return null;
   }
 
   if (type === TREE_ACTIONS.BATCH_MOVE_TO_ROOT) {
-    return batchMoveToRoot(payload.tabIds || [], {
+    const undo = await batchMoveToRoot(payload.tabIds || [], {
       placement: payload.placement,
       targetTabId: payload.targetTabId
     });
+    return undo ? { undo } : null;
   }
 
   if (type === TREE_ACTIONS.BATCH_REPARENT) {
-    return batchReparent(payload.tabIds || [], payload.newParentTabId, {
+    const undo = await batchReparent(payload.tabIds || [], payload.newParentTabId, {
       placement: payload.placement,
       targetTabId: payload.targetTabId
     });
+    return undo ? { undo } : null;
+  }
+
+  if (type === TREE_ACTIONS.UNDO_LAST_TREE_MOVE) {
+    const result = await undoLastTreeMove(payload.windowId ?? null, payload.token ?? null);
+    return result?.undone ? { undone: true, windowId: result.windowId } : null;
   }
 
   if (type === TREE_ACTIONS.MOVE_GROUP_BLOCK) {
-    return moveGroupBlock(payload);
+    const undo = await moveGroupBlock(payload);
+    return undo ? { undo } : null;
   }
 
   if (type === TREE_ACTIONS.RENAME_GROUP) {
-    return renameGroup(payload.groupId, payload.title || "", payload.windowId ?? null);
+    await renameGroup(payload.groupId, payload.title || "", payload.windowId ?? null);
+    return null;
   }
 
   if (type === TREE_ACTIONS.SET_GROUP_COLOR) {
-    return setGroupColor(payload.groupId, payload.color, payload.windowId ?? null, payload.tabIds || []);
+    await setGroupColor(payload.groupId, payload.color, payload.windowId ?? null, payload.tabIds || []);
+    return null;
   }
 
   if (type === TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE) {
-    return handleToggleGroupCollapseAction(payload, {
+    await handleToggleGroupCollapseAction(payload, {
       resolveGroupWindowId,
       windowTree,
       updateGroupCollapsed: (groupId, collapsed) => chrome.tabGroups.update(groupId, { collapsed }),
       refreshGroupMetadata
     });
+    return null;
   }
 
   if (type === TREE_ACTIONS.CLOSE_SUBTREE) {
-    return handleCloseSubtreeAction(payload, {
+    await handleCloseSubtreeAction(payload, {
       getTab,
       closeSubtree,
       nodeIdFromTabId,
@@ -1307,22 +1605,24 @@ async function handleTreeAction(payload) {
       removeTabIdsFromWindowTree,
       pruneWindowTreeAgainstLiveTabs
     });
+    return null;
   }
 
   const tab = await getTab(payload.tabId);
   if (!tab) {
-    return;
+    return null;
   }
   const tree = windowTree(tab.windowId);
   const nodeId = nodeIdFromTabId(payload.tabId);
 
   if (type === TREE_ACTIONS.TOGGLE_COLLAPSE) {
     setWindowTree(toggleNodeCollapsed(tree, nodeId));
-    return;
+    return null;
   }
 
   if (type === TREE_ACTIONS.REPARENT_TAB) {
-    return handleReparentTabAction({ payload, tab, tree, nodeId }, {
+    const moveRecord = captureTabMoveRecord(tree, payload.tabId);
+    const moved = await handleReparentTabAction({ payload, tab, tree, nodeId }, {
       nodeIdFromTabId,
       canReparent,
       moveNode,
@@ -1335,10 +1635,21 @@ async function handleTreeAction(payload) {
       groupTabs: (groupId, tabIds) => chrome.tabs.group({ groupId, tabIds }),
       syncWindowOrdering
     });
+    if (moved && moveRecord) {
+      const token = setLastMove(tab.windowId, {
+        kind: "tabs",
+        records: [moveRecord]
+      });
+      if (token) {
+        return { undo: { windowId: tab.windowId, token } };
+      }
+    }
+    return null;
   }
 
   if (type === TREE_ACTIONS.MOVE_TO_ROOT) {
-    return handleMoveToRootAction({ payload, tab, tree, nodeId }, {
+    const moveRecord = captureTabMoveRecord(tree, payload.tabId);
+    const moved = await handleMoveToRootAction({ payload, tab, tree, nodeId }, {
       moveNode,
       sortTreeByIndex,
       resolveBrowserMoveIndex,
@@ -1347,7 +1658,19 @@ async function handleTreeAction(payload) {
       setWindowTree,
       syncWindowOrdering
     });
+    if (moved && moveRecord) {
+      const token = setLastMove(tab.windowId, {
+        kind: "tabs",
+        records: [moveRecord]
+      });
+      if (token) {
+        return { undo: { windowId: tab.windowId, token } };
+      }
+    }
+    return null;
   }
+
+  return null;
 }
 
 async function promoteActiveTab() {
@@ -1477,8 +1800,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message?.type === MESSAGE_TYPES.TREE_ACTION) {
-      await handleTreeAction(message.payload);
-      sendResponse({ ok: true });
+      const result = await handleTreeAction(message.payload);
+      sendResponse({ ok: true, payload: result });
       return;
     }
 
@@ -1584,6 +1907,7 @@ chrome.tabs.onDetached.addListener(async (tabId, detachInfo) => {
 chrome.windows.onRemoved.addListener(async (windowId) => {
   await ensureInitialized();
   delete state.windows[windowId];
+  clearLastMove(windowId);
   await removeWindowTree(windowId);
   persistCoordinator.forgetWindow(windowId);
   broadcastState();

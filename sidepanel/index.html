@@ -60,6 +60,24 @@
         data-i18n-aria-label="tabTreeAriaLabel"
       ></section>
 
+      <div
+        id="bottom-root-drop-zone"
+        class="bottom-root-drop-zone"
+        hidden
+        data-i18n="dropToTopLevelBottomHint"
+      >
+        Drop here to move to top-level
+      </div>
+
+      <div id="drag-status-chip" class="drag-status-chip" hidden aria-live="polite"></div>
+
+      <div id="undo-toast" class="undo-toast" hidden>
+        <span id="undo-toast-label" data-i18n="moveCompleteUndo">Move complete</span>
+        <button id="undo-last-move" class="btn btn-ghost undo-toast-btn" type="button" data-i18n="undoAction">
+          Undo
+        </button>
+      </div>
+
       <footer class="hint-bar" id="hint-bar"></footer>
     </div>
 
