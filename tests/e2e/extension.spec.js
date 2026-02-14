@@ -17,6 +17,35 @@ async function dispatchFocusSearchFromServiceWorker(context) {
   });
 }
 
+async function activeSearchMatchTitle(sidePanelPage) {
+  return sidePanelPage.evaluate(() => {
+    const row = document.querySelector(".tree-row.search-match-active");
+    return row?.querySelector(".title")?.textContent?.trim() || null;
+  });
+}
+
+async function activeChromeTabTitle(sidePanelPage) {
+  return sidePanelPage.evaluate(async () => {
+    const tabs = await chrome.tabs.query({ currentWindow: true, active: true });
+    return tabs[0]?.title || null;
+  });
+}
+
+async function orderedTitlesWithPrefix(sidePanelPage, prefix) {
+  return sidePanelPage.evaluate((targetPrefix) => {
+    return Array.from(document.querySelectorAll(".tree-row[data-tab-id] .title"))
+      .map((el) => el.textContent?.trim() || "")
+      .filter((text) => text.startsWith(targetPrefix));
+  }, prefix);
+}
+
+async function isTreeRowFocused(sidePanelPage) {
+  return sidePanelPage.evaluate(() => {
+    const active = document.activeElement;
+    return active instanceof HTMLElement && active.classList.contains("tree-row");
+  });
+}
+
 function rowByTitle(sidePanelPage, title) {
   return sidePanelPage
     .locator(".tree-row")
@@ -176,23 +205,242 @@ test.describe("TabTree extension", () => {
       expect(orderedTitles.length).toBe(3);
 
       const [first, second] = orderedTitles;
-
-      const activeSearchTitle = async () => sidePanelPage.evaluate(() => {
-        const row = document.querySelector(".tree-row.search-match-active");
-        return row?.querySelector(".title")?.textContent?.trim() || null;
-      });
-
-      await expect.poll(activeSearchTitle).toBe(first);
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(first);
       await sidePanelPage.locator("#search").press("ArrowDown");
-      await expect.poll(activeSearchTitle).toBe(second);
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(second);
       await sidePanelPage.locator("#search").press("ArrowUp");
-      await expect.poll(activeSearchTitle).toBe(first);
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(first);
 
       await sidePanelPage.locator("#search").press("Enter");
-      await expect.poll(async () => sidePanelPage.evaluate(async () => {
-        const tabs = await chrome.tabs.query({ currentWindow: true, active: true });
-        return tabs[0]?.title || null;
-      })).toBe(first);
+      await expect.poll(() => activeChromeTabTitle(sidePanelPage)).toBe(first);
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
+  test("focus-search message focuses search when another tab page is frontmost", async ({ context, sidePanelPage }) => {
+    const frontPage = await context.newPage();
+    try {
+      await frontPage.setContent("<title>E2E Front Page</title><main>front</main>");
+      await frontPage.bringToFront();
+      await dispatchFocusSearchFromServiceWorker(context);
+      await sidePanelPage.bringToFront();
+      await expect(sidePanelPage.locator("#search")).toBeFocused();
+    } finally {
+      await frontPage.close().catch(() => {});
+    }
+  });
+
+  test("search Escape clears query first, then blurs to a tree row", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const titles = ["E2E Escape One", "E2E Escape Two"];
+      for (const title of titles) {
+        pages.push(await createTitledTab(context, title));
+      }
+
+      await dispatchFocusSearchFromServiceWorker(context);
+      await expect(sidePanelPage.locator("#search")).toBeFocused();
+      await sidePanelPage.locator("#search").fill("E2E Escape");
+
+      await expect.poll(async () => orderedTitlesWithPrefix(sidePanelPage, "E2E Escape"))
+        .toHaveLength(2);
+
+      await sidePanelPage.locator("#search").press("Escape");
+      await expect(sidePanelPage.locator("#search")).toHaveValue("");
+      await expect.poll(async () => orderedTitlesWithPrefix(sidePanelPage, "E2E Escape"))
+        .toHaveLength(2);
+
+      await sidePanelPage.locator("#search").press("Escape");
+      await expect.poll(() => isTreeRowFocused(sidePanelPage)).toBe(true);
+      await expect(sidePanelPage.locator("#search")).not.toBeFocused();
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
+  test("search Enter does not switch tabs when there are no matches", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const anchorTitle = "E2E NoMatch Anchor";
+      pages.push(await createTitledTab(context, anchorTitle));
+      pages.push(await createTitledTab(context, "E2E NoMatch Other"));
+
+      const anchorRow = rowByTitle(sidePanelPage, anchorTitle);
+      await expect(anchorRow).toBeVisible();
+      await anchorRow.click();
+      await expect.poll(() => activeChromeTabTitle(sidePanelPage)).toBe(anchorTitle);
+
+      await dispatchFocusSearchFromServiceWorker(context);
+      await sidePanelPage.locator("#search").fill("zzzzzz-e2e-no-match");
+      await expect(sidePanelPage.locator(".tree-row[data-tab-id]")).toHaveCount(0);
+
+      await sidePanelPage.locator("#search").press("Enter");
+      await expect.poll(() => activeChromeTabTitle(sidePanelPage)).toBe(anchorTitle);
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
+  test("search ArrowUp and ArrowDown wrap across match boundaries", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const titles = ["E2E Wrap Alpha", "E2E Wrap Beta", "E2E Wrap Gamma"];
+      for (const title of titles) {
+        pages.push(await createTitledTab(context, title));
+      }
+
+      await dispatchFocusSearchFromServiceWorker(context);
+      await sidePanelPage.locator("#search").fill("E2E Wrap");
+
+      await expect.poll(async () => orderedTitlesWithPrefix(sidePanelPage, "E2E Wrap"))
+        .toHaveLength(3);
+      const orderedTitles = await orderedTitlesWithPrefix(sidePanelPage, "E2E Wrap");
+      const [first, second, third] = orderedTitles;
+
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(first);
+      await sidePanelPage.locator("#search").press("ArrowUp");
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(third);
+      await sidePanelPage.locator("#search").press("ArrowDown");
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(first);
+      await sidePanelPage.locator("#search").press("ArrowDown");
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(second);
+      await sidePanelPage.locator("#search").press("ArrowDown");
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(third);
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
+  test("closing the active matched tab advances search highlight to the next match", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const titles = ["E2E Invalidate One", "E2E Invalidate Two", "E2E Invalidate Three"];
+      for (const title of titles) {
+        pages.push(await createTitledTab(context, title));
+      }
+
+      await dispatchFocusSearchFromServiceWorker(context);
+      await sidePanelPage.locator("#search").fill("E2E Invalidate");
+      await expect.poll(async () => orderedTitlesWithPrefix(sidePanelPage, "E2E Invalidate"))
+        .toHaveLength(3);
+      const ordered = await orderedTitlesWithPrefix(sidePanelPage, "E2E Invalidate");
+      const [, second, third] = ordered;
+
+      await sidePanelPage.locator("#search").press("ArrowDown");
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(second);
+
+      const secondTabId = await tabIdByTitle(sidePanelPage, second);
+      expect(Number.isInteger(secondTabId)).toBeTruthy();
+      await sidePanelPage.evaluate(async (tabId) => {
+        await chrome.tabs.remove(tabId);
+      }, secondTabId);
+
+      await expect.poll(() => orderedTitlesWithPrefix(sidePanelPage, "E2E Invalidate"))
+        .toHaveLength(2);
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(third);
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
+  test("search query and active match persist after Enter activation", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const query = "E2E Persist";
+      const titles = ["E2E Persist One", "E2E Persist Two", "E2E Persist Three"];
+      for (const title of titles) {
+        pages.push(await createTitledTab(context, title));
+      }
+
+      await dispatchFocusSearchFromServiceWorker(context);
+      await sidePanelPage.locator("#search").fill(query);
+      await expect.poll(async () => orderedTitlesWithPrefix(sidePanelPage, query))
+        .toHaveLength(3);
+      const ordered = await orderedTitlesWithPrefix(sidePanelPage, query);
+      const [, second] = ordered;
+
+      await sidePanelPage.locator("#search").press("ArrowDown");
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(second);
+      await sidePanelPage.locator("#search").press("Enter");
+
+      await expect.poll(() => activeChromeTabTitle(sidePanelPage)).toBe(second);
+      await expect(sidePanelPage.locator("#search")).toHaveValue(query);
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(second);
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
+  test("focus-search stays reliable after side panel reload", async ({ context, sidePanelPage }) => {
+    await sidePanelPage.reload();
+    await expect(sidePanelPage.locator("#search")).toBeVisible();
+
+    await sidePanelPage.locator("#open-settings").focus();
+    await dispatchFocusSearchFromServiceWorker(context);
+    await expect(sidePanelPage.locator("#search")).toBeFocused();
+
+    await sidePanelPage.locator("#open-settings").focus();
+    await dispatchFocusSearchFromServiceWorker(context);
+    await expect(sidePanelPage.locator("#search")).toBeFocused();
+  });
+
+  test("search navigation is isolated while context menu or confirm modal is open", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const titles = ["E2E Isolation Alpha", "E2E Isolation Beta"];
+      for (const title of titles) {
+        pages.push(await createTitledTab(context, title));
+      }
+
+      await dispatchFocusSearchFromServiceWorker(context);
+      await sidePanelPage.locator("#search").fill("E2E Isolation");
+      await expect.poll(async () => orderedTitlesWithPrefix(sidePanelPage, "E2E Isolation"))
+        .toHaveLength(2);
+      const ordered = await orderedTitlesWithPrefix(sidePanelPage, "E2E Isolation");
+      const [first] = ordered;
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(first);
+
+      const firstRow = rowByTitle(sidePanelPage, "E2E Isolation Alpha");
+      await firstRow.click({ button: "right" });
+      await expect(sidePanelPage.locator("#context-menu")).toBeVisible();
+
+      await sidePanelPage.keyboard.press("ArrowDown");
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(first);
+      await expect.poll(async () => sidePanelPage.evaluate(() => {
+        const active = document.activeElement;
+        return active instanceof HTMLElement && active.classList.contains("context-menu-item");
+      })).toBe(true);
+
+      await sidePanelPage.keyboard.press("Escape");
+      await expect(sidePanelPage.locator("#context-menu")).toBeHidden();
+
+      const rowA = rowByTitle(sidePanelPage, "E2E Isolation Alpha");
+      const rowB = rowByTitle(sidePanelPage, "E2E Isolation Beta");
+      await rowA.click();
+      await rowB.click({ modifiers: ["Shift"] });
+      await rowB.click({ button: "right" });
+      await sidePanelPage.locator('.context-menu-item[data-action="close-selected-tabs"]').click();
+
+      const confirmOverlay = sidePanelPage.locator("#confirm-overlay");
+      await expect(confirmOverlay).toBeVisible();
+      await sidePanelPage.keyboard.press("Escape");
+      await expect(confirmOverlay).toBeHidden();
+
+      await expect(sidePanelPage.locator("#search")).toHaveValue("E2E Isolation");
+      await expect.poll(() => activeSearchMatchTitle(sidePanelPage)).toBe(first);
     } finally {
       for (const page of pages) {
         await page.close().catch(() => {});
