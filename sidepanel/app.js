@@ -321,7 +321,6 @@ const AUTO_SCROLL_MIN_STEP = 1;
 const AUTO_SCROLL_MAX_STEP = 18;
 const AUTO_SCROLL_MAX_STEP_VIRTUAL = 30;
 const SETTINGS_WRITE_DEBOUNCE_MS = 320;
-const UNDO_TOAST_MS = 8000;
 const VIRTUALIZE_MIN_ROWS = 300;
 const VIRTUALIZE_OVERSCAN_PX = 640;
 const VIRTUAL_ROW_BUFFER = 12;
@@ -337,14 +336,6 @@ const DROP_TARGET_CLASSES = [
   "group-drop-before",
   "group-drop-after"
 ];
-const UNDOABLE_MOVE_ACTIONS = new Set([
-  TREE_ACTIONS.REPARENT_TAB,
-  TREE_ACTIONS.MOVE_TO_ROOT,
-  TREE_ACTIONS.BATCH_REPARENT,
-  TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
-  TREE_ACTIONS.MOVE_GROUP_BLOCK
-]);
-
 const DENSITY_PRESETS = {
   compact: {
     rowHeight: 28,
@@ -420,8 +411,6 @@ const state = {
     rafId: null,
     velocity: 0
   },
-  undoToastTimer: null,
-  pendingUndoMove: null,
   selectedTabIds: new Set(),
   selectionAnchorTabId: null,
   focusedTabId: null,
@@ -472,9 +461,7 @@ const dom = {
   contextMenu: document.getElementById("context-menu"),
   bottomRootDropZone: document.getElementById("bottom-root-drop-zone"),
   dragStatusChip: document.getElementById("drag-status-chip"),
-  dragAnchorChip: document.getElementById("drag-anchor-chip"),
-  undoToast: document.getElementById("undo-toast"),
-  undoLastMove: document.getElementById("undo-last-move")
+  dragAnchorChip: document.getElementById("drag-anchor-chip")
 };
 
 if (dom.contextMenu) {
@@ -1194,11 +1181,7 @@ async function executeContextMenuAction(action) {
     if (!intent.payload) {
       return;
     }
-    if (UNDOABLE_MOVE_ACTIONS.has(intent.payload.type)) {
-      await sendTreeActionWithUndo(intent.payload);
-    } else {
-      await send(MESSAGE_TYPES.TREE_ACTION, intent.payload);
-    }
+    await send(MESSAGE_TYPES.TREE_ACTION, intent.payload);
     return;
   }
 
@@ -1661,43 +1644,8 @@ async function send(type, payload = {}) {
   return sendOrThrow(type, payload);
 }
 
-function hideUndoToast() {
-  if (state.undoToastTimer) {
-    clearTimeout(state.undoToastTimer);
-    state.undoToastTimer = null;
-  }
-  state.pendingUndoMove = null;
-  if (dom.undoToast) {
-    dom.undoToast.hidden = true;
-  }
-}
-
-function showUndoToast(undo) {
-  if (!undo || !Number.isInteger(undo.windowId) || typeof undo.token !== "string") {
-    return;
-  }
-  state.pendingUndoMove = {
-    windowId: undo.windowId,
-    token: undo.token
-  };
-  if (dom.undoToast) {
-    dom.undoToast.hidden = false;
-  }
-  if (state.undoToastTimer) {
-    clearTimeout(state.undoToastTimer);
-  }
-  state.undoToastTimer = setTimeout(() => {
-    state.undoToastTimer = null;
-    hideUndoToast();
-  }, UNDO_TOAST_MS);
-}
-
 async function sendTreeActionWithUndo(payload) {
-  const response = await send(MESSAGE_TYPES.TREE_ACTION, payload);
-  if (response?.payload?.undo) {
-    showUndoToast(response.payload.undo);
-  }
-  return response;
+  return send(MESSAGE_TYPES.TREE_ACTION, payload);
 }
 
 function groupDisplay(tree, groupId) {
@@ -4281,23 +4229,6 @@ function bindEvents() {
     await executeCloseAction(pending.action);
   });
 
-  dom.undoLastMove?.addEventListener("click", async () => {
-    const pendingUndo = state.pendingUndoMove;
-    if (!pendingUndo || !Number.isInteger(pendingUndo.windowId) || typeof pendingUndo.token !== "string") {
-      hideUndoToast();
-      return;
-    }
-    try {
-      await send(MESSAGE_TYPES.TREE_ACTION, {
-        type: TREE_ACTIONS.UNDO_LAST_TREE_MOVE,
-        windowId: pendingUndo.windowId,
-        token: pendingUndo.token
-      });
-    } finally {
-      hideUndoToast();
-    }
-  });
-
   dom.treeRoot.addEventListener("scroll", () => {
     closeContextMenu();
     if (!state.virtualModeActive) {
@@ -4416,7 +4347,6 @@ function bindEvents() {
       cancelAnimationFrame(state.virtualScrollRafId);
       state.virtualScrollRafId = null;
     }
-    hideUndoToast();
     flushPendingSettingsPatchSoon();
   });
   window.addEventListener("resize", () => {

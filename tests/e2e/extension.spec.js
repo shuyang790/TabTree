@@ -2325,7 +2325,7 @@ test.describe("TabTree extension", () => {
     await tail.close().catch(() => {});
   });
 
-  test("move undo toast restores previous order", async ({ context, sidePanelPage }) => {
+  test("move action updates order without rendering undo toast", async ({ context, sidePanelPage }) => {
     const source = await createTitledTab(context, "Undo Move Source");
     const target = await createTitledTab(context, "Undo Move Target");
     const tail = await createTitledTab(context, "Undo Move Tail");
@@ -2339,10 +2339,12 @@ test.describe("TabTree extension", () => {
       return rootTitles(tree).filter((title) => tracked.includes(title));
     }).toEqual(["Undo Move Target", "Undo Move Source", "Undo Move Tail"]);
 
-    await expect(sidePanelPage.locator("#undo-toast")).toBeVisible();
-    await sidePanelPage.locator("#undo-last-move").click();
-
-    await expectTreeAndNativeOrderMatch(sidePanelPage, tracked, tracked);
+    await expect(sidePanelPage.locator("#undo-toast")).toHaveCount(0);
+    await expectTreeAndNativeOrderMatch(
+      sidePanelPage,
+      tracked,
+      ["Undo Move Target", "Undo Move Source", "Undo Move Tail"]
+    );
 
     await source.close().catch(() => {});
     await target.close().catch(() => {});
