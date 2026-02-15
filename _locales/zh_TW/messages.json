@@ -149,6 +149,9 @@
   "showGroupSubtrees": {
     "message": "顯示群組子樹"
   },
+  "showDragStatusChip": {
+    "message": "顯示拖曳狀態文字"
+  },
   "showShortcutHints": {
     "message": "顯示快捷提示"
   },

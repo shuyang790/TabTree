@@ -127,6 +127,10 @@ export function normalizeSettings(candidate) {
   normalized.showFavicons = normalizeBoolean(normalized.showFavicons, DEFAULT_SETTINGS.showFavicons);
   normalized.showCloseButton = normalizeBoolean(normalized.showCloseButton, DEFAULT_SETTINGS.showCloseButton);
   normalized.showGroupHeaders = normalizeBoolean(normalized.showGroupHeaders, DEFAULT_SETTINGS.showGroupHeaders);
+  normalized.showDragStatusChip = normalizeBoolean(
+    normalized.showDragStatusChip,
+    DEFAULT_SETTINGS.showDragStatusChip
+  );
   normalized.shortcutHintsEnabled = normalizeBoolean(
     normalized.shortcutHintsEnabled,
     DEFAULT_SETTINGS.shortcutHintsEnabled

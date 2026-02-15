@@ -96,6 +96,7 @@ const SETTINGS_SECTION_KEYS = {
     "showFavicons",
     "showCloseButton",
     "showGroupHeaders",
+    "showDragStatusChip",
     "shortcutHintsEnabled"
   ],
   safety: ["confirmCloseSubtree", "confirmCloseBatch"]
@@ -1874,6 +1875,8 @@ function updateDragStatusChip() {
   }
   const tabCount = state.draggingTabIds.length;
   const groupDrag = Number.isInteger(state.draggingGroupId);
+  const tree = currentWindowTree();
+  const reason = resolveDragBlockedReason(tree, groupDrag);
   if (!groupDrag && tabCount === 0) {
     dom.dragStatusChip.hidden = true;
     dom.dragStatusChip.textContent = "";
@@ -1884,10 +1887,14 @@ function updateDragStatusChip() {
     return;
   }
 
-  const destination = dragDestinationLabel();
+  if (!state.settings?.showDragStatusChip) {
+    dom.dragStatusChip.hidden = true;
+    dom.dragStatusChip.textContent = "";
+    updateDragAnchorChip(tree, groupDrag, reason);
+    return;
+  }
 
-  const tree = currentWindowTree();
-  const reason = resolveDragBlockedReason(tree, groupDrag);
+  const destination = dragDestinationLabel();
   const validity = state.dragTarget.valid
     ? t("dropStatusValid", [], "valid")
     : blockedReasonLabel(reason);

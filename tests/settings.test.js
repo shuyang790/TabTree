@@ -10,7 +10,8 @@ test("normalizeSettings keeps explicit light/dark presets and strips legacy keys
     themePresetDark: "gruvbox-dark",
     themePreset: "catppuccin-mocha",
     themeMode: "dark",
-    accentColor: "#112233"
+    accentColor: "#112233",
+    showDragStatusChip: true
   });
 
   assert.equal(normalized.themePresetLight, "gruvbox-light");
@@ -18,6 +19,7 @@ test("normalizeSettings keeps explicit light/dark presets and strips legacy keys
   assert.equal(normalized.themePreset, undefined);
   assert.equal(normalized.themeMode, undefined);
   assert.equal(normalized.accentColor, "#112233");
+  assert.equal(normalized.showDragStatusChip, true);
 });
 
 test("normalizeSettings migrates legacy dark preset to dark appearance", () => {
@@ -61,6 +63,7 @@ test("normalizeSettings clamps ranges and rejects invalid enum/color/boolean val
     showFavicons: "true",
     showCloseButton: 1,
     showGroupHeaders: null,
+    showDragStatusChip: "on",
     shortcutHintsEnabled: "yes",
     confirmCloseSubtree: "no",
     confirmCloseBatch: 0
@@ -81,6 +84,7 @@ test("normalizeSettings clamps ranges and rejects invalid enum/color/boolean val
   assert.equal(normalized.showFavicons, DEFAULT_SETTINGS.showFavicons);
   assert.equal(normalized.showCloseButton, DEFAULT_SETTINGS.showCloseButton);
   assert.equal(normalized.showGroupHeaders, DEFAULT_SETTINGS.showGroupHeaders);
+  assert.equal(normalized.showDragStatusChip, DEFAULT_SETTINGS.showDragStatusChip);
   assert.equal(normalized.shortcutHintsEnabled, DEFAULT_SETTINGS.shortcutHintsEnabled);
   assert.equal(normalized.confirmCloseSubtree, DEFAULT_SETTINGS.confirmCloseSubtree);
   assert.equal(normalized.confirmCloseBatch, DEFAULT_SETTINGS.confirmCloseBatch);

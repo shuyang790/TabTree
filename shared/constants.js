@@ -22,6 +22,7 @@ export const DEFAULT_SETTINGS = {
   showFavicons: true,
   showCloseButton: true,
   showGroupHeaders: true,
+  showDragStatusChip: false,
   shortcutHintsEnabled: true,
   confirmCloseSubtree: true,
   confirmCloseBatch: true

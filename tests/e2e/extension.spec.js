@@ -2207,6 +2207,53 @@ test.describe("TabTree extension", () => {
     await target.close().catch(() => {});
   });
 
+  test("drag status chip is hidden by default and appears when enabled", async ({ context, sidePanelPage }) => {
+    const source = await createTitledTab(context, "Drag Chip Source");
+    const target = await createTitledTab(context, "Drag Chip Target");
+
+    const sourceRow = rowByTitle(sidePanelPage, "Drag Chip Source");
+    const targetRow = rowByTitle(sidePanelPage, "Drag Chip Target");
+    await expect(sourceRow).toBeVisible();
+    await expect(targetRow).toBeVisible();
+
+    const dragOverTarget = async () => {
+      const sourceBox = await sourceRow.boundingBox();
+      const targetBox = await targetRow.boundingBox();
+      expect(sourceBox).toBeTruthy();
+      expect(targetBox).toBeTruthy();
+
+      const sourceX = Math.floor(sourceBox.x + Math.max(12, sourceBox.width / 2));
+      const sourceY = Math.floor(sourceBox.y + Math.max(8, sourceBox.height / 2));
+      const targetX = Math.floor(targetBox.x + Math.max(12, targetBox.width / 2));
+      const targetY = Math.floor(targetBox.y + 3);
+
+      await sidePanelPage.mouse.move(sourceX, sourceY);
+      await sidePanelPage.mouse.down();
+      await sidePanelPage.mouse.move(targetX, targetY, { steps: 10 });
+    };
+
+    try {
+      await dragOverTarget();
+      await expect(sidePanelPage.locator("#drag-status-chip")).toBeHidden();
+      await sidePanelPage.mouse.up();
+
+      await sidePanelPage.evaluate(async () => {
+        await chrome.runtime.sendMessage({
+          type: "PATCH_SETTINGS",
+          payload: { settingsPatch: { showDragStatusChip: true } }
+        });
+      });
+
+      await dragOverTarget();
+      await expect(sidePanelPage.locator("#drag-status-chip")).toBeVisible();
+      await sidePanelPage.mouse.up();
+    } finally {
+      await sidePanelPage.mouse.up().catch(() => {});
+      await source.close().catch(() => {});
+      await target.close().catch(() => {});
+    }
+  });
+
   test("dragging an unselected row adopts dragged selection for quick back-and-forth moves", async ({ context, sidePanelPage }) => {
     const staleA = await createTitledTab(context, "Drag Select Stale A");
     const staleB = await createTitledTab(context, "Drag Select Stale B");

@@ -149,6 +149,9 @@
   "showGroupSubtrees": {
     "message": "Show group subtrees"
   },
+  "showDragStatusChip": {
+    "message": "Show drag status text"
+  },
   "showShortcutHints": {
     "message": "Show shortcut hints"
   },
