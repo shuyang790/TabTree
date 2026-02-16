@@ -29,6 +29,12 @@
   "searchPlaceholder": {
     "message": "按标题或 URL 搜索标签页"
   },
+  "searchAriaLabel": {
+    "message": "搜索标签页"
+  },
+  "searchDropHint": {
+    "message": "搜索标签页后可拖放到这里移动到顶层"
+  },
   "addChildTab": {
     "message": "添加子标签页"
   },

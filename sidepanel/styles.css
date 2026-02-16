@@ -93,6 +93,7 @@ button:focus-visible {
 .search-wrap {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: var(--topbar-pad-y) 12px;
@@ -110,6 +111,7 @@ button:focus-visible {
 .search-wrap[data-drop-focused="true"] {
   background: color-mix(in srgb, var(--accent), transparent 82%);
   border-bottom-color: color-mix(in srgb, var(--accent), transparent 20%);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent), transparent 15%);
 }
 
 #search {
@@ -159,17 +161,37 @@ button:focus-visible {
 }
 
 .search-drop-hint {
-  position: absolute;
-  right: 90px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: var(--bg-elev);
-  border: 1px dashed color-mix(in srgb, var(--accent), transparent 20%);
-  border-radius: 999px;
+  flex: 1 0 100%;
+  background: color-mix(in srgb, var(--accent), transparent 95%);
+  border: 1px dashed color-mix(in srgb, var(--accent), transparent 42%);
+  border-radius: calc(var(--radius) - 2px);
   color: var(--text-muted);
   font-size: 0.72rem;
-  padding: 2px 8px;
+  padding: 4px 8px;
   pointer-events: none;
+}
+
+.search-drop-hint[data-drop-active="true"] {
+  border-color: color-mix(in srgb, var(--accent), transparent 20%);
+}
+
+.search-drop-hint[data-drop-focused="true"] {
+  border-width: 2px;
+  border-style: solid;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .tree-root {
@@ -1155,7 +1177,4 @@ button:focus-visible {
     z-index: 20;
   }
 
-  .search-drop-hint {
-    display: none;
-  }
 }

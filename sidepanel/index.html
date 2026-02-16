@@ -9,11 +9,15 @@
   <body>
     <div class="app-shell">
       <div id="search-wrap" class="search-wrap" data-drop-active="false">
+        <label class="sr-only" for="search" data-i18n="searchAriaLabel">Search tabs</label>
         <input
           id="search"
           type="search"
           placeholder="Search tabs by title or URL"
+          aria-label="Search tabs"
+          aria-describedby="search-drop-hint"
           data-i18n-placeholder="searchPlaceholder"
+          data-i18n-aria-label="searchAriaLabel"
         />
         <div class="search-actions">
           <button
@@ -46,8 +50,14 @@
             </svg>
           </button>
         </div>
-        <div id="search-drop-hint" class="search-drop-hint" hidden data-i18n="dropToTopLevelHint">
-          Drop here to move to top-level
+        <div
+          id="search-drop-hint"
+          class="search-drop-hint"
+          data-drop-active="false"
+          data-drop-focused="false"
+          data-i18n="searchDropHint"
+        >
+          Search tabs and drag here to move to top-level
         </div>
       </div>
 

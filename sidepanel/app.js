@@ -1913,7 +1913,8 @@ function updateSearchDropAffordance() {
   const focused = active && state.dragTarget.kind === "root" && state.dragTarget.valid;
   dom.searchWrap.dataset.dropActive = active ? "true" : "false";
   dom.searchWrap.dataset.dropFocused = focused ? "true" : "false";
-  dom.searchDropHint.hidden = !active;
+  dom.searchDropHint.dataset.dropActive = active ? "true" : "false";
+  dom.searchDropHint.dataset.dropFocused = focused ? "true" : "false";
 
   if (dom.bottomRootDropZone) {
     const enabled = !!state.settings?.showBottomRootDropZone;

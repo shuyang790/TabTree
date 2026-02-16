@@ -29,6 +29,12 @@
   "searchPlaceholder": {
     "message": "Search tabs by title or URL"
   },
+  "searchAriaLabel": {
+    "message": "Search tabs"
+  },
+  "searchDropHint": {
+    "message": "Search tabs and drag here to move to top-level"
+  },
   "addChildTab": {
     "message": "Add child tab"
   },

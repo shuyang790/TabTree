@@ -29,6 +29,12 @@
   "searchPlaceholder": {
     "message": "依標題或 URL 搜尋分頁"
   },
+  "searchAriaLabel": {
+    "message": "搜尋分頁"
+  },
+  "searchDropHint": {
+    "message": "搜尋分頁後可拖放到這裡移到頂層"
+  },
   "addChildTab": {
     "message": "新增子分頁"
   },
