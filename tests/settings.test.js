@@ -102,3 +102,13 @@ test("theme preset key lists share a single preset corpus and mode-specific base
   assert.equal(THEME_PRESET_DARK_KEYS[0], "base-dark");
   assert.deepEqual(lightNonBase, darkNonBase);
 });
+
+test("normalizeSettings accepts expanded preset keys", () => {
+  const normalized = normalizeSettings({
+    themePresetLight: "solarized-light",
+    themePresetDark: "dracula-dark"
+  });
+
+  assert.equal(normalized.themePresetLight, "solarized-light");
+  assert.equal(normalized.themePresetDark, "dracula-dark");
+});

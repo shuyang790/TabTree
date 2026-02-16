@@ -23,6 +23,12 @@ test("theme selectors include all expected families and variants in both dropdow
     "tokyonight-night",
     "kanagawa-lotus",
     "kanagawa-wave",
+    "nord-light",
+    "nord-dark",
+    "solarized-light",
+    "solarized-dark",
+    "dracula-light",
+    "dracula-dark",
     "one-light",
     "one-dark"
   ];
@@ -50,6 +56,12 @@ test("theme labels include family name and avoid bare Light/Dark labels", () => 
     "Tokyo Night — Night",
     "Kanagawa — Lotus",
     "Kanagawa — Wave",
+    "Nord — Light",
+    "Nord — Dark",
+    "Solarized — Light",
+    "Solarized — Dark",
+    "Dracula — Light",
+    "Dracula — Dark",
     "One — Light",
     "One — Dark"
   ];

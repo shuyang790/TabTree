@@ -43,6 +43,12 @@ const SHARED_THEME_PRESET_KEYS = [
   "tokyonight-night",
   "kanagawa-lotus",
   "kanagawa-wave",
+  "nord-light",
+  "nord-dark",
+  "solarized-light",
+  "solarized-dark",
+  "dracula-light",
+  "dracula-dark",
   "one-light",
   "one-dark"
 ];
