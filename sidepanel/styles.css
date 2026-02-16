@@ -209,25 +209,6 @@ button:focus-visible {
   pointer-events: none;
 }
 
-.bottom-root-drop-zone {
-  margin: 0 8px 8px;
-  min-height: 28px;
-  border: 1px dashed color-mix(in srgb, var(--accent), transparent 40%);
-  border-radius: calc(var(--radius) - 1px);
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--accent), transparent 95%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.76rem;
-}
-
-.bottom-root-drop-zone[data-drop-focused="true"] {
-  border-color: color-mix(in srgb, var(--accent), transparent 10%);
-  background: color-mix(in srgb, var(--accent), transparent 88%);
-  color: var(--text);
-}
-
 .drag-status-chip {
   position: absolute;
   top: 52px;

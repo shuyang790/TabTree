@@ -97,6 +97,7 @@ const SETTINGS_SECTION_KEYS = {
   behavior: [
     "dragExpandOnHover",
     "dragExpandDelayMs",
+    // Deprecated no-op kept for compatibility with older synced settings snapshots.
     "showBottomRootDropZone",
     "dragInsideDwellMs",
     "dragEdgeRatio",
@@ -252,7 +253,6 @@ const dom = {
   confirmCancel: document.getElementById("confirm-cancel"),
   confirmOk: document.getElementById("confirm-ok"),
   contextMenu: document.getElementById("context-menu"),
-  bottomRootDropZone: document.getElementById("bottom-root-drop-zone"),
   dragStatusChip: document.getElementById("drag-status-chip"),
   dragAnchorChip: document.getElementById("drag-anchor-chip")
 };
@@ -1707,13 +1707,6 @@ function updateSearchDropAffordance() {
   dom.searchWrap.dataset.dropFocused = focused ? "true" : "false";
   dom.searchDropHint.dataset.dropActive = active ? "true" : "false";
   dom.searchDropHint.dataset.dropFocused = focused ? "true" : "false";
-
-  if (dom.bottomRootDropZone) {
-    const enabled = !!state.settings?.showBottomRootDropZone;
-    const shouldShow = enabled;
-    dom.bottomRootDropZone.hidden = !shouldShow;
-    dom.bottomRootDropZone.dataset.dropFocused = focused ? "true" : "false";
-  }
 
   updateDragStatusChip();
 }
@@ -3400,47 +3393,6 @@ function bindEvents() {
 
   dom.searchWrap.addEventListener("drop", async (event) => {
     if (!state.draggingTabIds.length || Number.isInteger(state.draggingGroupId)) {
-      return;
-    }
-    event.preventDefault();
-    stopAutoScroll();
-    const tree = currentWindowTree();
-    if (!tree) {
-      return;
-    }
-    await dropToRoot(tree);
-    clearDropClasses();
-  });
-
-  dom.bottomRootDropZone?.addEventListener("dragover", (event) => {
-    if (!state.draggingTabIds.length || Number.isInteger(state.draggingGroupId)) {
-      return;
-    }
-    if (!state.settings?.showBottomRootDropZone) {
-      return;
-    }
-    event.preventDefault();
-    setDragTarget({
-      kind: "root",
-      position: "inside",
-      valid: true
-    }, dom.bottomRootDropZone);
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "move";
-    }
-  });
-
-  dom.bottomRootDropZone?.addEventListener("dragleave", (event) => {
-    if (!dom.bottomRootDropZone.contains(event.relatedTarget) && state.dragTarget.kind === "root") {
-      setDragTarget(null, null);
-    }
-  });
-
-  dom.bottomRootDropZone?.addEventListener("drop", async (event) => {
-    if (!state.draggingTabIds.length || Number.isInteger(state.draggingGroupId)) {
-      return;
-    }
-    if (!state.settings?.showBottomRootDropZone) {
       return;
     }
     event.preventDefault();

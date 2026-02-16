@@ -16,6 +16,7 @@ export const DEFAULT_SETTINGS = {
   radiusPx: 8,
   dragExpandOnHover: true,
   dragExpandDelayMs: 450,
+  // Deprecated no-op; kept for backward compatibility with synced settings.
   showBottomRootDropZone: true,
   dragInsideDwellMs: 220,
   dragEdgeRatio: 0.24,

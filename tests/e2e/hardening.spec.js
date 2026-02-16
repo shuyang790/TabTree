@@ -1,9 +1,10 @@
 import { expect, test } from "./extension.fixture.js";
 
 test.describe("Hardening regressions", () => {
-  test("search exposes explicit accessibility attributes and persistent root-drop guidance", async ({ sidePanelPage }) => {
+  test("search exposes explicit accessibility attributes and is the only root-drop guidance", async ({ sidePanelPage }) => {
     const search = sidePanelPage.locator("#search");
     const dropHint = sidePanelPage.locator("#search-drop-hint");
+    const bottomDropZone = sidePanelPage.locator("#bottom-root-drop-zone");
 
     await expect(search).toBeVisible();
     await expect(search).toHaveAttribute("aria-label", /search/i);
@@ -11,6 +12,7 @@ test.describe("Hardening regressions", () => {
     await expect(dropHint).toBeVisible();
     await expect(dropHint).toContainText(/drag/i);
     await expect(dropHint).toHaveAttribute("data-drop-active", "false");
+    await expect(bottomDropZone).toHaveCount(0);
   });
 
   test("unknown tree action returns a structured error response", async ({ sidePanelPage }) => {

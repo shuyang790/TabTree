@@ -14,3 +14,7 @@ test("search drop hint remains visible and localized", () => {
   assert.match(html, /<div[^>]*id="search-drop-hint"[^>]*data-i18n="searchDropHint"/);
   assert.equal(/<div[^>]*id="search-drop-hint"[^>]*hidden/.test(html), false);
 });
+
+test("bottom root drop zone markup is removed", () => {
+  assert.equal(/id="bottom-root-drop-zone"/.test(html), false);
+});
