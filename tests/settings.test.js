@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { DEFAULT_SETTINGS } from "../shared/constants.js";
+import {
+  DEFAULT_SETTINGS,
+  THEME_PRESET_DARK_KEYS,
+  THEME_PRESET_LIGHT_KEYS
+} from "../shared/constants.js";
 import { normalizeSettings } from "../shared/treeStore.js";
 
 test("normalizeSettings keeps explicit light/dark presets and strips legacy keys", () => {
@@ -88,4 +92,13 @@ test("normalizeSettings clamps ranges and rejects invalid enum/color/boolean val
   assert.equal(normalized.shortcutHintsEnabled, DEFAULT_SETTINGS.shortcutHintsEnabled);
   assert.equal(normalized.confirmCloseSubtree, DEFAULT_SETTINGS.confirmCloseSubtree);
   assert.equal(normalized.confirmCloseBatch, DEFAULT_SETTINGS.confirmCloseBatch);
+});
+
+test("theme preset key lists share a single preset corpus and mode-specific base presets", () => {
+  const lightNonBase = THEME_PRESET_LIGHT_KEYS.filter((key) => key !== "base-light").sort();
+  const darkNonBase = THEME_PRESET_DARK_KEYS.filter((key) => key !== "base-dark").sort();
+
+  assert.equal(THEME_PRESET_LIGHT_KEYS[0], "base-light");
+  assert.equal(THEME_PRESET_DARK_KEYS[0], "base-dark");
+  assert.deepEqual(lightNonBase, darkNonBase);
 });

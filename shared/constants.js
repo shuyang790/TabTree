@@ -30,8 +30,7 @@ export const DEFAULT_SETTINGS = {
 
 export const DENSITY_OPTIONS = ["compact", "comfortable", "cozy", "spacious"];
 
-export const THEME_PRESET_LIGHT_KEYS = [
-  "base-light",
+const SHARED_THEME_PRESET_KEYS = [
   "catppuccin-latte",
   "catppuccin-frappe",
   "catppuccin-macchiato",
@@ -48,22 +47,14 @@ export const THEME_PRESET_LIGHT_KEYS = [
   "one-dark"
 ];
 
+export const THEME_PRESET_LIGHT_KEYS = [
+  "base-light",
+  ...SHARED_THEME_PRESET_KEYS
+];
+
 export const THEME_PRESET_DARK_KEYS = [
   "base-dark",
-  "catppuccin-latte",
-  "catppuccin-frappe",
-  "catppuccin-macchiato",
-  "catppuccin-mocha",
-  "everforest-light",
-  "everforest-dark",
-  "gruvbox-light",
-  "gruvbox-dark",
-  "tokyonight-day",
-  "tokyonight-night",
-  "kanagawa-lotus",
-  "kanagawa-wave",
-  "one-light",
-  "one-dark"
+  ...SHARED_THEME_PRESET_KEYS
 ];
 
 export const SETTINGS_NUMERIC_RANGES = {
