@@ -101,6 +101,9 @@
   "resetBehavior": {
     "message": "重置行为"
   },
+  "advancedBehavior": {
+    "message": "高级行为"
+  },
   "settingsSafetyTitle": {
     "message": "安全"
   },

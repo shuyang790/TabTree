@@ -101,6 +101,9 @@
   "resetBehavior": {
     "message": "Reset Behavior"
   },
+  "advancedBehavior": {
+    "message": "Advanced behavior"
+  },
   "settingsSafetyTitle": {
     "message": "Safety"
   },
