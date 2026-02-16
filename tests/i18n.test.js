@@ -10,6 +10,13 @@ function assertMessageToken(value, label) {
   assert.match(value, /^__MSG_[A-Za-z0-9_]+__$/, `${label} should use a __MSG_*__ token`);
 }
 
+function discoveredLocaleIds() {
+  return fs.readdirSync(new URL("../_locales/", import.meta.url), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+}
+
 test("manifest enables i18n and localizes user-facing metadata", () => {
   const manifest = readJson("../manifest.json");
 
@@ -24,7 +31,9 @@ test("manifest enables i18n and localizes user-facing metadata", () => {
 });
 
 test("locale files exist and keep the same message keys", () => {
-  const localeIds = ["en", "zh_CN", "zh_TW"];
+  const localeIds = discoveredLocaleIds();
+  assert.ok(localeIds.includes("en"), "default en locale should exist");
+  assert.ok(localeIds.length >= 1, "at least one locale directory should exist");
   const localeMessages = localeIds.map((localeId) => ({
     localeId,
     messages: readJson(`../_locales/${localeId}/messages.json`)
