@@ -1777,6 +1777,10 @@ chrome.runtime.onStartup.addListener(async () => {
   await ensureInitialized();
 });
 
+chrome.runtime.onSuspend.addListener(() => {
+  void persistCoordinator.flushNow();
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
     await ensureInitialized();

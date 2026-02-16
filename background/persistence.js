@@ -27,6 +27,14 @@ export function createPersistCoordinator({
     }, delayMs);
   }
 
+  async function flushNow() {
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    await flushPending();
+  }
+
   async function flushPending() {
     if (flushInFlight) {
       scheduleFlush(flushDebounceMs);
@@ -109,6 +117,7 @@ export function createPersistCoordinator({
 
   return {
     dispose,
+    flushNow,
     flushSoon: () => scheduleFlush(flushDebounceMs),
     forgetWindow,
     markSnapshotDirty,

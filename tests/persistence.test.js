@@ -122,3 +122,34 @@ test("persist coordinator throttles snapshot writes but still flushes window tre
 
   coordinator.dispose();
 });
+
+test("persist coordinator flushNow bypasses debounce and clears pending timer", async () => {
+  const windowsState = {
+    1: { windowId: 1, nodes: {}, rootNodeIds: [] }
+  };
+  let windowWrites = 0;
+  let snapshotWrites = 0;
+
+  const coordinator = createPersistCoordinator({
+    saveWindowTree: async () => {
+      windowWrites += 1;
+    },
+    saveSyncSnapshot: async () => {
+      snapshotWrites += 1;
+    },
+    getWindowsState: () => windowsState,
+    flushDebounceMs: 1000,
+    snapshotMinIntervalMs: 0
+  });
+
+  coordinator.markWindowDirty(1);
+  await coordinator.flushNow();
+  assert.equal(windowWrites, 1);
+  assert.equal(snapshotWrites, 1);
+
+  await sleep(60);
+  assert.equal(windowWrites, 1);
+  assert.equal(snapshotWrites, 1);
+
+  coordinator.dispose();
+});
