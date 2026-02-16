@@ -56,4 +56,80 @@ test.describe("Hardening regressions", () => {
       });
     }).toBe(true);
   });
+
+  test("new theme families are available in both selectors and persist to settings", async ({ sidePanelPage }) => {
+    const lightSelect = sidePanelPage.locator('select[name="themePresetLight"]');
+    const darkSelect = sidePanelPage.locator('select[name="themePresetDark"]');
+    const openSettings = sidePanelPage.locator("#open-settings");
+
+    await openSettings.click();
+    await expect(sidePanelPage.locator("#settings-panel")).toBeVisible();
+    await expect(lightSelect).toBeVisible();
+    await expect(darkSelect).toBeVisible();
+
+    const expectedPresets = [
+      "nord-light",
+      "nord-dark",
+      "solarized-light",
+      "solarized-dark",
+      "dracula-light",
+      "dracula-dark"
+    ];
+
+    for (const preset of expectedPresets) {
+      await expect(lightSelect.locator(`option[value=\"${preset}\"]`)).toHaveCount(1);
+      await expect(darkSelect.locator(`option[value=\"${preset}\"]`)).toHaveCount(1);
+    }
+
+    await lightSelect.selectOption("solarized-light");
+    await darkSelect.selectOption("dracula-dark");
+
+    await expect.poll(async () => {
+      return sidePanelPage.evaluate(async () => {
+        const response = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+        return {
+          light: response?.payload?.settings?.themePresetLight ?? null,
+          dark: response?.payload?.settings?.themePresetDark ?? null
+        };
+      });
+    }).toEqual({
+      light: "solarized-light",
+      dark: "dracula-dark"
+    });
+  });
+
+  test("expanded locale catalogs are readable and keep key parity", async ({ sidePanelPage }) => {
+    const summary = await sidePanelPage.evaluate(async () => {
+      const localeIds = ["en", "zh_CN", "zh_TW", "es", "ja", "de", "fr"];
+      const catalogs = {};
+      for (const localeId of localeIds) {
+        const url = chrome.runtime.getURL(`_locales/${localeId}/messages.json`);
+        const response = await fetch(url);
+        if (!response.ok) {
+          catalogs[localeId] = { ok: false, keyCount: 0, nonEmptyCount: 0 };
+          continue;
+        }
+        const json = await response.json();
+        const keys = Object.keys(json);
+        const nonEmptyCount = keys.filter((key) => typeof json[key]?.message === "string" && json[key].message.trim().length > 0).length;
+        catalogs[localeId] = {
+          ok: true,
+          keyCount: keys.length,
+          nonEmptyCount
+        };
+      }
+
+      const baseCount = catalogs.en?.keyCount ?? 0;
+      const parity = Object.fromEntries(localeIds.map((id) => [id, catalogs[id]?.keyCount === baseCount]));
+      return { catalogs, parity, baseCount };
+    });
+
+    expect(summary.baseCount).toBeGreaterThan(0);
+    for (const localeId of ["en", "zh_CN", "zh_TW", "es", "ja", "de", "fr"]) {
+      expect(summary.catalogs[localeId]?.ok).toBe(true);
+      expect(summary.catalogs[localeId]?.keyCount).toBe(summary.baseCount);
+      expect(summary.catalogs[localeId]?.nonEmptyCount).toBe(summary.baseCount);
+      expect(summary.parity[localeId]).toBe(true);
+    }
+  });
 });
