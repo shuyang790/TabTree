@@ -6,6 +6,7 @@ import {
   buildTreeFromTabs,
   createEmptyWindowTree,
   ensureValidTree,
+  getDescendantNodeIds,
   inferTreeFromSyncSnapshot,
   moveNode,
   normalizeGroupedTabParents,
@@ -16,6 +17,7 @@ import {
   removeSubtree,
   setActiveTab,
   sortTreeByIndex,
+  toggleNodeCollapsed,
   upsertTabNode
 } from "../shared/treeModel.js";
 
@@ -93,6 +95,64 @@ test("setActiveTab marks one active tab", () => {
   assert.equal(tree.selectedTabId, 2);
   assert.equal(tree.nodes[nodeIdFromTabId(2)].active, true);
   assert.equal(tree.nodes[nodeIdFromTabId(1)].active, false);
+});
+
+test("setActiveTab ignores unknown tab ids", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0, active: true }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1 }));
+
+  const selectedBefore = tree.selectedTabId;
+  const firstActiveBefore = tree.nodes[nodeIdFromTabId(1)].active;
+  const secondActiveBefore = tree.nodes[nodeIdFromTabId(2)].active;
+
+  const next = setActiveTab(tree, 99);
+
+  assert.equal(next.selectedTabId, selectedBefore);
+  assert.equal(next.nodes[nodeIdFromTabId(1)].active, firstActiveBefore);
+  assert.equal(next.nodes[nodeIdFromTabId(2)].active, secondActiveBefore);
+});
+
+test("toggleNodeCollapsed flips only the target node collapse state", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0 }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1 }));
+  tree = moveNode(tree, nodeIdFromTabId(2), nodeIdFromTabId(1));
+
+  tree.nodes[nodeIdFromTabId(1)].updatedAt = 111;
+  tree.nodes[nodeIdFromTabId(2)].updatedAt = 222;
+
+  const next = toggleNodeCollapsed(tree, nodeIdFromTabId(2));
+
+  assert.equal(next.nodes[nodeIdFromTabId(2)].collapsed, true);
+  assert.equal(next.nodes[nodeIdFromTabId(2)].updatedAt >= 222, true);
+  assert.equal(next.nodes[nodeIdFromTabId(1)].collapsed, false);
+  assert.equal(next.nodes[nodeIdFromTabId(1)].updatedAt, 111);
+});
+
+test("getDescendantNodeIds returns descendants in stack depth-first order", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0 }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1 }));
+  tree = upsertTabNode(tree, tab({ id: 3, index: 2 }));
+  tree = upsertTabNode(tree, tab({ id: 4, index: 3 }));
+  tree = upsertTabNode(tree, tab({ id: 5, index: 4 }));
+
+  tree = moveNode(tree, nodeIdFromTabId(2), nodeIdFromTabId(1));
+  tree = moveNode(tree, nodeIdFromTabId(3), nodeIdFromTabId(2));
+  tree = moveNode(tree, nodeIdFromTabId(4), nodeIdFromTabId(1));
+  tree = moveNode(tree, nodeIdFromTabId(5), nodeIdFromTabId(4));
+
+  const beforeChildren = [...tree.nodes[nodeIdFromTabId(1)].childNodeIds];
+  const descendants = getDescendantNodeIds(tree, nodeIdFromTabId(1));
+
+  assert.deepEqual(descendants, [
+    nodeIdFromTabId(4),
+    nodeIdFromTabId(5),
+    nodeIdFromTabId(2),
+    nodeIdFromTabId(3)
+  ]);
+  assert.deepEqual(tree.nodes[nodeIdFromTabId(1)].childNodeIds, beforeChildren);
 });
 
 test("upsertTabNode reparents existing node when parentNodeId is provided", () => {

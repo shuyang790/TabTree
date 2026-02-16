@@ -222,6 +222,9 @@ export function upsertTabNode(tree, tab, options = {}) {
 }
 
 export function setActiveTab(tree, tabId) {
+  if (!hasNodeForTabId(tree, tabId)) {
+    return tree;
+  }
   const next = cloneTree(tree);
   next.selectedTabId = tabId;
   for (const node of Object.values(next.nodes)) {
