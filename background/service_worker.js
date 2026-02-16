@@ -1,4 +1,4 @@
-import { MESSAGE_TYPES, TREE_ACTIONS } from "../shared/constants.js";
+import { isTreeActionType, MESSAGE_TYPES, TREE_ACTIONS } from "../shared/constants.js";
 import {
   buildTreeFromTabs,
   createEmptyWindowTree,
@@ -1519,7 +1519,10 @@ async function setGroupColor(groupId, color, windowIdHint = null, tabIds = []) {
 }
 
 async function handleTreeAction(payload) {
-  const { type } = payload;
+  const { type } = payload || {};
+  if (!isTreeActionType(type)) {
+    throw new Error(`Unsupported tree action type: ${String(type)}`);
+  }
   if (type === TREE_ACTIONS.ADD_CHILD_TAB) {
     await addChildTab(payload.parentTabId);
     return null;
@@ -1670,7 +1673,7 @@ async function handleTreeAction(payload) {
     return null;
   }
 
-  return null;
+  throw new Error(`Tree action handler missing for type: ${type}`);
 }
 
 async function promoteActiveTab() {

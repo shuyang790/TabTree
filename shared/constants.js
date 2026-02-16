@@ -102,3 +102,9 @@ export const TREE_ACTIONS = {
   RENAME_GROUP: "RENAME_GROUP",
   SET_GROUP_COLOR: "SET_GROUP_COLOR"
 };
+
+const TREE_ACTION_VALUES = new Set(Object.values(TREE_ACTIONS));
+
+export function isTreeActionType(type) {
+  return typeof type === "string" && TREE_ACTION_VALUES.has(type);
+}
