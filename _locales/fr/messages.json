@@ -3,259 +3,259 @@
     "message": "TabTree"
   },
   "extDescription": {
-    "message": "Tree-style vertical tabs in Chrome side panel."
+    "message": "Onglets verticaux en arborescence dans le panneau lateral de Chrome."
   },
   "actionDefaultTitle": {
     "message": "TabTree"
   },
   "cmdAddChildDescription": {
-    "message": "Add a child tab under the active tab"
+    "message": "Ajouter un onglet enfant sous l onglet actif"
   },
   "cmdFocusPanelDescription": {
-    "message": "Focus TabTree side panel"
+    "message": "Mettre le panneau lateral TabTree au focus"
   },
   "cmdFocusSearchDescription": {
-    "message": "Focus TabTree search"
+    "message": "Mettre la recherche TabTree au focus"
   },
   "cmdPromoteTabLevelDescription": {
-    "message": "Promote active tab one tree level"
+    "message": "Remonter l onglet actif d un niveau"
   },
   "cmdToggleCollapseDescription": {
-    "message": "Toggle collapse for active tab node"
+    "message": "Basculer le repliement du noeud d onglet actif"
   },
   "cmdMoveUnderPreviousRootSiblingDescription": {
-    "message": "Reparent active tab under previous root sibling"
+    "message": "Replacer l onglet actif sous le frere racine precedent"
   },
   "searchPlaceholder": {
-    "message": "Search tabs by title or URL"
+    "message": "Rechercher des onglets par titre ou URL"
   },
   "searchAriaLabel": {
-    "message": "Search tabs"
+    "message": "Rechercher des onglets"
   },
   "searchDropHint": {
-    "message": "Search tabs and drag here to move to top-level"
+    "message": "Recherchez des onglets puis glissez ici pour les deplacer au niveau racine"
   },
   "addChildTab": {
-    "message": "Add child tab"
+    "message": "Ajouter un onglet enfant"
   },
   "settings": {
-    "message": "Settings"
+    "message": "Parametres"
   },
   "dropToTopLevelHint": {
-    "message": "Drop here to move to top-level"
+    "message": "Deposez ici pour deplacer au niveau racine"
   },
   "dropToTopLevelBottomHint": {
-    "message": "Drop here to move to top-level"
+    "message": "Deposez ici pour deplacer au niveau racine"
   },
   "dropStatusValid": {
-    "message": "valid"
+    "message": "valide"
   },
   "dropBlockedGeneric": {
-    "message": "blocked"
+    "message": "bloque"
   },
   "dropBlockedCycle": {
     "message": "cycle"
   },
   "dropBlockedPinnedMismatch": {
-    "message": "pinned mismatch"
+    "message": "epingle incompatible"
   },
   "dropBlockedSelection": {
-    "message": "selection conflict"
+    "message": "conflit de selection"
   },
   "dropBlockedGroupBoundary": {
-    "message": "group boundary"
+    "message": "limite de groupe"
   },
   "dropBlockedSameGroup": {
-    "message": "same group"
+    "message": "meme groupe"
   },
   "moveCompleteUndo": {
-    "message": "Move complete"
+    "message": "Deplacement termine"
   },
   "undoAction": {
-    "message": "Undo"
+    "message": "Annuler"
   },
   "tabTreeAriaLabel": {
-    "message": "Tab tree"
+    "message": "Arborescence des onglets"
   },
   "settingsPanelTitle": {
-    "message": "Appearance & Behavior"
+    "message": "Apparence et comportement"
   },
   "settingsAppearanceTitle": {
-    "message": "Appearance"
+    "message": "Apparence"
   },
   "settingsAppearanceDescription": {
-    "message": "Theme, spacing, and typography."
+    "message": "Theme, espacement et typographie."
   },
   "resetAppearance": {
-    "message": "Reset Appearance"
+    "message": "Reinitialiser l apparence"
   },
   "advancedAppearance": {
-    "message": "Advanced appearance"
+    "message": "Apparence avancee"
   },
   "settingsBehaviorTitle": {
-    "message": "Behavior"
+    "message": "Comportement"
   },
   "settingsBehaviorDescription": {
-    "message": "Adjust what is shown and how you interact."
+    "message": "Ajustez ce qui est affiche et la facon d interagir."
   },
   "resetBehavior": {
-    "message": "Reset Behavior"
+    "message": "Reinitialiser le comportement"
   },
   "advancedBehavior": {
-    "message": "Advanced behavior"
+    "message": "Comportement avance"
   },
   "settingsSafetyTitle": {
-    "message": "Safety"
+    "message": "Securite"
   },
   "settingsSafetyDescription": {
-    "message": "Control confirmation prompts before destructive actions."
+    "message": "Controler les confirmations avant les actions destructrices."
   },
   "resetSafety": {
-    "message": "Reset Safety"
+    "message": "Reinitialiser la securite"
   },
   "close": {
-    "message": "Close"
+    "message": "Fermer"
   },
   "lightAppearance": {
-    "message": "Light Appearance"
+    "message": "Apparence claire"
   },
   "darkAppearance": {
-    "message": "Dark Appearance"
+    "message": "Apparence sombre"
   },
   "accentColor": {
-    "message": "Accent Color"
+    "message": "Couleur d accent"
   },
   "density": {
-    "message": "Density"
+    "message": "Densite"
   },
   "densityCompact": {
-    "message": "Compact"
+    "message": "Compacte"
   },
   "densityComfortable": {
-    "message": "Comfortable"
+    "message": "Confortable"
   },
   "densityCozy": {
-    "message": "Cozy"
+    "message": "Douce"
   },
   "densitySpacious": {
-    "message": "Spacious"
+    "message": "Spacieuse"
   },
   "fontScale": {
-    "message": "Font Scale"
+    "message": "Echelle de police"
   },
   "indentWidth": {
-    "message": "Indent Width"
+    "message": "Largeur d indentation"
   },
   "cornerRadius": {
-    "message": "Corner Radius"
+    "message": "Rayon des coins"
   },
   "showFavicons": {
-    "message": "Show favicons"
+    "message": "Afficher les favicons"
   },
   "showCloseButtons": {
-    "message": "Show close buttons"
+    "message": "Afficher les boutons de fermeture"
   },
   "showGroupSubtrees": {
-    "message": "Show group subtrees"
+    "message": "Afficher les sous-arbres de groupe"
   },
   "showDragStatusChip": {
-    "message": "Show drag status text"
+    "message": "Afficher le texte d etat du glisser"
   },
   "showShortcutHints": {
-    "message": "Show shortcut hints"
+    "message": "Afficher les raccourcis"
   },
   "confirmBeforeClosingTree": {
-    "message": "Confirm before closing tree (2+ tabs)"
+    "message": "Confirmer avant de fermer l arbre (2+ onglets)"
   },
   "confirmBeforeClosingBatch": {
-    "message": "Confirm before closing selected tabs (2+ tabs)"
+    "message": "Confirmer avant de fermer les onglets selectionnes (2+ onglets)"
   },
   "closeTabsQuestion": {
-    "message": "Close tabs?"
+    "message": "Fermer les onglets ?"
   },
   "dontAskAgain": {
-    "message": "Don't ask again"
+    "message": "Ne plus demander"
   },
   "cancel": {
-    "message": "Cancel"
+    "message": "Annuler"
   },
   "tabActionsAriaLabel": {
-    "message": "Tab actions"
+    "message": "Actions des onglets"
   },
   "shortcutHintText": {
-    "message": "Use Chrome shortcuts to focus panel/search. In search, use Up/Down to navigate results and Enter to jump."
+    "message": "Utilisez les raccourcis Chrome pour focaliser panneau/recherche. Dans la recherche, utilisez Haut/Bas pour naviguer et Entree pour aller."
   },
   "selectedCount": {
-    "message": "$1 selected"
+    "message": "$1 selectionnes"
   },
   "closeSelectedTabsGeneric": {
-    "message": "Close selected tab(s)"
+    "message": "Fermer les onglets selectionnes"
   },
   "closeSelectedTab": {
-    "message": "Close selected tab"
+    "message": "Fermer l onglet selectionne"
   },
   "closeSelectedTabsMany": {
-    "message": "Close $1 selected tabs"
+    "message": "Fermer $1 onglets selectionnes"
   },
   "addSelectedToNewTabGroup": {
-    "message": "Add selected to new tab group"
+    "message": "Ajouter la selection a un nouveau groupe d onglets"
   },
   "addToNewTabGroup": {
-    "message": "Add to new tab group"
+    "message": "Ajouter a un nouveau groupe d onglets"
   },
   "addToExistingTabGroup": {
-    "message": "Add to existing tab group"
+    "message": "Ajouter a un groupe d onglets existant"
   },
   "moreGroups": {
-    "message": "More groups..."
+    "message": "Plus de groupes..."
   },
   "moveSelectedToTopLevel": {
-    "message": "Move selected to top-level"
+    "message": "Deplacer la selection au niveau racine"
   },
   "toggleCollapse": {
-    "message": "Toggle collapse"
+    "message": "Basculer le repliement"
   },
   "copyUrls": {
-    "message": "Copy URL(s)"
+    "message": "Copier URL(s)"
   },
   "closeTabGroup": {
-    "message": "Close tab group"
+    "message": "Fermer le groupe d onglets"
   },
   "closeTabGroupWithCount": {
-    "message": "Close tab group ($1)"
+    "message": "Fermer le groupe d onglets ($1)"
   },
   "renameGroup": {
-    "message": "Rename group..."
+    "message": "Renommer le groupe..."
   },
   "groupNamePlaceholder": {
-    "message": "Group name"
+    "message": "Nom du groupe"
   },
   "save": {
-    "message": "Save"
+    "message": "Enregistrer"
   },
   "color": {
-    "message": "Color"
+    "message": "Couleur"
   },
   "colorGrey": {
-    "message": "Grey"
+    "message": "Gris"
   },
   "colorBlue": {
-    "message": "Blue"
+    "message": "Bleu"
   },
   "colorRed": {
-    "message": "Red"
+    "message": "Rouge"
   },
   "colorYellow": {
-    "message": "Yellow"
+    "message": "Jaune"
   },
   "colorGreen": {
-    "message": "Green"
+    "message": "Vert"
   },
   "colorPink": {
-    "message": "Pink"
+    "message": "Rose"
   },
   "colorPurple": {
-    "message": "Purple"
+    "message": "Violet"
   },
   "colorCyan": {
     "message": "Cyan"
@@ -264,48 +264,48 @@
     "message": "Orange"
   },
   "setGroupColorTo": {
-    "message": "Set group color to $1"
+    "message": "Definir la couleur du groupe sur $1"
   },
   "confirmCloseMessage": {
-    "message": "This will close $1 tabs. Continue?"
+    "message": "Cela fermera $1 onglets. Continuer ?"
   },
   "pinnedTabTitle": {
-    "message": "Pinned tab"
+    "message": "Onglet epingle"
   },
   "toggleChildren": {
-    "message": "Toggle children"
+    "message": "Basculer les enfants"
   },
   "expandGroup": {
-    "message": "Expand group"
+    "message": "Developper le groupe"
   },
   "collapseGroup": {
-    "message": "Collapse group"
+    "message": "Replier le groupe"
   },
   "untitledTab": {
-    "message": "Untitled tab"
+    "message": "Onglet sans titre"
   },
   "closeSubtree": {
-    "message": "Close subtree"
+    "message": "Fermer le sous-arbre"
   },
   "closeTab": {
-    "message": "Close tab"
+    "message": "Fermer l onglet"
   },
   "noTabsAvailable": {
-    "message": "No tabs available."
+    "message": "Aucun onglet disponible."
   },
   "sectionPinned": {
-    "message": "Pinned"
+    "message": "Epingle"
   },
   "noTabsMatchSearch": {
-    "message": "No tabs match your search."
+    "message": "Aucun onglet ne correspond a votre recherche."
   },
   "noTabsInWindow": {
-    "message": "No tabs in this window."
+    "message": "Aucun onglet dans cette fenetre."
   },
   "groupFallbackName": {
-    "message": "Group $1"
+    "message": "Groupe $1"
   },
   "unnamedGroup": {
-    "message": "Unnamed group"
+    "message": "Groupe sans nom"
   }
 }

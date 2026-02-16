@@ -3,309 +3,309 @@
     "message": "TabTree"
   },
   "extDescription": {
-    "message": "Tree-style vertical tabs in Chrome side panel."
+    "message": "Chrome サイドパネルのツリー型縦タブ。"
   },
   "actionDefaultTitle": {
     "message": "TabTree"
   },
   "cmdAddChildDescription": {
-    "message": "Add a child tab under the active tab"
+    "message": "アクティブタブの下に子タブを追加"
   },
   "cmdFocusPanelDescription": {
-    "message": "Focus TabTree side panel"
+    "message": "TabTree サイドパネルにフォーカス"
   },
   "cmdFocusSearchDescription": {
-    "message": "Focus TabTree search"
+    "message": "TabTree 検索にフォーカス"
   },
   "cmdPromoteTabLevelDescription": {
-    "message": "Promote active tab one tree level"
+    "message": "アクティブタブを1階層上へ移動"
   },
   "cmdToggleCollapseDescription": {
-    "message": "Toggle collapse for active tab node"
+    "message": "アクティブタブノードの折りたたみを切り替え"
   },
   "cmdMoveUnderPreviousRootSiblingDescription": {
-    "message": "Reparent active tab under previous root sibling"
+    "message": "アクティブタブを前のルート兄弟の配下へ再配置"
   },
   "searchPlaceholder": {
-    "message": "Search tabs by title or URL"
+    "message": "タイトルまたは URL でタブを検索"
   },
   "searchAriaLabel": {
-    "message": "Search tabs"
+    "message": "タブを検索"
   },
   "searchDropHint": {
-    "message": "Search tabs and drag here to move to top-level"
+    "message": "タブを検索し、ここにドラッグしてトップレベルへ移動"
   },
   "addChildTab": {
-    "message": "Add child tab"
+    "message": "子タブを追加"
   },
   "settings": {
-    "message": "Settings"
+    "message": "設定"
   },
   "dropToTopLevelHint": {
-    "message": "Drop here to move to top-level"
+    "message": "ここにドロップしてトップレベルへ移動"
   },
   "dropToTopLevelBottomHint": {
-    "message": "Drop here to move to top-level"
+    "message": "ここにドロップしてトップレベルへ移動"
   },
   "dropStatusValid": {
-    "message": "valid"
+    "message": "有効"
   },
   "dropBlockedGeneric": {
-    "message": "blocked"
+    "message": "不可"
   },
   "dropBlockedCycle": {
-    "message": "cycle"
+    "message": "循環"
   },
   "dropBlockedPinnedMismatch": {
-    "message": "pinned mismatch"
+    "message": "固定状態の不一致"
   },
   "dropBlockedSelection": {
-    "message": "selection conflict"
+    "message": "選択の競合"
   },
   "dropBlockedGroupBoundary": {
-    "message": "group boundary"
+    "message": "グループ境界"
   },
   "dropBlockedSameGroup": {
-    "message": "same group"
+    "message": "同一グループ"
   },
   "moveCompleteUndo": {
-    "message": "Move complete"
+    "message": "移動が完了しました"
   },
   "undoAction": {
-    "message": "Undo"
+    "message": "元に戻す"
   },
   "tabTreeAriaLabel": {
-    "message": "Tab tree"
+    "message": "タブツリー"
   },
   "settingsPanelTitle": {
-    "message": "Appearance & Behavior"
+    "message": "外観と動作"
   },
   "settingsAppearanceTitle": {
-    "message": "Appearance"
+    "message": "外観"
   },
   "settingsAppearanceDescription": {
-    "message": "Theme, spacing, and typography."
+    "message": "テーマ、間隔、タイポグラフィ。"
   },
   "resetAppearance": {
-    "message": "Reset Appearance"
+    "message": "外観をリセット"
   },
   "advancedAppearance": {
-    "message": "Advanced appearance"
+    "message": "外観の詳細"
   },
   "settingsBehaviorTitle": {
-    "message": "Behavior"
+    "message": "動作"
   },
   "settingsBehaviorDescription": {
-    "message": "Adjust what is shown and how you interact."
+    "message": "表示内容と操作方法を調整します。"
   },
   "resetBehavior": {
-    "message": "Reset Behavior"
+    "message": "動作をリセット"
   },
   "advancedBehavior": {
-    "message": "Advanced behavior"
+    "message": "動作の詳細"
   },
   "settingsSafetyTitle": {
-    "message": "Safety"
+    "message": "安全"
   },
   "settingsSafetyDescription": {
-    "message": "Control confirmation prompts before destructive actions."
+    "message": "破壊的操作前の確認を制御します。"
   },
   "resetSafety": {
-    "message": "Reset Safety"
+    "message": "安全設定をリセット"
   },
   "close": {
-    "message": "Close"
+    "message": "閉じる"
   },
   "lightAppearance": {
-    "message": "Light Appearance"
+    "message": "ライト外観"
   },
   "darkAppearance": {
-    "message": "Dark Appearance"
+    "message": "ダーク外観"
   },
   "accentColor": {
-    "message": "Accent Color"
+    "message": "アクセントカラー"
   },
   "density": {
-    "message": "Density"
+    "message": "密度"
   },
   "densityCompact": {
-    "message": "Compact"
+    "message": "コンパクト"
   },
   "densityComfortable": {
-    "message": "Comfortable"
+    "message": "標準"
   },
   "densityCozy": {
-    "message": "Cozy"
+    "message": "ゆったり"
   },
   "densitySpacious": {
-    "message": "Spacious"
+    "message": "広め"
   },
   "fontScale": {
-    "message": "Font Scale"
+    "message": "フォント倍率"
   },
   "indentWidth": {
-    "message": "Indent Width"
+    "message": "インデント幅"
   },
   "cornerRadius": {
-    "message": "Corner Radius"
+    "message": "角の丸み"
   },
   "showFavicons": {
-    "message": "Show favicons"
+    "message": "ファビコンを表示"
   },
   "showCloseButtons": {
-    "message": "Show close buttons"
+    "message": "閉じるボタンを表示"
   },
   "showGroupSubtrees": {
-    "message": "Show group subtrees"
+    "message": "グループサブツリーを表示"
   },
   "showDragStatusChip": {
-    "message": "Show drag status text"
+    "message": "ドラッグ状態テキストを表示"
   },
   "showShortcutHints": {
-    "message": "Show shortcut hints"
+    "message": "ショートカットヒントを表示"
   },
   "confirmBeforeClosingTree": {
-    "message": "Confirm before closing tree (2+ tabs)"
+    "message": "ツリーを閉じる前に確認 (2+ タブ)"
   },
   "confirmBeforeClosingBatch": {
-    "message": "Confirm before closing selected tabs (2+ tabs)"
+    "message": "選択タブを閉じる前に確認 (2+ タブ)"
   },
   "closeTabsQuestion": {
-    "message": "Close tabs?"
+    "message": "タブを閉じますか？"
   },
   "dontAskAgain": {
-    "message": "Don't ask again"
+    "message": "今後は確認しない"
   },
   "cancel": {
-    "message": "Cancel"
+    "message": "キャンセル"
   },
   "tabActionsAriaLabel": {
-    "message": "Tab actions"
+    "message": "タブ操作"
   },
   "shortcutHintText": {
-    "message": "Use Chrome shortcuts to focus panel/search. In search, use Up/Down to navigate results and Enter to jump."
+    "message": "Chrome ショートカットでパネル/検索にフォーカスできます。検索では上下キーで移動し、Enter でジャンプします。"
   },
   "selectedCount": {
-    "message": "$1 selected"
+    "message": "$1 件を選択中"
   },
   "closeSelectedTabsGeneric": {
-    "message": "Close selected tab(s)"
+    "message": "選択したタブを閉じる"
   },
   "closeSelectedTab": {
-    "message": "Close selected tab"
+    "message": "選択したタブを閉じる"
   },
   "closeSelectedTabsMany": {
-    "message": "Close $1 selected tabs"
+    "message": "選択した $1 件のタブを閉じる"
   },
   "addSelectedToNewTabGroup": {
-    "message": "Add selected to new tab group"
+    "message": "選択項目を新しいタブグループに追加"
   },
   "addToNewTabGroup": {
-    "message": "Add to new tab group"
+    "message": "新しいタブグループに追加"
   },
   "addToExistingTabGroup": {
-    "message": "Add to existing tab group"
+    "message": "既存のタブグループに追加"
   },
   "moreGroups": {
-    "message": "More groups..."
+    "message": "その他のグループ..."
   },
   "moveSelectedToTopLevel": {
-    "message": "Move selected to top-level"
+    "message": "選択項目をトップレベルへ移動"
   },
   "toggleCollapse": {
-    "message": "Toggle collapse"
+    "message": "折りたたみを切り替え"
   },
   "copyUrls": {
-    "message": "Copy URL(s)"
+    "message": "URL をコピー"
   },
   "closeTabGroup": {
-    "message": "Close tab group"
+    "message": "タブグループを閉じる"
   },
   "closeTabGroupWithCount": {
-    "message": "Close tab group ($1)"
+    "message": "タブグループを閉じる ($1)"
   },
   "renameGroup": {
-    "message": "Rename group..."
+    "message": "グループ名を変更..."
   },
   "groupNamePlaceholder": {
-    "message": "Group name"
+    "message": "グループ名"
   },
   "save": {
-    "message": "Save"
+    "message": "保存"
   },
   "color": {
-    "message": "Color"
+    "message": "色"
   },
   "colorGrey": {
-    "message": "Grey"
+    "message": "グレー"
   },
   "colorBlue": {
-    "message": "Blue"
+    "message": "ブルー"
   },
   "colorRed": {
-    "message": "Red"
+    "message": "レッド"
   },
   "colorYellow": {
-    "message": "Yellow"
+    "message": "イエロー"
   },
   "colorGreen": {
-    "message": "Green"
+    "message": "グリーン"
   },
   "colorPink": {
-    "message": "Pink"
+    "message": "ピンク"
   },
   "colorPurple": {
-    "message": "Purple"
+    "message": "パープル"
   },
   "colorCyan": {
-    "message": "Cyan"
+    "message": "シアン"
   },
   "colorOrange": {
-    "message": "Orange"
+    "message": "オレンジ"
   },
   "setGroupColorTo": {
-    "message": "Set group color to $1"
+    "message": "グループの色を $1 に設定"
   },
   "confirmCloseMessage": {
-    "message": "This will close $1 tabs. Continue?"
+    "message": "$1 件のタブを閉じます。続行しますか？"
   },
   "pinnedTabTitle": {
-    "message": "Pinned tab"
+    "message": "固定タブ"
   },
   "toggleChildren": {
-    "message": "Toggle children"
+    "message": "子ノードを切り替え"
   },
   "expandGroup": {
-    "message": "Expand group"
+    "message": "グループを展開"
   },
   "collapseGroup": {
-    "message": "Collapse group"
+    "message": "グループを折りたたむ"
   },
   "untitledTab": {
-    "message": "Untitled tab"
+    "message": "無題のタブ"
   },
   "closeSubtree": {
-    "message": "Close subtree"
+    "message": "サブツリーを閉じる"
   },
   "closeTab": {
-    "message": "Close tab"
+    "message": "タブを閉じる"
   },
   "noTabsAvailable": {
-    "message": "No tabs available."
+    "message": "利用可能なタブがありません。"
   },
   "sectionPinned": {
-    "message": "Pinned"
+    "message": "固定"
   },
   "noTabsMatchSearch": {
-    "message": "No tabs match your search."
+    "message": "検索に一致するタブはありません。"
   },
   "noTabsInWindow": {
-    "message": "No tabs in this window."
+    "message": "このウィンドウにタブはありません。"
   },
   "groupFallbackName": {
-    "message": "Group $1"
+    "message": "グループ $1"
   },
   "unnamedGroup": {
-    "message": "Unnamed group"
+    "message": "名前なしグループ"
   }
 }
