@@ -16,15 +16,20 @@ Tree-style vertical tabs for Chrome Side Panel that help you organize browsing i
 
 ## Screenshots
 
-| Tree Overview (Dark) | Grouped Tabs (Light) |
+| Overview (Base Dark) | Grouping Workflow (Base Light) |
 | --- | --- |
-| ![TabTree dark tree overview with nested tasks and pinned row](docs/images/01-tree-overview-dark.png) | ![TabTree light mode grouped tabs with color-coded header](docs/images/02-groups-and-colors-light.png) |
-| *Nested tab hierarchy with pinned strip and collapse controls.* | *Color-coded group subtree with group naming and grouping workflow.* |
+| ![TabTree base dark overview with nested hierarchy, collapse state, and pinned row](docs/images/01-overview-base-dark.png) | ![TabTree base light grouping workflow with renamed and recolored group](docs/images/02-grouping-base-light.png) |
+| *Core workspace hierarchy with pinned strip and collapsed branches.* | *Group rename/color workflow with clear subtree boundaries.* |
 
-| Multi-select + Batch Actions (Dark) | Settings + Theme Controls (Light) |
+| Multi-select Actions (Base Dark) | Settings Controls (Base Light) |
 | --- | --- |
-| ![TabTree dark mode multi-select with batch bar and context menu](docs/images/03-multiselect-batch-dark.png) | ![TabTree settings panel with theme presets and density controls](docs/images/04-settings-theme-light.png) |
-| *Range selection plus context menu actions for bulk operations.* | *Appearance and behavior controls including presets, density, and sizing.* |
+| ![TabTree base dark multi-select with context menu actions](docs/images/03-multiselect-base-dark.png) | ![TabTree base light settings panel for appearance controls](docs/images/04-settings-base-light.png) |
+| *Shift-range selection and context actions for quick bulk operations.* | *Preset, density, and advanced appearance controls in one panel.* |
+
+| Tokyo Night Workspace | Tokyo Night Settings |
+| --- | --- |
+| ![TabTree Tokyo Night workspace with nested tabs and grouped lanes](docs/images/05-tokyonight-workspace.png) | ![TabTree Tokyo Night settings with day and night preset pairing](docs/images/06-tokyonight-settings.png) |
+| *Standout Tokyo Night look for focused planning and execution views.* | *Theme pairing and fine-tuning for the Tokyo Night profile.* |
 
 ## Why TabTree
 
@@ -166,9 +171,9 @@ npm run test:e2e:screenshots
 npm run test:e2e:screenshots:headed
 ```
 
-Screenshot assets are generated at `docs/images/` (PNG, `1200x750`).
+Screenshot assets are generated at `docs/images/` (PNG, `1280x800`).
 
 ## Current Status
 
-- Version: `0.4.0`
+- Version: `0.4.2`
 - Status: Active development
