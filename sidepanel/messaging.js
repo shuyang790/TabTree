@@ -8,7 +8,21 @@ export async function sendOrThrow(type, payload = {}) {
     throw new Error(`No response for message type ${type}`);
   }
   if (response.ok === false) {
-    throw new Error(response.error || `Message ${type} failed`);
+    const errorPayload = response.error;
+    const message = typeof errorPayload === "string"
+      ? errorPayload
+      : (errorPayload?.message || `Message ${type} failed`);
+    const error = new Error(message);
+    if (typeof errorPayload?.code === "string") {
+      error.code = errorPayload.code;
+    }
+    if (typeof errorPayload?.actionType === "string") {
+      error.actionType = errorPayload.actionType;
+    }
+    if (Number.isInteger(errorPayload?.windowId)) {
+      error.windowId = errorPayload.windowId;
+    }
+    throw error;
   }
   return response;
 }

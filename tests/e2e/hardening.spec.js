@@ -26,7 +26,8 @@ test.describe("Hardening regressions", () => {
     });
 
     expect(response?.ok).toBe(false);
-    expect(response?.error || "").toContain("Unsupported tree action type");
+    expect(response?.error?.code).toBe("UNSUPPORTED_TREE_ACTION");
+    expect(response?.error?.message || "").toContain("Unsupported tree action type");
   });
 
   test("advanced behavior settings remain collapsed by default and still persist changes", async ({ sidePanelPage }) => {

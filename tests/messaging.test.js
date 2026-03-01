@@ -42,11 +42,27 @@ test("sendOrThrow throws when response.ok is false", async () => {
   try {
     globalThis.chrome = {
       runtime: {
-        sendMessage: async () => ({ ok: false, error: "Denied" })
+        sendMessage: async () => ({
+          ok: false,
+          error: {
+            code: "DENIED",
+            message: "Denied",
+            actionType: "PING",
+            windowId: 7
+          }
+        })
       }
     };
 
-    await assert.rejects(sendOrThrow("PING"), /Denied/);
+    await assert.rejects(async () => {
+      await sendOrThrow("PING");
+    }, (error) => {
+      assert.match(error.message, /Denied/);
+      assert.equal(error.code, "DENIED");
+      assert.equal(error.actionType, "PING");
+      assert.equal(error.windowId, 7);
+      return true;
+    });
   } finally {
     globalThis.chrome = previousChrome;
   }
