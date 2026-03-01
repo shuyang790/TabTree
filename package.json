@@ -9,6 +9,8 @@
     "test:unit": "node --test",
     "test:e2e": "playwright test",
     "test:e2e:headed": "PW_HEADLESS=0 playwright test",
+    "test:e2e:reliability": "npm run test:e2e -- tests/e2e/reliability-concurrency.spec.js && npm run test:e2e -- tests/e2e/reliability-groups.spec.js && npm run test:e2e -- tests/e2e/reliability-restart.spec.js",
+    "test:e2e:reliability:headed": "PW_HEADLESS=0 npm run test:e2e:reliability",
     "test:e2e:screenshots": "playwright test tests/e2e/screenshots.spec.js",
     "test:e2e:screenshots:headed": "PW_HEADLESS=0 playwright test tests/e2e/screenshots.spec.js"
   },
