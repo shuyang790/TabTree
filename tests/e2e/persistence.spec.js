@@ -423,3 +423,152 @@ test("restores same-url siblings under original parent after browser restart", a
     rmSync(userDataDir, { recursive: true, force: true });
   }
 });
+
+test("restores parent-child relationships across restart when more than three windows are open", async () => {
+  const userDataDir = mkdtempSync(path.join(os.tmpdir(), "tabtree-persist-many-windows-"));
+  const stamp = Date.now();
+
+  const pairs = ["A", "B", "C", "D"].map((label) => ({
+    label,
+    parentTitle: `Restart Multi Parent ${label} ${stamp}`,
+    childTitle: `Restart Multi Child ${label} ${stamp}`
+  }));
+
+  let launchOne = null;
+  let launchTwo = null;
+
+  try {
+    launchOne = await launchExtensionContext(userDataDir);
+    const { context, sidePanelPage } = launchOne;
+
+    const setup = await sidePanelPage.evaluate(async ({ pairs }) => {
+      const created = [];
+      for (const pair of pairs) {
+        const parentHtml = `<title>${pair.parentTitle}</title><main>${pair.parentTitle}</main>`;
+        const parentUrl = `data:text/html,${encodeURIComponent(parentHtml)}`;
+        const win = await chrome.windows.create({ url: parentUrl });
+        const windowId = win.id;
+        const parentTabId = win.tabs?.[0]?.id ?? null;
+        if (!Number.isInteger(windowId) || !Number.isInteger(parentTabId)) {
+          throw new Error(`failed to create parent tab/window for ${pair.label}`);
+        }
+
+        const childHtml = `<title>${pair.childTitle}</title><main>${pair.childTitle}</main>`;
+        const childUrl = `data:text/html,${encodeURIComponent(childHtml)}`;
+        const childTab = await chrome.tabs.create({
+          windowId,
+          url: childUrl,
+          active: false
+        });
+        if (!Number.isInteger(childTab?.id)) {
+          throw new Error(`failed to create child tab for ${pair.label}`);
+        }
+
+        const actionResponse = await chrome.runtime.sendMessage({
+          type: "TREE_ACTION",
+          payload: {
+            type: "REPARENT_TAB",
+            tabId: childTab.id,
+            newParentTabId: parentTabId
+          }
+        });
+        if (!actionResponse?.ok) {
+          throw new Error(`reparent failed for ${pair.label}`);
+        }
+
+        created.push({
+          windowId,
+          parentTabId,
+          childTabId: childTab.id,
+          parentTitle: pair.parentTitle,
+          childTitle: pair.childTitle
+        });
+      }
+      return created;
+    }, { pairs });
+
+    expect(setup).toHaveLength(4);
+
+    await expect.poll(async () => {
+      return sidePanelPage.evaluate(async ({ setup }) => {
+        let persistedCount = 0;
+        for (const pair of setup) {
+          const key = `tree.local.v1.${pair.windowId}`;
+          const raw = await chrome.storage.local.get([key]);
+          const tree = raw[key] || null;
+          if (!tree) {
+            continue;
+          }
+          const parentNode = Object.values(tree.nodes || {})
+            .find((node) => node.lastKnownTitle === pair.parentTitle);
+          const childNode = Object.values(tree.nodes || {})
+            .find((node) => node.lastKnownTitle === pair.childTitle);
+          if (parentNode?.nodeId && childNode?.parentNodeId === parentNode.nodeId) {
+            persistedCount += 1;
+          }
+        }
+        return persistedCount;
+      }, { setup });
+    }, { timeout: 15000 }).toBe(4);
+
+    await context.close();
+    launchOne = null;
+
+    launchTwo = await launchExtensionContext(userDataDir);
+    const sidePanelPageTwo = launchTwo.sidePanelPage;
+
+    await expect.poll(async () => {
+      return sidePanelPageTwo.evaluate(async ({ pairs }) => {
+        const windows = await chrome.windows.getAll({ populate: true });
+        const unresolved = [];
+        let restoredCount = 0;
+
+        for (const pair of pairs) {
+          const matchedWindow = windows.find((win) => {
+            const titles = (win.tabs || []).map((tab) => tab.title || "");
+            return titles.includes(pair.parentTitle) && titles.includes(pair.childTitle);
+          });
+
+          if (!matchedWindow?.id) {
+            unresolved.push(pair.label);
+            continue;
+          }
+
+          const response = await chrome.runtime.sendMessage({
+            type: "GET_STATE",
+            payload: { windowId: matchedWindow.id }
+          });
+          const payloadWindows = response?.payload?.windows || {};
+          const tree = payloadWindows[matchedWindow.id] || payloadWindows[String(matchedWindow.id)] || null;
+          if (!tree) {
+            unresolved.push(pair.label);
+            continue;
+          }
+
+          const parentNode = Object.values(tree.nodes || {})
+            .find((node) => node.lastKnownTitle === pair.parentTitle) || null;
+          const childNode = Object.values(tree.nodes || {})
+            .find((node) => node.lastKnownTitle === pair.childTitle) || null;
+
+          if (parentNode?.nodeId && childNode?.parentNodeId === parentNode.nodeId) {
+            restoredCount += 1;
+          } else {
+            unresolved.push(pair.label);
+          }
+        }
+
+        return {
+          restoredCount,
+          unresolved
+        };
+      }, { pairs });
+    }, { timeout: 15000 }).toEqual({
+      restoredCount: 4,
+      unresolved: []
+    });
+  } finally {
+    await launchTwo?.context?.close().catch(() => {});
+    await launchOne?.context?.close().catch(() => {});
+    rmSync(userDataDir, { recursive: true, force: true });
+  }
+});

@@ -1,4 +1,10 @@
-import { isTreeActionType, MESSAGE_TYPES, TREE_ACTIONS } from "../shared/constants.js";
+import {
+  isTreeActionType,
+  LOCAL_ARCHIVE_MAX_TREES,
+  LOCAL_ARCHIVE_RETENTION_MS,
+  MESSAGE_TYPES,
+  TREE_ACTIONS
+} from "../shared/constants.js";
 import {
   buildTreeFromTabs,
   createEmptyWindowTree,
@@ -28,10 +34,12 @@ import { groupLiveTabIdsByWindow } from "./liveTabGrouping.js";
 import { pruneTreeAgainstLiveTabs, removeTabIdsFromTree } from "./windowTreeReconciler.js";
 import {
   loadAllWindowTrees,
+  loadLocalSnapshot,
   loadSettings,
   loadSyncSnapshot,
   loadWindowTree,
   removeWindowTree,
+  saveLocalSnapshot,
   saveSettings,
   saveSyncSnapshot,
   saveWindowTree
@@ -52,6 +60,7 @@ const state = {
   settings: null,
   windows: {},
   initialized: false,
+  localSnapshot: null,
   syncSnapshot: null,
   lastMoveByWindow: {}
 };
@@ -64,6 +73,8 @@ const ACTION_ERROR_CODES = {
   UNKNOWN_MESSAGE_TYPE: "UNKNOWN_MESSAGE_TYPE",
   MESSAGE_HANDLER_FAILED: "MESSAGE_HANDLER_FAILED"
 };
+const LOW_CONFIDENCE_RESTORE_SCORE = 3;
+const STARTUP_RECONCILE_DELAYS_MS = [2000, 6000];
 
 function t(key, fallback = key) {
   return chrome.i18n.getMessage(key) || fallback;
@@ -75,6 +86,9 @@ function logUnexpectedFailure(operation, error, context = {}) {
 
 const persistCoordinator = createPersistCoordinator({
   saveWindowTree,
+  saveLocalSnapshot: async (windowsState) => {
+    state.localSnapshot = await saveLocalSnapshot(windowsState);
+  },
   saveSyncSnapshot,
   getWindowsState: () => state.windows,
   onError: (error) => {
@@ -122,9 +136,34 @@ function windowTree(windowId) {
 }
 
 function setWindowTree(nextTree) {
-  state.windows[nextTree.windowId] = nextTree;
-  persistCoordinator.markWindowDirty(nextTree.windowId);
-  broadcastState(nextTree.windowId, nextTree.windowId);
+  const now = Date.now();
+  const persistedTree = {
+    ...nextTree,
+    archivedAt: null,
+    lastSeenAt: now,
+    persistenceVersion: 1
+  };
+  state.windows[persistedTree.windowId] = persistedTree;
+  persistCoordinator.markWindowDirty(persistedTree.windowId);
+  broadcastState(persistedTree.windowId, persistedTree.windowId);
+}
+
+async function archiveWindowTree(windowId) {
+  if (!Number.isInteger(windowId)) {
+    return;
+  }
+  const existing = state.windows[windowId] || await loadWindowTree(windowId);
+  if (!existing || typeof existing !== "object") {
+    return;
+  }
+
+  const now = Date.now();
+  await saveWindowTree({
+    ...existing,
+    archivedAt: now,
+    lastSeenAt: Number.isFinite(existing.lastSeenAt) ? existing.lastSeenAt : now,
+    persistenceVersion: 1
+  });
 }
 
 async function getTab(tabId) {
@@ -765,13 +804,359 @@ async function ensureSelectedTabVisible(windowId, tabId) {
   await refreshGroupMetadata(windowId);
 }
 
+function treeTimestamp(tree) {
+  if (!tree || typeof tree !== "object") {
+    return 0;
+  }
+  const updatedAt = Number.isFinite(tree.updatedAt) ? tree.updatedAt : 0;
+  const lastSeenAt = Number.isFinite(tree.lastSeenAt) ? tree.lastSeenAt : 0;
+  const archivedAt = Number.isFinite(tree.archivedAt) ? tree.archivedAt : 0;
+  return Math.max(updatedAt, lastSeenAt, archivedAt);
+}
+
+function dedupeTreePool(trees = []) {
+  const byWindowId = new Map();
+  for (const tree of trees) {
+    if (!tree || typeof tree !== "object" || !Number.isInteger(tree.windowId) || !tree.nodes) {
+      continue;
+    }
+    const existing = byWindowId.get(tree.windowId);
+    if (!existing || treeTimestamp(tree) >= treeTimestamp(existing)) {
+      byWindowId.set(tree.windowId, tree);
+    }
+  }
+  return Array.from(byWindowId.values());
+}
+
+function buildCountMap(items) {
+  const map = new Map();
+  for (const item of items) {
+    if (!item) {
+      continue;
+    }
+    map.set(item, (map.get(item) || 0) + 1);
+  }
+  return map;
+}
+
+function overlapCount(a, b) {
+  let total = 0;
+  for (const [key, countA] of a.entries()) {
+    const countB = b.get(key) || 0;
+    if (countB > 0) {
+      total += Math.min(countA, countB);
+    }
+  }
+  return total;
+}
+
+function scorePreviousTreeAgainstTabs(tree, tabs) {
+  if (!tree?.nodes || !tabs.length) {
+    return 0;
+  }
+
+  const orderedTabs = [...tabs].sort((a, b) => a.index - b.index);
+  const tabUrls = orderedTabs.map((tab) => normalizeUrl(initialTabUrl(tab))).filter((value) => !!value);
+  const tabTitles = orderedTabs.map((tab) => (tab.title || "").trim()).filter((value) => !!value);
+  const treeNodes = Object.values(tree.nodes || {})
+    .filter((node) => node && typeof node === "object")
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  const treeUrls = treeNodes.map((node) => normalizeUrl(node.lastKnownUrl || "")).filter((value) => !!value);
+  const treeTitles = treeNodes.map((node) => (node.lastKnownTitle || "").trim()).filter((value) => !!value);
+
+  if (!tabUrls.length && !tabTitles.length) {
+    return 0;
+  }
+
+  const urlScore = overlapCount(buildCountMap(tabUrls), buildCountMap(treeUrls)) * 4;
+  const titleScore = overlapCount(buildCountMap(tabTitles), buildCountMap(treeTitles)) * 2;
+  const sizeScore = Math.max(0, 10 - Math.abs(orderedTabs.length - treeNodes.length));
+
+  const orderedTabUrls = orderedTabs.map((tab) => normalizeUrl(initialTabUrl(tab))).filter((value) => !!value);
+  const orderedTreeUrls = treeNodes.map((node) => normalizeUrl(node.lastKnownUrl || "")).filter((value) => !!value);
+  const compareLength = Math.min(20, orderedTabUrls.length, orderedTreeUrls.length);
+  let orderScore = 0;
+  for (let i = 0; i < compareLength; i += 1) {
+    if (orderedTabUrls[i] && orderedTabUrls[i] === orderedTreeUrls[i]) {
+      orderScore += 1;
+    }
+  }
+
+  const archivedPenalty = Number.isFinite(tree.archivedAt)
+    ? Math.min(4, Math.floor((Date.now() - tree.archivedAt) / (24 * 60 * 60 * 1000)))
+    : 0;
+  return Math.max(0, urlScore + titleScore + sizeScore + orderScore - archivedPenalty);
+}
+
+function assignBestPreviousTrees(windows, treePool) {
+  const assignments = new Map();
+  if (!Array.isArray(windows) || !windows.length || !Array.isArray(treePool) || !treePool.length) {
+    return assignments;
+  }
+
+  const pairs = [];
+  for (const win of windows) {
+    const tabs = win.tabs || [];
+    for (let i = 0; i < treePool.length; i += 1) {
+      const candidate = treePool[i];
+      const score = scorePreviousTreeAgainstTabs(candidate, tabs);
+      if (score <= 0) {
+        continue;
+      }
+      pairs.push({
+        windowId: win.id,
+        treeIndex: i,
+        score,
+        treeTs: treeTimestamp(candidate)
+      });
+    }
+  }
+
+  pairs.sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+    if (b.treeTs !== a.treeTs) {
+      return b.treeTs - a.treeTs;
+    }
+    if (a.windowId !== b.windowId) {
+      return a.windowId - b.windowId;
+    }
+    return a.treeIndex - b.treeIndex;
+  });
+
+  const usedWindows = new Set();
+  const usedTrees = new Set();
+  for (const pair of pairs) {
+    if (usedWindows.has(pair.windowId) || usedTrees.has(pair.treeIndex)) {
+      continue;
+    }
+    usedWindows.add(pair.windowId);
+    usedTrees.add(pair.treeIndex);
+    assignments.set(pair.windowId, {
+      tree: treePool[pair.treeIndex],
+      score: pair.score
+    });
+  }
+
+  return assignments;
+}
+
+async function treeWithCurrentGroupMetadata(windowId, tree) {
+  let groups = [];
+  try {
+    groups = await chrome.tabGroups.query({ windowId });
+  } catch {
+    groups = [];
+  }
+
+  const groupMap = {};
+  for (const group of groups) {
+    groupMap[group.id] = {
+      id: group.id,
+      title: group.title || t("unnamedGroup", "Unnamed group"),
+      color: group.color,
+      collapsed: !!group.collapsed
+    };
+  }
+
+  return {
+    ...tree,
+    groups: groupMap
+  };
+}
+
+async function pruneArchivedLocalTrees(currentWindowIds = []) {
+  const trees = await loadAllWindowTrees();
+  if (!trees.length) {
+    return;
+  }
+
+  const currentSet = new Set(currentWindowIds.filter((id) => Number.isInteger(id)));
+  const now = Date.now();
+  const removalIds = new Set();
+  const archivedCandidates = [];
+
+  for (const tree of trees) {
+    if (!tree || !Number.isInteger(tree.windowId) || currentSet.has(tree.windowId)) {
+      continue;
+    }
+    if (Number.isFinite(tree.archivedAt) && (now - tree.archivedAt) > LOCAL_ARCHIVE_RETENTION_MS) {
+      removalIds.add(tree.windowId);
+      continue;
+    }
+    if (Number.isFinite(tree.archivedAt)) {
+      archivedCandidates.push(tree);
+    }
+  }
+
+  archivedCandidates.sort((a, b) => treeTimestamp(b) - treeTimestamp(a));
+  const overflow = archivedCandidates.slice(LOCAL_ARCHIVE_MAX_TREES);
+  for (const tree of overflow) {
+    removalIds.add(tree.windowId);
+  }
+
+  if (!removalIds.size) {
+    return;
+  }
+
+  await Promise.all(Array.from(removalIds).map((windowId) => removeWindowTree(windowId)));
+}
+
+async function collectRestoreTreePool() {
+  const storedTrees = await loadAllWindowTrees();
+  const snapshotTrees = Array.isArray(state.localSnapshot?.windows)
+    ? state.localSnapshot.windows
+    : [];
+  return dedupeTreePool([...storedTrees, ...snapshotTrees]);
+}
+
+async function hydrateWindow(windowId, tabs, options = {}) {
+  const previous = options.previousTree || null;
+  const previousScore = Number.isFinite(options.previousScore) ? options.previousScore : 0;
+  let tree;
+  let source = "empty";
+
+  if (tabs.length) {
+    if (previous) {
+      tree = buildTreeFromTabs(tabs, previous);
+      source = "previous";
+    } else {
+      tree = inferTreeFromSyncSnapshot(windowId, tabs, state.syncSnapshot);
+      if (tree) {
+        source = "sync";
+      } else {
+        tree = buildTreeFromTabs(tabs);
+        source = "flat";
+      }
+    }
+  } else {
+    tree = createEmptyWindowTree(windowId);
+  }
+
+  const hydrated = await treeWithCurrentGroupMetadata(windowId, tree);
+  state.windows[windowId] = {
+    ...hydrated,
+    archivedAt: null,
+    lastSeenAt: Date.now(),
+    persistenceVersion: 1
+  };
+  persistCoordinator.markWindowDirty(windowId);
+
+  return {
+    source,
+    score: previousScore
+  };
+}
+
+async function attemptLowConfidenceRehydrate(windowId, candidatePool) {
+  if (!Number.isInteger(windowId)) {
+    return;
+  }
+  const currentTree = state.windows[windowId];
+  if (!currentTree) {
+    return;
+  }
+
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ windowId });
+  } catch {
+    return;
+  }
+  if (!tabs.length) {
+    return;
+  }
+
+  const currentScore = scorePreviousTreeAgainstTabs(currentTree, tabs);
+  const candidates = (candidatePool || []).filter((tree) =>
+    Number.isInteger(tree?.windowId)
+      && tree.windowId !== windowId
+      && tree?.nodes
+  );
+
+  let bestTree = null;
+  let bestScore = 0;
+  for (const candidate of candidates) {
+    const score = scorePreviousTreeAgainstTabs(candidate, tabs);
+    if (score > bestScore) {
+      bestScore = score;
+      bestTree = candidate;
+    }
+  }
+
+  if (!bestTree || bestScore < LOW_CONFIDENCE_RESTORE_SCORE || bestScore <= currentScore + 2) {
+    return;
+  }
+
+  const rebuilt = buildTreeFromTabs(tabs, bestTree);
+  const withGroups = await treeWithCurrentGroupMetadata(windowId, rebuilt);
+  setWindowTree(withGroups);
+}
+
+function scheduleStartupReconcile(windowIds) {
+  const targets = (windowIds || []).filter((id) => Number.isInteger(id));
+  if (!targets.length) {
+    return;
+  }
+
+  for (const delayMs of STARTUP_RECONCILE_DELAYS_MS) {
+    setTimeout(() => {
+      queueMutationFireAndForget(null, async () => {
+        const candidatePool = await collectRestoreTreePool();
+        for (const windowId of targets) {
+          await attemptLowConfidenceRehydrate(windowId, candidatePool);
+        }
+      }, {
+        operation: "startup.reconcile",
+        windowIds: targets,
+        delayMs
+      });
+    }, delayMs);
+  }
+}
+
+async function hydrateAllWindows(windows, previousTrees = []) {
+  const openWindows = Array.isArray(windows) ? windows : [];
+  const treePool = dedupeTreePool(previousTrees);
+  const preassigned = assignBestPreviousTrees(openWindows, treePool);
+  const lowConfidenceWindows = [];
+
+  for (const win of openWindows) {
+    const tabs = win.tabs || [];
+    let previousTree = await loadWindowTree(win.id);
+    let previousScore = 0;
+
+    if (!previousTree && tabs.length) {
+      const assigned = preassigned.get(win.id);
+      if (assigned?.tree) {
+        previousTree = assigned.tree;
+        previousScore = assigned.score;
+      }
+    }
+
+    const result = await hydrateWindow(win.id, tabs, {
+      previousTree,
+      previousScore
+    });
+    if (result.source !== "previous" || result.score < LOW_CONFIDENCE_RESTORE_SCORE) {
+      lowConfidenceWindows.push(win.id);
+    }
+  }
+
+  scheduleStartupReconcile(lowConfidenceWindows);
+}
+
 const ensureInitialized = createInitCoordinator({
   isInitialized: () => state.initialized,
   initialize: async () => {
     state.settings = await loadSettings();
     state.syncSnapshot = await loadSyncSnapshot();
-    const previousTrees = await loadAllWindowTrees();
-    await hydrateAllWindows(previousTrees);
+    state.localSnapshot = await loadLocalSnapshot();
+    const windows = await chrome.windows.getAll({ populate: true });
+    await pruneArchivedLocalTrees(windows.map((win) => win.id));
+    const previousTrees = await collectRestoreTreePool();
+    await hydrateAllWindows(windows, previousTrees);
     state.initialized = true;
 
     try {
@@ -781,105 +1166,6 @@ const ensureInitialized = createInitCoordinator({
     }
   }
 });
-
-function scorePreviousTreeAgainstTabs(tree, tabs) {
-  if (!tree?.nodes || !tabs.length) {
-    return 0;
-  }
-
-  const currentUrls = new Set(
-    tabs.map((tab) => normalizeUrl(initialTabUrl(tab))).filter((url) => !!url)
-  );
-  const currentTitles = new Set(
-    tabs.map((tab) => tab.title || "").filter((title) => !!title)
-  );
-
-  if (!currentUrls.size && !currentTitles.size) {
-    return 0;
-  }
-
-  let score = 0;
-  for (const node of Object.values(tree.nodes)) {
-    const nodeUrl = normalizeUrl(node.lastKnownUrl || "");
-    if (nodeUrl && currentUrls.has(nodeUrl)) {
-      score += 2;
-      continue;
-    }
-    const nodeTitle = node.lastKnownTitle || "";
-    if (nodeTitle && currentTitles.has(nodeTitle)) {
-      score += 1;
-    }
-  }
-  return score;
-}
-
-function pickBestPreviousTreeForTabs(tabs, treePool) {
-  if (!tabs.length || !Array.isArray(treePool) || !treePool.length) {
-    return null;
-  }
-
-  let bestIndex = -1;
-  let bestScore = 0;
-  for (let i = 0; i < treePool.length; i += 1) {
-    const score = scorePreviousTreeAgainstTabs(treePool[i], tabs);
-    if (score > bestScore) {
-      bestScore = score;
-      bestIndex = i;
-    }
-  }
-
-  if (bestIndex < 0 || bestScore <= 0) {
-    return null;
-  }
-
-  const [best] = treePool.splice(bestIndex, 1);
-  return best || null;
-}
-
-async function hydrateAllWindows(previousTrees = []) {
-  const windows = await chrome.windows.getAll({ populate: true });
-  const treePool = Array.isArray(previousTrees) ? [...previousTrees] : [];
-  for (const win of windows) {
-    await hydrateWindow(win.id, win.tabs || [], treePool);
-  }
-}
-
-async function hydrateWindow(windowId, tabs, treePool = []) {
-  let previous = await loadWindowTree(windowId);
-  if (!previous && tabs.length) {
-    previous = pickBestPreviousTreeForTabs(tabs, treePool);
-  }
-  let tree;
-
-  if (tabs.length) {
-    if (previous) {
-      tree = buildTreeFromTabs(tabs, previous);
-    } else {
-      tree = inferTreeFromSyncSnapshot(windowId, tabs, state.syncSnapshot) || buildTreeFromTabs(tabs);
-    }
-  } else {
-    tree = createEmptyWindowTree(windowId);
-  }
-
-  let groups = [];
-  try {
-    groups = await chrome.tabGroups.query({ windowId });
-  } catch {
-    groups = [];
-  }
-  tree.groups = {};
-  for (const group of groups) {
-    tree.groups[group.id] = {
-      id: group.id,
-      title: group.title || t("unnamedGroup", "Unnamed group"),
-      color: group.color,
-      collapsed: !!group.collapsed
-    };
-  }
-
-  state.windows[windowId] = tree;
-  persistCoordinator.markWindowDirty(windowId);
-}
 
 async function addChildTab(parentTabId) {
   const parentTab = await getTab(parentTabId);
@@ -2161,9 +2447,9 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
 chrome.windows.onRemoved.addListener((windowId) => {
   queueMutationFireAndForget(windowId, async () => {
     await ensureInitialized();
+    await archiveWindowTree(windowId);
     delete state.windows[windowId];
     clearLastMove(windowId);
-    await removeWindowTree(windowId);
     persistCoordinator.forgetWindow(windowId);
     orderSyncCoordinator.cancel(windowId);
     broadcastState();

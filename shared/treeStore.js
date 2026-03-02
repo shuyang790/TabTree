@@ -1,6 +1,7 @@
 import {
   DEFAULT_SETTINGS,
   DENSITY_OPTIONS,
+  LOCAL_SNAPSHOT_KEY,
   LOCAL_WINDOW_PREFIX,
   SETTINGS_NUMERIC_RANGES,
   SETTINGS_KEY,
@@ -157,6 +158,26 @@ function mergeSettings(candidate) {
   };
 }
 
+function normalizeWindowTreePersistenceMeta(windowTree) {
+  if (!windowTree || typeof windowTree !== "object") {
+    return windowTree;
+  }
+  const now = Date.now();
+  const lastSeenAt = Number.isFinite(windowTree.lastSeenAt)
+    ? windowTree.lastSeenAt
+    : Number.isFinite(windowTree.updatedAt)
+      ? windowTree.updatedAt
+      : now;
+  const archivedAt = Number.isFinite(windowTree.archivedAt) ? windowTree.archivedAt : null;
+
+  return {
+    ...windowTree,
+    lastSeenAt,
+    archivedAt,
+    persistenceVersion: 1
+  };
+}
+
 export async function loadSettings() {
   const raw = await chrome.storage.sync.get([SETTINGS_KEY]);
   return mergeSettings(raw[SETTINGS_KEY]);
@@ -171,7 +192,8 @@ export async function saveSettings(settings) {
 export async function loadWindowTree(windowId) {
   const key = `${LOCAL_WINDOW_PREFIX}${windowId}`;
   const raw = await chrome.storage.local.get([key]);
-  return raw[key] || null;
+  const tree = raw[key] || null;
+  return tree ? normalizeWindowTreePersistenceMeta(tree) : null;
 }
 
 export async function loadAllWindowTrees() {
@@ -182,7 +204,7 @@ export async function loadAllWindowTrees() {
       continue;
     }
     if (value && typeof value === "object" && typeof value.windowId === "number" && value.nodes) {
-      trees.push(value);
+      trees.push(normalizeWindowTreePersistenceMeta(value));
     }
   }
   return trees;
@@ -190,7 +212,7 @@ export async function loadAllWindowTrees() {
 
 export async function saveWindowTree(windowTree) {
   const key = `${LOCAL_WINDOW_PREFIX}${windowTree.windowId}`;
-  await chrome.storage.local.set({ [key]: windowTree });
+  await chrome.storage.local.set({ [key]: normalizeWindowTreePersistenceMeta(windowTree) });
 }
 
 export async function removeWindowTree(windowId) {
@@ -203,6 +225,11 @@ export async function loadSyncSnapshot() {
   return raw[SYNC_SNAPSHOT_KEY] || null;
 }
 
+export async function loadLocalSnapshot() {
+  const raw = await chrome.storage.local.get([LOCAL_SNAPSHOT_KEY]);
+  return raw[LOCAL_SNAPSHOT_KEY] || null;
+}
+
 export async function saveSyncSnapshot(windowsState) {
   const snapshot = buildSyncSnapshot(windowsState, {
     maxWindows: SYNC_MAX_WINDOWS,
@@ -210,5 +237,20 @@ export async function saveSyncSnapshot(windowsState) {
     maxUrlLength: SYNC_MAX_URL_LENGTH
   });
   await chrome.storage.sync.set({ [SYNC_SNAPSHOT_KEY]: snapshot });
+  return snapshot;
+}
+
+export async function saveLocalSnapshot(windowsState) {
+  const windowEntries = Object.values(windowsState || {})
+    .filter((tree) => tree && typeof tree === "object" && Number.isInteger(tree.windowId) && tree.nodes)
+    .map((tree) => normalizeWindowTreePersistenceMeta(tree));
+
+  const snapshot = {
+    v: 1,
+    t: Date.now(),
+    windows: windowEntries
+  };
+
+  await chrome.storage.local.set({ [LOCAL_SNAPSHOT_KEY]: snapshot });
   return snapshot;
 }

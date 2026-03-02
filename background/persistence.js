@@ -3,6 +3,7 @@ import { STORAGE_WRITE_DEBOUNCE_MS } from "../shared/constants.js";
 export function createPersistCoordinator({
   saveWindowTree,
   saveSyncSnapshot,
+  saveLocalSnapshot = async () => {},
   getWindowsState,
   onError = () => {},
   flushDebounceMs = STORAGE_WRITE_DEBOUNCE_MS,
@@ -58,6 +59,8 @@ export function createPersistCoordinator({
       if (writeTasks.length) {
         await Promise.all(writeTasks);
       }
+
+      await saveLocalSnapshot(windowsState);
 
       if (snapshotDirty) {
         const now = Date.now();
