@@ -26,6 +26,7 @@ test("persist coordinator flushes dirty windows and coalesces snapshot writes", 
   const windowWrites = [];
   let snapshotWrites = 0;
   let localSnapshotWrites = 0;
+  let restoreArchiveWrites = 0;
 
   const coordinator = createPersistCoordinator({
     saveWindowTree: async (tree) => {
@@ -37,6 +38,9 @@ test("persist coordinator flushes dirty windows and coalesces snapshot writes", 
     saveSyncSnapshot: async () => {
       snapshotWrites += 1;
     },
+    saveRestoreArchive: async () => {
+      restoreArchiveWrites += 1;
+    },
     getWindowsState: () => windowsState,
     flushDebounceMs: 15,
     snapshotMinIntervalMs: 0
@@ -45,11 +49,11 @@ test("persist coordinator flushes dirty windows and coalesces snapshot writes", 
   coordinator.markWindowDirty(1);
   coordinator.markWindowDirty(2);
 
-  await waitFor(() => windowWrites.length === 2 && snapshotWrites === 1 && localSnapshotWrites >= 1);
+  await waitFor(() => windowWrites.length === 2 && snapshotWrites === 1 && localSnapshotWrites >= 1 && restoreArchiveWrites >= 1);
   assert.deepEqual([...windowWrites].sort((a, b) => a - b), [1, 2]);
 
   coordinator.markWindowDirty(1);
-  await waitFor(() => windowWrites.length === 3 && snapshotWrites === 2 && localSnapshotWrites >= 2);
+  await waitFor(() => windowWrites.length === 3 && snapshotWrites === 2 && localSnapshotWrites >= 2 && restoreArchiveWrites >= 2);
   assert.equal(windowWrites.filter((id) => id === 1).length, 2);
 
   coordinator.dispose();
@@ -62,6 +66,7 @@ test("persist coordinator retries when flush fails", async () => {
   let windowWriteCalls = 0;
   let snapshotWrites = 0;
   let localSnapshotWrites = 0;
+  let restoreArchiveWrites = 0;
   let errorCount = 0;
   let failFirst = true;
 
@@ -79,6 +84,9 @@ test("persist coordinator retries when flush fails", async () => {
     saveLocalSnapshot: async () => {
       localSnapshotWrites += 1;
     },
+    saveRestoreArchive: async () => {
+      restoreArchiveWrites += 1;
+    },
     getWindowsState: () => windowsState,
     onError: () => {
       errorCount += 1;
@@ -91,10 +99,11 @@ test("persist coordinator retries when flush fails", async () => {
 
   coordinator.markWindowDirty(1);
 
-  await waitFor(() => windowWriteCalls >= 2 && snapshotWrites >= 1 && localSnapshotWrites >= 1 && errorCount >= 1, { timeoutMs: 1200 });
+  await waitFor(() => windowWriteCalls >= 2 && snapshotWrites >= 1 && localSnapshotWrites >= 1 && restoreArchiveWrites >= 1 && errorCount >= 1, { timeoutMs: 1200 });
   assert.ok(windowWriteCalls >= 2);
   assert.ok(snapshotWrites >= 1);
   assert.ok(localSnapshotWrites >= 1);
+  assert.ok(restoreArchiveWrites >= 1);
   assert.ok(errorCount >= 1);
 
   coordinator.dispose();
@@ -107,6 +116,7 @@ test("persist coordinator throttles snapshot writes but still flushes window tre
   let windowWrites = 0;
   let snapshotWrites = 0;
   let localSnapshotWrites = 0;
+  let restoreArchiveWrites = 0;
 
   const coordinator = createPersistCoordinator({
     saveWindowTree: async () => {
@@ -117,6 +127,9 @@ test("persist coordinator throttles snapshot writes but still flushes window tre
     },
     saveLocalSnapshot: async () => {
       localSnapshotWrites += 1;
+    },
+    saveRestoreArchive: async () => {
+      restoreArchiveWrites += 1;
     },
     getWindowsState: () => windowsState,
     flushDebounceMs: 10,
@@ -133,6 +146,7 @@ test("persist coordinator throttles snapshot writes but still flushes window tre
   await waitFor(() => snapshotWrites >= 2, { timeoutMs: 1200 });
   assert.ok(windowWrites >= 2);
   assert.ok(localSnapshotWrites >= 2);
+  assert.ok(restoreArchiveWrites >= 2);
 
   coordinator.dispose();
 });
@@ -144,6 +158,7 @@ test("persist coordinator flushNow bypasses debounce and clears pending timer", 
   let windowWrites = 0;
   let snapshotWrites = 0;
   let localSnapshotWrites = 0;
+  let restoreArchiveWrites = 0;
 
   const coordinator = createPersistCoordinator({
     saveWindowTree: async () => {
@@ -155,6 +170,9 @@ test("persist coordinator flushNow bypasses debounce and clears pending timer", 
     saveLocalSnapshot: async () => {
       localSnapshotWrites += 1;
     },
+    saveRestoreArchive: async () => {
+      restoreArchiveWrites += 1;
+    },
     getWindowsState: () => windowsState,
     flushDebounceMs: 1000,
     snapshotMinIntervalMs: 0
@@ -165,11 +183,13 @@ test("persist coordinator flushNow bypasses debounce and clears pending timer", 
   assert.equal(windowWrites, 1);
   assert.equal(snapshotWrites, 1);
   assert.equal(localSnapshotWrites, 1);
+  assert.equal(restoreArchiveWrites, 1);
 
   await sleep(60);
   assert.equal(windowWrites, 1);
   assert.equal(snapshotWrites, 1);
   assert.equal(localSnapshotWrites, 1);
+  assert.equal(restoreArchiveWrites, 1);
 
   coordinator.dispose();
 });
@@ -181,6 +201,7 @@ test("persist coordinator writes local snapshot even when no windows are dirty",
   let windowWrites = 0;
   let syncSnapshotWrites = 0;
   let localSnapshotWrites = 0;
+  let restoreArchiveWrites = 0;
 
   const coordinator = createPersistCoordinator({
     saveWindowTree: async () => {
@@ -192,13 +213,16 @@ test("persist coordinator writes local snapshot even when no windows are dirty",
     saveLocalSnapshot: async () => {
       localSnapshotWrites += 1;
     },
+    saveRestoreArchive: async () => {
+      restoreArchiveWrites += 1;
+    },
     getWindowsState: () => windowsState,
     flushDebounceMs: 10,
     snapshotMinIntervalMs: 0
   });
 
   coordinator.markSnapshotDirty();
-  await waitFor(() => localSnapshotWrites >= 1 && syncSnapshotWrites >= 1);
+  await waitFor(() => localSnapshotWrites >= 1 && syncSnapshotWrites >= 1 && restoreArchiveWrites >= 1);
   assert.equal(windowWrites, 0);
 
   coordinator.dispose();

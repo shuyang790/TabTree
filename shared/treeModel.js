@@ -409,6 +409,7 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
         parentPreviousNodeId: parentNodeId,
         url: normalizeUrl(node.lastKnownUrl),
         parentUrl: parentNode ? normalizeUrl(parentNode.lastKnownUrl) : null,
+        pinned: !!node.pinned,
         title: node.lastKnownTitle || "",
         parentTitle: parentNode ? (parentNode.lastKnownTitle || "") : "",
         collapsed: !!node.collapsed,
@@ -434,9 +435,15 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
     return null;
   };
 
+  const previousByComposite = new Map();
   const previousByUrl = new Map();
   const previousByTitle = new Map();
   for (const record of previousRecords) {
+    const compositeKey = `${record.pinned ? 1 : 0}\u0000${record.title}\u0000${record.url}`;
+    if (!previousByComposite.has(compositeKey)) {
+      previousByComposite.set(compositeKey, []);
+    }
+    previousByComposite.get(compositeKey).push(record);
     if (!previousByUrl.has(record.url)) {
       previousByUrl.set(record.url, []);
     }
@@ -452,19 +459,36 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
   for (const tab of sortedTabs) {
     const url = normalizeUrl(tab.url);
     const title = typeof tab.title === "string" ? tab.title : "";
+    const pinned = !!tab.pinned;
+    const compositeKey = `${pinned ? 1 : 0}\u0000${title}\u0000${url}`;
     let match = null;
+    if (title || url) {
+      match = takeFirstUnconsumed(previousByComposite.get(compositeKey));
+    }
     if (title) {
       // Prefer stable identity when duplicate URLs exist.
-      match = takeFirstUnconsumed(previousByTitle.get(title), (record) => record.url === url);
+      match = match || takeFirstUnconsumed(previousByTitle.get(title), (record) =>
+        record.url === url && record.pinned === pinned
+      );
+      if (!match) {
+        match = takeFirstUnconsumed(previousByTitle.get(title), (record) => record.url === url);
+      }
+      if (!match) {
+        match = takeFirstUnconsumed(previousByTitle.get(title), (record) => record.pinned === pinned);
+      }
       if (!match) {
         match = takeFirstUnconsumed(previousByTitle.get(title));
       }
     }
     if (!match) {
+      match = takeFirstUnconsumed(previousByUrl.get(url), (record) => record.pinned === pinned);
+    }
+    if (!match) {
       match = takeFirstUnconsumed(previousByUrl.get(url));
     }
     if (!match && title) {
-      match = takeFirstUnconsumed(previousByTitle.get(title));
+      match = takeFirstUnconsumed(previousByTitle.get(title), (record) => record.pinned === pinned)
+        || takeFirstUnconsumed(previousByTitle.get(title));
     }
     if (match) {
       matchedByTabId.set(tab.id, match);

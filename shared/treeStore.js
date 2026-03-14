@@ -1,5 +1,8 @@
 import {
   DEFAULT_SETTINGS,
+  LOCAL_ARCHIVE_MAX_TREES,
+  LOCAL_ARCHIVE_RETENTION_MS,
+  LOCAL_RESTORE_ARCHIVE_KEY,
   DENSITY_OPTIONS,
   LOCAL_SNAPSHOT_KEY,
   LOCAL_WINDOW_PREFIX,
@@ -34,6 +37,10 @@ const DENSITY_OPTION_SET = new Set(DENSITY_OPTIONS);
 
 function nonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
+}
+
+function fallbackRestoreArchiveId(windowId, savedAt, index = 0) {
+  return `restore-${windowId}-${savedAt}-${index}`;
 }
 
 function isValidHexColor(value) {
@@ -178,6 +185,60 @@ function normalizeWindowTreePersistenceMeta(windowTree) {
   };
 }
 
+function normalizeRestoreArchiveEntry(entry, index = 0) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  const tree = normalizeWindowTreePersistenceMeta(entry.tree);
+  if (!tree || typeof tree !== "object" || !tree.nodes) {
+    return null;
+  }
+
+  const savedAt = Number.isFinite(entry.savedAt)
+    ? entry.savedAt
+    : Number.isFinite(tree.updatedAt)
+      ? tree.updatedAt
+      : Date.now();
+  const id = nonEmptyString(entry.id)
+    ? entry.id
+    : fallbackRestoreArchiveId(tree.windowId, savedAt, index);
+
+  return {
+    id,
+    windowId: Number.isInteger(entry.windowId) ? entry.windowId : tree.windowId,
+    savedAt,
+    tree: {
+      ...tree,
+      restoreArchiveId: id
+    }
+  };
+}
+
+function pruneRestoreArchiveEntries(entries) {
+  const now = Date.now();
+  const deduped = new Map();
+
+  for (const [index, entry] of (entries || []).entries()) {
+    const normalized = normalizeRestoreArchiveEntry(entry, index);
+    if (!normalized) {
+      continue;
+    }
+    if ((now - normalized.savedAt) > LOCAL_ARCHIVE_RETENTION_MS) {
+      continue;
+    }
+
+    const existing = deduped.get(normalized.id);
+    if (!existing || normalized.savedAt >= existing.savedAt) {
+      deduped.set(normalized.id, normalized);
+    }
+  }
+
+  return Array.from(deduped.values())
+    .sort((a, b) => b.savedAt - a.savedAt)
+    .slice(0, LOCAL_ARCHIVE_MAX_TREES);
+}
+
 export async function loadSettings() {
   const raw = await chrome.storage.sync.get([SETTINGS_KEY]);
   return mergeSettings(raw[SETTINGS_KEY]);
@@ -230,6 +291,18 @@ export async function loadLocalSnapshot() {
   return raw[LOCAL_SNAPSHOT_KEY] || null;
 }
 
+export async function loadRestoreArchive() {
+  const raw = await chrome.storage.local.get([LOCAL_RESTORE_ARCHIVE_KEY]);
+  const archive = raw[LOCAL_RESTORE_ARCHIVE_KEY] || null;
+  const entries = pruneRestoreArchiveEntries(archive?.entries || []);
+
+  return {
+    v: 1,
+    t: Number.isFinite(archive?.t) ? archive.t : 0,
+    entries
+  };
+}
+
 export async function saveSyncSnapshot(windowsState) {
   const snapshot = buildSyncSnapshot(windowsState, {
     maxWindows: SYNC_MAX_WINDOWS,
@@ -253,4 +326,43 @@ export async function saveLocalSnapshot(windowsState) {
 
   await chrome.storage.local.set({ [LOCAL_SNAPSHOT_KEY]: snapshot });
   return snapshot;
+}
+
+export async function saveRestoreArchive(windowsState, restoreArchiveIdByWindow = {}, existingArchive = null) {
+  const baseArchive = existingArchive && typeof existingArchive === "object"
+    ? existingArchive
+    : await loadRestoreArchive();
+  const byId = new Map(pruneRestoreArchiveEntries(baseArchive?.entries || []).map((entry) => [entry.id, entry]));
+  const now = Date.now();
+
+  const trees = Object.values(windowsState || {})
+    .filter((tree) => tree && typeof tree === "object" && Number.isInteger(tree.windowId) && tree.nodes)
+    .map((tree, index) => {
+      const archiveId = nonEmptyString(restoreArchiveIdByWindow?.[tree.windowId])
+        ? restoreArchiveIdByWindow[tree.windowId]
+        : fallbackRestoreArchiveId(tree.windowId, now, index);
+      const normalizedTree = normalizeWindowTreePersistenceMeta(tree);
+      return {
+        id: archiveId,
+        windowId: tree.windowId,
+        savedAt: now,
+        tree: {
+          ...normalizedTree,
+          restoreArchiveId: archiveId
+        }
+      };
+    });
+
+  for (const entry of trees) {
+    byId.set(entry.id, entry);
+  }
+
+  const archive = {
+    v: 1,
+    t: now,
+    entries: pruneRestoreArchiveEntries(Array.from(byId.values()))
+  };
+
+  await chrome.storage.local.set({ [LOCAL_RESTORE_ARCHIVE_KEY]: archive });
+  return archive;
 }

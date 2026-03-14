@@ -2,6 +2,7 @@ export const SETTINGS_KEY = "settings.v1";
 export const SYNC_SNAPSHOT_KEY = "tree.sync.snapshot.v1";
 export const LOCAL_WINDOW_PREFIX = "tree.local.v1.";
 export const LOCAL_SNAPSHOT_KEY = "tree.local.snapshot.v1";
+export const LOCAL_RESTORE_ARCHIVE_KEY = "tree.local.restore.archive.v1";
 export const STORAGE_WRITE_DEBOUNCE_MS = 400;
 export const SYNC_MAX_WINDOWS = 3;
 export const SYNC_MAX_NODES_PER_WINDOW = 80;

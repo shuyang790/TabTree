@@ -35,11 +35,13 @@ import { pruneTreeAgainstLiveTabs, removeTabIdsFromTree } from "./windowTreeReco
 import {
   loadAllWindowTrees,
   loadLocalSnapshot,
+  loadRestoreArchive,
   loadSettings,
   loadSyncSnapshot,
   loadWindowTree,
   removeWindowTree,
   saveLocalSnapshot,
+  saveRestoreArchive,
   saveSettings,
   saveSyncSnapshot,
   saveWindowTree
@@ -61,6 +63,8 @@ const state = {
   windows: {},
   initialized: false,
   localSnapshot: null,
+  restoreArchive: null,
+  restoreArchiveIds: {},
   syncSnapshot: null,
   lastMoveByWindow: {}
 };
@@ -88,6 +92,9 @@ const persistCoordinator = createPersistCoordinator({
   saveWindowTree,
   saveLocalSnapshot: async (windowsState) => {
     state.localSnapshot = await saveLocalSnapshot(windowsState);
+  },
+  saveRestoreArchive: async (windowsState) => {
+    state.restoreArchive = await saveRestoreArchive(windowsState, state.restoreArchiveIds, state.restoreArchive);
   },
   saveSyncSnapshot,
   getWindowsState: () => state.windows,
@@ -135,10 +142,38 @@ function windowTree(windowId) {
   return state.windows[windowId];
 }
 
-function setWindowTree(nextTree) {
+function createRestoreArchiveId() {
+  if (typeof crypto?.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `restore-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function ensureWindowRestoreArchiveId(windowId, preferredId = null) {
+  if (!Number.isInteger(windowId)) {
+    return typeof preferredId === "string" && preferredId.length ? preferredId : createRestoreArchiveId();
+  }
+  if (typeof preferredId === "string" && preferredId.length) {
+    state.restoreArchiveIds[windowId] = preferredId;
+    return preferredId;
+  }
+  if (typeof state.restoreArchiveIds[windowId] === "string" && state.restoreArchiveIds[windowId].length) {
+    return state.restoreArchiveIds[windowId];
+  }
+  const archiveId = createRestoreArchiveId();
+  state.restoreArchiveIds[windowId] = archiveId;
+  return archiveId;
+}
+
+function setWindowTree(nextTree, options = {}) {
   const now = Date.now();
+  const restoreArchiveId = ensureWindowRestoreArchiveId(
+    nextTree.windowId,
+    options.restoreArchiveId ?? nextTree.restoreArchiveId ?? null
+  );
   const persistedTree = {
     ...nextTree,
+    restoreArchiveId,
     archivedAt: null,
     lastSeenAt: now,
     persistenceVersion: 1
@@ -814,18 +849,36 @@ function treeTimestamp(tree) {
   return Math.max(updatedAt, lastSeenAt, archivedAt);
 }
 
+function treeNodeCount(tree) {
+  return tree?.nodes ? Object.keys(tree.nodes).length : 0;
+}
+
+function restoreCandidateKey(tree) {
+  if (!tree || typeof tree !== "object") {
+    return null;
+  }
+  if (typeof tree.restoreArchiveId === "string" && tree.restoreArchiveId.length) {
+    return `restore:${tree.restoreArchiveId}`;
+  }
+  if (Number.isInteger(tree.windowId)) {
+    return `window:${tree.windowId}`;
+  }
+  return null;
+}
+
 function dedupeTreePool(trees = []) {
-  const byWindowId = new Map();
+  const byCandidateKey = new Map();
   for (const tree of trees) {
     if (!tree || typeof tree !== "object" || !Number.isInteger(tree.windowId) || !tree.nodes) {
       continue;
     }
-    const existing = byWindowId.get(tree.windowId);
+    const candidateKey = restoreCandidateKey(tree) || `window:${tree.windowId}:${treeTimestamp(tree)}`;
+    const existing = byCandidateKey.get(candidateKey);
     if (!existing || treeTimestamp(tree) >= treeTimestamp(existing)) {
-      byWindowId.set(tree.windowId, tree);
+      byCandidateKey.set(candidateKey, tree);
     }
   }
-  return Array.from(byWindowId.values());
+  return Array.from(byCandidateKey.values());
 }
 
 function buildCountMap(items) {
@@ -871,12 +924,19 @@ function scorePreviousTreeAgainstTabs(tree, tabs) {
   const urlScore = overlapCount(buildCountMap(tabUrls), buildCountMap(treeUrls)) * 4;
   const titleScore = overlapCount(buildCountMap(tabTitles), buildCountMap(treeTitles)) * 2;
   const sizeScore = Math.max(0, 10 - Math.abs(orderedTabs.length - treeNodes.length));
+  const compareLength = Math.min(20, orderedTabs.length, treeNodes.length);
+  let pinnedScore = 0;
+  for (let i = 0; i < compareLength; i += 1) {
+    if (!!orderedTabs[i]?.pinned === !!treeNodes[i]?.pinned) {
+      pinnedScore += 1;
+    }
+  }
 
   const orderedTabUrls = orderedTabs.map((tab) => normalizeUrl(initialTabUrl(tab))).filter((value) => !!value);
   const orderedTreeUrls = treeNodes.map((node) => normalizeUrl(node.lastKnownUrl || "")).filter((value) => !!value);
-  const compareLength = Math.min(20, orderedTabUrls.length, orderedTreeUrls.length);
+  const orderedCompareLength = Math.min(compareLength, orderedTabUrls.length, orderedTreeUrls.length);
   let orderScore = 0;
-  for (let i = 0; i < compareLength; i += 1) {
+  for (let i = 0; i < orderedCompareLength; i += 1) {
     if (orderedTabUrls[i] && orderedTabUrls[i] === orderedTreeUrls[i]) {
       orderScore += 1;
     }
@@ -885,7 +945,7 @@ function scorePreviousTreeAgainstTabs(tree, tabs) {
   const archivedPenalty = Number.isFinite(tree.archivedAt)
     ? Math.min(4, Math.floor((Date.now() - tree.archivedAt) / (24 * 60 * 60 * 1000)))
     : 0;
-  return Math.max(0, urlScore + titleScore + sizeScore + orderScore - archivedPenalty);
+  return Math.max(0, urlScore + titleScore + sizeScore + pinnedScore + orderScore - archivedPenalty);
 }
 
 function assignBestPreviousTrees(windows, treePool) {
@@ -1008,12 +1068,21 @@ async function collectRestoreTreePool() {
   const snapshotTrees = Array.isArray(state.localSnapshot?.windows)
     ? state.localSnapshot.windows
     : [];
-  return dedupeTreePool([...storedTrees, ...snapshotTrees]);
+  const archivedTrees = Array.isArray(state.restoreArchive?.entries)
+    ? state.restoreArchive.entries.map((entry) => ({
+      ...entry.tree,
+      restoreArchiveId: entry.id
+    }))
+    : [];
+  return dedupeTreePool([...storedTrees, ...snapshotTrees, ...archivedTrees]);
 }
 
 async function hydrateWindow(windowId, tabs, options = {}) {
   const previous = options.previousTree || null;
   const previousScore = Number.isFinite(options.previousScore) ? options.previousScore : 0;
+  const shouldAdoptRestoreArchiveId = !!previous
+    && previousScore >= LOW_CONFIDENCE_RESTORE_SCORE
+    && treeNodeCount(previous) === tabs.length;
   let tree;
   let source = "empty";
 
@@ -1035,13 +1104,15 @@ async function hydrateWindow(windowId, tabs, options = {}) {
   }
 
   const hydrated = await treeWithCurrentGroupMetadata(windowId, tree);
-  state.windows[windowId] = {
+  setWindowTree({
     ...hydrated,
-    archivedAt: null,
-    lastSeenAt: Date.now(),
-    persistenceVersion: 1
-  };
-  persistCoordinator.markWindowDirty(windowId);
+    restoreScore: previousScore,
+    restoreSource: source,
+    restoreStartupPending: tabs.length > 0,
+    restoreArchiveId: shouldAdoptRestoreArchiveId ? previous?.restoreArchiveId : null
+  }, {
+    restoreArchiveId: shouldAdoptRestoreArchiveId ? previous?.restoreArchiveId : null
+  });
 
   return {
     source,
@@ -1049,7 +1120,7 @@ async function hydrateWindow(windowId, tabs, options = {}) {
   };
 }
 
-async function attemptLowConfidenceRehydrate(windowId, candidatePool) {
+async function attemptLowConfidenceRehydrate(windowId, candidatePool, options = {}) {
   if (!Number.isInteger(windowId)) {
     return;
   }
@@ -1057,6 +1128,7 @@ async function attemptLowConfidenceRehydrate(windowId, candidatePool) {
   if (!currentTree) {
     return;
   }
+  const isFinalAttempt = !!options.isFinalAttempt;
 
   let tabs = [];
   try {
@@ -1069,10 +1141,12 @@ async function attemptLowConfidenceRehydrate(windowId, candidatePool) {
   }
 
   const currentScore = scorePreviousTreeAgainstTabs(currentTree, tabs);
+  const currentRestoreScore = Number.isFinite(currentTree.restoreScore) ? currentTree.restoreScore : 0;
+  const currentRestoreIsWeak = currentTree.restoreSource !== "previous"
+    || currentRestoreScore < LOW_CONFIDENCE_RESTORE_SCORE;
+  const startupPending = !!currentTree.restoreStartupPending;
   const candidates = (candidatePool || []).filter((tree) =>
-    Number.isInteger(tree?.windowId)
-      && tree.windowId !== windowId
-      && tree?.nodes
+    Number.isInteger(tree?.windowId) && tree?.nodes
   );
 
   let bestTree = null;
@@ -1085,13 +1159,31 @@ async function attemptLowConfidenceRehydrate(windowId, candidatePool) {
     }
   }
 
-  if (!bestTree || bestScore < LOW_CONFIDENCE_RESTORE_SCORE || bestScore <= currentScore + 2) {
+  if (!bestTree || bestScore < LOW_CONFIDENCE_RESTORE_SCORE) {
+    if (startupPending && isFinalAttempt) {
+      setWindowTree({
+        ...currentTree,
+        restoreStartupPending: false
+      }, {
+        restoreArchiveId: currentTree.restoreArchiveId ?? null
+      });
+    }
+    return;
+  }
+  if (!startupPending && !currentRestoreIsWeak && bestScore <= Math.max(currentScore, currentRestoreScore) + 2) {
     return;
   }
 
   const rebuilt = buildTreeFromTabs(tabs, bestTree);
   const withGroups = await treeWithCurrentGroupMetadata(windowId, rebuilt);
-  setWindowTree(withGroups);
+  setWindowTree({
+    ...withGroups,
+    restoreScore: bestScore,
+    restoreSource: "previous",
+    restoreStartupPending: !isFinalAttempt
+  }, {
+    restoreArchiveId: bestTree.restoreArchiveId ?? null
+  });
 }
 
 function scheduleStartupReconcile(windowIds) {
@@ -1100,12 +1192,15 @@ function scheduleStartupReconcile(windowIds) {
     return;
   }
 
+  const finalDelayMs = STARTUP_RECONCILE_DELAYS_MS[STARTUP_RECONCILE_DELAYS_MS.length - 1] || 0;
   for (const delayMs of STARTUP_RECONCILE_DELAYS_MS) {
     setTimeout(() => {
       queueMutationFireAndForget(null, async () => {
         const candidatePool = await collectRestoreTreePool();
         for (const windowId of targets) {
-          await attemptLowConfidenceRehydrate(windowId, candidatePool);
+          await attemptLowConfidenceRehydrate(windowId, candidatePool, {
+            isFinalAttempt: delayMs === finalDelayMs
+          });
         }
       }, {
         operation: "startup.reconcile",
@@ -1120,31 +1215,24 @@ async function hydrateAllWindows(windows, previousTrees = []) {
   const openWindows = Array.isArray(windows) ? windows : [];
   const treePool = dedupeTreePool(previousTrees);
   const preassigned = assignBestPreviousTrees(openWindows, treePool);
-  const lowConfidenceWindows = [];
+  const reconcileWindows = [];
 
   for (const win of openWindows) {
     const tabs = win.tabs || [];
-    let previousTree = await loadWindowTree(win.id);
-    let previousScore = 0;
-
-    if (!previousTree && tabs.length) {
-      const assigned = preassigned.get(win.id);
-      if (assigned?.tree) {
-        previousTree = assigned.tree;
-        previousScore = assigned.score;
-      }
-    }
+    const assigned = preassigned.get(win.id);
+    const previousTree = assigned?.tree || null;
+    const previousScore = assigned?.score || 0;
 
     const result = await hydrateWindow(win.id, tabs, {
       previousTree,
       previousScore
     });
-    if (result.source !== "previous" || result.score < LOW_CONFIDENCE_RESTORE_SCORE) {
-      lowConfidenceWindows.push(win.id);
+    if (tabs.length && (result.source !== "empty")) {
+      reconcileWindows.push(win.id);
     }
   }
 
-  scheduleStartupReconcile(lowConfidenceWindows);
+  scheduleStartupReconcile(reconcileWindows);
 }
 
 const ensureInitialized = createInitCoordinator({
@@ -1153,6 +1241,7 @@ const ensureInitialized = createInitCoordinator({
     state.settings = await loadSettings();
     state.syncSnapshot = await loadSyncSnapshot();
     state.localSnapshot = await loadLocalSnapshot();
+    state.restoreArchive = await loadRestoreArchive();
     const windows = await chrome.windows.getAll({ populate: true });
     await pruneArchivedLocalTrees(windows.map((win) => win.id));
     const previousTrees = await collectRestoreTreePool();
@@ -2449,6 +2538,7 @@ chrome.windows.onRemoved.addListener((windowId) => {
     await ensureInitialized();
     await archiveWindowTree(windowId);
     delete state.windows[windowId];
+    delete state.restoreArchiveIds[windowId];
     clearLastMove(windowId);
     persistCoordinator.forgetWindow(windowId);
     orderSyncCoordinator.cancel(windowId);

@@ -326,6 +326,67 @@ test("buildTreeFromTabs preserves original parent for reordered same-url sibling
   assert.deepEqual(restored.nodes[nodeIdFromTabId(1)].childNodeIds, [nodeIdFromTabId(2), nodeIdFromTabId(3)]);
 });
 
+test("buildTreeFromTabs prefers pinned-aware matching when duplicate url/title tabs exist", () => {
+  const sharedTitle = "Inbox";
+  const sharedUrl = "https://mail.test/inbox";
+  const tabs = [
+    tab({ id: 10, index: 0, pinned: true, title: sharedTitle, url: sharedUrl }),
+    tab({ id: 11, index: 1, title: sharedTitle, url: sharedUrl }),
+    tab({ id: 12, index: 2, title: "Pinned Child", url: "https://mail.test/thread/1" }),
+    tab({ id: 13, index: 3, title: "Regular Child", url: "https://mail.test/thread/2" })
+  ];
+
+  const previousTree = createEmptyWindowTree(1);
+  previousTree.nodes = {
+    [nodeIdFromTabId(1)]: {
+      nodeId: nodeIdFromTabId(1),
+      tabId: 1,
+      parentNodeId: null,
+      childNodeIds: [nodeIdFromTabId(3)],
+      collapsed: false,
+      pinned: true,
+      lastKnownTitle: sharedTitle,
+      lastKnownUrl: sharedUrl
+    },
+    [nodeIdFromTabId(2)]: {
+      nodeId: nodeIdFromTabId(2),
+      tabId: 2,
+      parentNodeId: null,
+      childNodeIds: [nodeIdFromTabId(4)],
+      collapsed: false,
+      pinned: false,
+      lastKnownTitle: sharedTitle,
+      lastKnownUrl: sharedUrl
+    },
+    [nodeIdFromTabId(3)]: {
+      nodeId: nodeIdFromTabId(3),
+      tabId: 3,
+      parentNodeId: nodeIdFromTabId(1),
+      childNodeIds: [],
+      collapsed: false,
+      pinned: true,
+      lastKnownTitle: "Pinned Child",
+      lastKnownUrl: "https://mail.test/thread/1"
+    },
+    [nodeIdFromTabId(4)]: {
+      nodeId: nodeIdFromTabId(4),
+      tabId: 4,
+      parentNodeId: nodeIdFromTabId(2),
+      childNodeIds: [],
+      collapsed: false,
+      pinned: false,
+      lastKnownTitle: "Regular Child",
+      lastKnownUrl: "https://mail.test/thread/2"
+    }
+  };
+  previousTree.rootNodeIds = [nodeIdFromTabId(1), nodeIdFromTabId(2)];
+
+  const restored = buildTreeFromTabs(tabs, previousTree);
+
+  assert.equal(restored.nodes[nodeIdFromTabId(12)].parentNodeId, nodeIdFromTabId(10));
+  assert.equal(restored.nodes[nodeIdFromTabId(13)].parentNodeId, nodeIdFromTabId(11));
+});
+
 test("buildTreeFromTabs falls back to title matching when urls are missing", () => {
   const tabs = [
     tab({ id: 1, index: 0, title: "Persist Parent", url: "" }),

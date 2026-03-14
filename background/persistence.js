@@ -4,6 +4,7 @@ export function createPersistCoordinator({
   saveWindowTree,
   saveSyncSnapshot,
   saveLocalSnapshot = async () => {},
+  saveRestoreArchive = async () => {},
   getWindowsState,
   onError = () => {},
   flushDebounceMs = STORAGE_WRITE_DEBOUNCE_MS,
@@ -61,6 +62,7 @@ export function createPersistCoordinator({
       }
 
       await saveLocalSnapshot(windowsState);
+      await saveRestoreArchive(windowsState);
 
       if (snapshotDirty) {
         const now = Date.now();
