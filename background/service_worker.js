@@ -12,6 +12,7 @@ import {
   inferTreeFromSyncSnapshot,
   moveNode,
   normalizeGroupedTabParents,
+  normalizeTreeToTabOrder,
   normalizeUrl,
   nodeIdFromTabId,
   reconcileSelectedTabId,
@@ -717,7 +718,7 @@ async function syncWindowOrdering(windowId) {
   next = pruneTreeAgainstLiveTabs(next, liveTabIds, activeTabId).tree;
 
   next = normalizeGroupedTabParents(next);
-  next = sortTreeByIndex(next);
+  next = normalizeTreeToTabOrder(next);
 
   let groups = [];
   try {

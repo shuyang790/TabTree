@@ -394,6 +394,102 @@ export function normalizeGroupedTabParents(tree) {
   return sortTreeByIndex(ensureValidTree(next));
 }
 
+function compareNodesByTabIndex(a, b) {
+  const indexDelta = (a?.index ?? 0) - (b?.index ?? 0);
+  if (indexDelta !== 0) {
+    return indexDelta;
+  }
+  const createdAtDelta = (a?.createdAt ?? 0) - (b?.createdAt ?? 0);
+  if (createdAtDelta !== 0) {
+    return createdAtDelta;
+  }
+  return String(a?.nodeId || "").localeCompare(String(b?.nodeId || ""));
+}
+
+function preferredAncestorIds(tree, nodeId) {
+  const ancestors = [];
+  const seen = new Set([nodeId]);
+  let current = tree.nodes[nodeId]?.parentNodeId || null;
+
+  while (current && tree.nodes[current] && !seen.has(current)) {
+    ancestors.push(current);
+    seen.add(current);
+    current = tree.nodes[current]?.parentNodeId || null;
+  }
+
+  return ancestors;
+}
+
+function canPreserveParentChildOrder(childNode, parentNode) {
+  if (!childNode || !parentNode) {
+    return false;
+  }
+  if (!!childNode.pinned !== !!parentNode.pinned) {
+    return false;
+  }
+
+  const childGroupId = Number.isInteger(childNode.groupId) && childNode.groupId >= 0
+    ? childNode.groupId
+    : null;
+  if (childGroupId === null) {
+    return true;
+  }
+
+  const parentGroupId = Number.isInteger(parentNode.groupId) && parentNode.groupId >= 0
+    ? parentNode.groupId
+    : null;
+  return parentGroupId === childGroupId;
+}
+
+export function normalizeTreeToTabOrder(tree) {
+  const base = ensureValidTree(tree);
+  const next = cloneTree(base);
+  const orderedNodeIds = Object.values(base.nodes)
+    .sort(compareNodesByTabIndex)
+    .map((node) => node.nodeId);
+
+  next.rootNodeIds = [];
+  for (const node of Object.values(next.nodes)) {
+    node.parentNodeId = null;
+    node.childNodeIds = [];
+  }
+
+  const openAncestorStack = [];
+  for (const nodeId of orderedNodeIds) {
+    const node = next.nodes[nodeId];
+    if (!node) {
+      continue;
+    }
+
+    let parentNodeId = null;
+    for (const preferredAncestorId of preferredAncestorIds(base, nodeId)) {
+      const stackIndex = openAncestorStack.lastIndexOf(preferredAncestorId);
+      if (stackIndex < 0) {
+        continue;
+      }
+      if (!canPreserveParentChildOrder(node, next.nodes[preferredAncestorId])) {
+        continue;
+      }
+      parentNodeId = preferredAncestorId;
+      openAncestorStack.splice(stackIndex + 1);
+      break;
+    }
+
+    if (!parentNodeId) {
+      openAncestorStack.length = 0;
+      next.rootNodeIds.push(nodeId);
+    } else {
+      node.parentNodeId = parentNodeId;
+      next.nodes[parentNodeId].childNodeIds.push(nodeId);
+    }
+
+    openAncestorStack.push(nodeId);
+  }
+
+  next.updatedAt = Date.now();
+  return sortTreeByIndex(next);
+}
+
 export function buildTreeFromTabs(tabs, previousTree = null) {
   const tree = createEmptyWindowTree(tabs[0]?.windowId ?? -1);
   tree.groups = { ...(previousTree?.groups || {}) };
@@ -592,7 +688,7 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
   }
   sortRootsByTabIndex(tree);
 
-  return ensureValidTree(tree);
+  return normalizeTreeToTabOrder(normalizeGroupedTabParents(tree));
 }
 
 export function sortTreeByIndex(tree) {

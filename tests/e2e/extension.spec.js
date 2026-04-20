@@ -113,6 +113,15 @@ async function treeOrderByTitles(sidePanelPage, titles) {
     .filter((title) => tracked.has(title));
 }
 
+async function renderedOrderByTitles(sidePanelPage, titles) {
+  return sidePanelPage.evaluate((trackedTitles) => {
+    const tracked = new Set(trackedTitles);
+    return Array.from(document.querySelectorAll(".tree-row[data-tab-id] .title"))
+      .map((el) => el.textContent?.trim() || "")
+      .filter((title) => tracked.has(title));
+  }, titles);
+}
+
 async function activeTreeRowTitle(sidePanelPage) {
   return sidePanelPage.evaluate(() => {
     const row = document.querySelector(".tree-row.active");
@@ -761,6 +770,72 @@ test.describe("TabTree extension", () => {
         "Native Move C",
         "Native Move A"
       ]);
+    } finally {
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
+  test("native move detaches child when browser order leaves the parent block", async ({ context, sidePanelPage }) => {
+    const pages = [];
+    try {
+      const parentTitle = "Order Sync Parent";
+      const childTitle = "Order Sync Child";
+      const siblingTitle = "Order Sync Sibling";
+      for (const title of [parentTitle, childTitle, siblingTitle]) {
+        pages.push(await createTitledTab(context, title));
+      }
+
+      const parentTabId = await tabIdByTitle(sidePanelPage, parentTitle);
+      const childTabId = await tabIdByTitle(sidePanelPage, childTitle);
+      expect(Number.isInteger(parentTabId)).toBeTruthy();
+      expect(Number.isInteger(childTabId)).toBeTruthy();
+
+      await sidePanelPage.evaluate(async ({ parentTabId, childTabId }) => {
+        await chrome.runtime.sendMessage({
+          type: "TREE_ACTION",
+          payload: {
+            type: "REPARENT_TAB",
+            tabId: childTabId,
+            newParentTabId: parentTabId
+          }
+        });
+      }, { parentTabId, childTabId });
+
+      await expect.poll(async () => {
+        const tree = await getCurrentWindowTree(sidePanelPage);
+        return childTitles(tree, parentTitle);
+      }).toEqual([childTitle]);
+
+      await sidePanelPage.evaluate(async ({ childTitle, siblingTitle }) => {
+        const tabs = await chrome.tabs.query({ currentWindow: true });
+        const childTab = tabs.find((tab) => tab.title === childTitle);
+        const siblingTab = tabs.find((tab) => tab.title === siblingTitle);
+        if (!childTab || !siblingTab) {
+          throw new Error("Native detach setup failed");
+        }
+        await chrome.tabs.move(childTab.id, { index: siblingTab.index + 1 });
+      }, { childTitle, siblingTitle });
+
+      const trackedTitles = [parentTitle, siblingTitle, childTitle];
+      const expectedOrder = [parentTitle, siblingTitle, childTitle];
+      await expect.poll(async () => {
+        const [nativeOrder, renderedOrder] = await Promise.all([
+          nativeOrderByTitles(sidePanelPage, trackedTitles),
+          renderedOrderByTitles(sidePanelPage, trackedTitles)
+        ]);
+        const tree = await getCurrentWindowTree(sidePanelPage);
+        return {
+          nativeOrder,
+          renderedOrder,
+          childParentNodeId: nodeByTitle(tree, childTitle)?.parentNodeId ?? null
+        };
+      }).toEqual({
+        nativeOrder: expectedOrder,
+        renderedOrder: expectedOrder,
+        childParentNodeId: null
+      });
     } finally {
       for (const page of pages) {
         await page.close().catch(() => {});

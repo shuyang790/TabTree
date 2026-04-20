@@ -10,6 +10,7 @@ import {
   inferTreeFromSyncSnapshot,
   moveNode,
   normalizeGroupedTabParents,
+  normalizeTreeToTabOrder,
   normalizeUrl,
   nodeIdFromTabId,
   reconcileSelectedTabId,
@@ -207,6 +208,46 @@ test("normalizeGroupedTabParents keeps grouped subtree intact after boundary det
   assert.deepEqual(tree.nodes[nodeIdFromTabId(2)].childNodeIds, [nodeIdFromTabId(3)]);
 });
 
+test("normalizeTreeToTabOrder detaches child moved outside parent block", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0, title: "Parent" }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1, title: "Intervening Root" }));
+  tree = upsertTabNode(tree, tab({ id: 3, index: 2, title: "Moved Child" }));
+  tree = moveNode(tree, nodeIdFromTabId(3), nodeIdFromTabId(1));
+
+  const normalized = normalizeTreeToTabOrder(tree);
+
+  assert.equal(normalized.nodes[nodeIdFromTabId(3)].parentNodeId, null);
+  assert.deepEqual(normalized.rootNodeIds, [
+    nodeIdFromTabId(1),
+    nodeIdFromTabId(2),
+    nodeIdFromTabId(3)
+  ]);
+  assert.deepEqual(normalized.nodes[nodeIdFromTabId(1)].childNodeIds, []);
+});
+
+test("normalizeTreeToTabOrder keeps the nearest valid ancestor in native order", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0, title: "Root" }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1, title: "Former Parent" }));
+  tree = upsertTabNode(tree, tab({ id: 3, index: 2, title: "Grandchild" }));
+  tree = moveNode(tree, nodeIdFromTabId(2), nodeIdFromTabId(1));
+  tree = moveNode(tree, nodeIdFromTabId(3), nodeIdFromTabId(2));
+
+  tree = upsertTabNode(tree, tab({ id: 2, index: 2, title: "Former Parent" }));
+  tree = upsertTabNode(tree, tab({ id: 3, index: 1, title: "Grandchild" }));
+
+  const normalized = normalizeTreeToTabOrder(tree);
+
+  assert.equal(normalized.nodes[nodeIdFromTabId(2)].parentNodeId, nodeIdFromTabId(1));
+  assert.equal(normalized.nodes[nodeIdFromTabId(3)].parentNodeId, nodeIdFromTabId(1));
+  assert.deepEqual(normalized.rootNodeIds, [nodeIdFromTabId(1)]);
+  assert.deepEqual(normalized.nodes[nodeIdFromTabId(1)].childNodeIds, [
+    nodeIdFromTabId(3),
+    nodeIdFromTabId(2)
+  ]);
+});
+
 test("removeNodePromoteChildren clears stale selected tab", () => {
   let tree = createEmptyWindowTree(1);
   tree = upsertTabNode(tree, tab({ id: 1, index: 0, active: true }));
@@ -278,7 +319,7 @@ test("buildTreeFromTabs handles large duplicate-url snapshots without self-paren
   }
 });
 
-test("buildTreeFromTabs preserves original parent for reordered same-url siblings", () => {
+test("buildTreeFromTabs preserves only order-compatible parents for reordered same-url siblings", () => {
   const sharedUrl = "https://dup-parent.test/path?token=1";
   const tabs = [
     tab({ id: 2, index: 0, title: "Child A", url: sharedUrl }),
@@ -320,10 +361,11 @@ test("buildTreeFromTabs preserves original parent for reordered same-url sibling
 
   const restored = buildTreeFromTabs(tabs, previousTree);
 
-  assert.equal(restored.nodes[nodeIdFromTabId(2)].parentNodeId, nodeIdFromTabId(1));
+  assert.equal(restored.nodes[nodeIdFromTabId(2)].parentNodeId, null);
   assert.equal(restored.nodes[nodeIdFromTabId(3)].parentNodeId, nodeIdFromTabId(1));
   assert.notEqual(restored.nodes[nodeIdFromTabId(3)].parentNodeId, nodeIdFromTabId(2));
-  assert.deepEqual(restored.nodes[nodeIdFromTabId(1)].childNodeIds, [nodeIdFromTabId(2), nodeIdFromTabId(3)]);
+  assert.deepEqual(restored.rootNodeIds, [nodeIdFromTabId(2), nodeIdFromTabId(1)]);
+  assert.deepEqual(restored.nodes[nodeIdFromTabId(1)].childNodeIds, [nodeIdFromTabId(3)]);
 });
 
 test("buildTreeFromTabs prefers pinned-aware matching when duplicate url/title tabs exist", () => {
@@ -331,8 +373,8 @@ test("buildTreeFromTabs prefers pinned-aware matching when duplicate url/title t
   const sharedUrl = "https://mail.test/inbox";
   const tabs = [
     tab({ id: 10, index: 0, pinned: true, title: sharedTitle, url: sharedUrl }),
-    tab({ id: 11, index: 1, title: sharedTitle, url: sharedUrl }),
-    tab({ id: 12, index: 2, title: "Pinned Child", url: "https://mail.test/thread/1" }),
+    tab({ id: 12, index: 1, pinned: true, title: "Pinned Child", url: "https://mail.test/thread/1" }),
+    tab({ id: 11, index: 2, title: sharedTitle, url: sharedUrl }),
     tab({ id: 13, index: 3, title: "Regular Child", url: "https://mail.test/thread/2" })
   ];
 
@@ -385,6 +427,7 @@ test("buildTreeFromTabs prefers pinned-aware matching when duplicate url/title t
 
   assert.equal(restored.nodes[nodeIdFromTabId(12)].parentNodeId, nodeIdFromTabId(10));
   assert.equal(restored.nodes[nodeIdFromTabId(13)].parentNodeId, nodeIdFromTabId(11));
+  assert.deepEqual(restored.rootNodeIds, [nodeIdFromTabId(10), nodeIdFromTabId(11)]);
 });
 
 test("buildTreeFromTabs falls back to title matching when urls are missing", () => {
