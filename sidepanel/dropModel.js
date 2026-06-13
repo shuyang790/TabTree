@@ -25,8 +25,13 @@ export const DROP_BLOCK_REASONS = Object.freeze({
   SELF_TARGET: "self-target",
   MISSING_SOURCE: "missing-source",
   CYCLE: "cycle",
-  PINNED_MISMATCH: "pinned-mismatch"
+  PINNED_MISMATCH: "pinned-mismatch",
+  GROUP_BOUNDARY: "group-boundary"
 });
+
+function normalizedGroupId(node) {
+  return Number.isInteger(node?.groupId) && node.groupId >= 0 ? node.groupId : null;
+}
 
 export function dropBlockReason({
   tree,
@@ -54,6 +59,7 @@ export function dropBlockReason({
   const newParentNodeId = position === "inside"
     ? targetNodeId
     : targetNode.parentNodeId;
+  const parentGroupId = newParentNodeId ? normalizedGroupId(tree.nodes[newParentNodeId]) : null;
   const expectedPinned = (() => {
     if (newParentNodeId) {
       return !!tree.nodes[newParentNodeId]?.pinned;
@@ -73,6 +79,10 @@ export function dropBlockReason({
 
     if (!!sourceNode.pinned !== expectedPinned) {
       return DROP_BLOCK_REASONS.PINNED_MISMATCH;
+    }
+
+    if (newParentNodeId && parentGroupId === null && normalizedGroupId(sourceNode) !== null) {
+      return DROP_BLOCK_REASONS.GROUP_BOUNDARY;
     }
   }
 

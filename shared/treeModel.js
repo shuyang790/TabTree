@@ -154,6 +154,10 @@ function sortChildrenByTabIndex(tree, parentNodeId) {
   parent.childNodeIds.sort((a, b) => (tree.nodes[a]?.index || 0) - (tree.nodes[b]?.index || 0));
 }
 
+function normalizedGroupId(node) {
+  return Number.isInteger(node?.groupId) && node.groupId >= 0 ? node.groupId : null;
+}
+
 function reparentNode(next, nodeId, parentNodeId, newIndex = null) {
   const node = next.nodes[nodeId];
   if (!node) {
@@ -338,10 +342,20 @@ export function ensureValidTree(tree) {
       return true;
     });
   };
+  const hasParentCycle = (nodeId) => {
+    const seen = new Set([nodeId]);
+    let current = next.nodes[nodeId]?.parentNodeId || null;
+    while (current && next.nodes[current]) {
+      if (seen.has(current)) {
+        return true;
+      }
+      seen.add(current);
+      current = next.nodes[current]?.parentNodeId || null;
+    }
+    return false;
+  };
 
   const known = new Set(Object.keys(next.nodes));
-  next.rootNodeIds = dedupeIds(next.rootNodeIds.filter((id) => known.has(id)));
-
   for (const node of Object.values(next.nodes)) {
     node.childNodeIds = dedupeIds(node.childNodeIds.filter((id) => known.has(id) && id !== node.nodeId));
     if (node.parentNodeId && !known.has(node.parentNodeId)) {
@@ -350,8 +364,31 @@ export function ensureValidTree(tree) {
   }
 
   for (const [id, node] of Object.entries(next.nodes)) {
+    if (node.parentNodeId && hasParentCycle(id)) {
+      node.parentNodeId = null;
+    }
+  }
+
+  next.rootNodeIds = dedupeIds(
+    next.rootNodeIds.filter((id) => known.has(id) && !next.nodes[id]?.parentNodeId)
+  );
+
+  for (const [parentId, parentNode] of Object.entries(next.nodes)) {
+    parentNode.childNodeIds = dedupeIds(
+      parentNode.childNodeIds.filter((id) => next.nodes[id]?.parentNodeId === parentId)
+    );
+  }
+
+  for (const [id, node] of Object.entries(next.nodes)) {
     if (!node.parentNodeId && !next.rootNodeIds.includes(id)) {
       next.rootNodeIds.push(id);
+      continue;
+    }
+    if (node.parentNodeId && next.nodes[node.parentNodeId]) {
+      const siblings = next.nodes[node.parentNodeId].childNodeIds;
+      if (!siblings.includes(id)) {
+        siblings.push(id);
+      }
     }
   }
 
@@ -364,16 +401,15 @@ export function normalizeGroupedTabParents(tree) {
   let changed = false;
 
   for (const [nodeId, node] of Object.entries(next.nodes)) {
-    if (!Number.isInteger(node.groupId) || node.groupId < 0 || !node.parentNodeId) {
+    if (!node.parentNodeId) {
       continue;
     }
 
     const parentNode = next.nodes[node.parentNodeId];
-    const parentGroupId = Number.isInteger(parentNode?.groupId) && parentNode.groupId >= 0
-      ? parentNode.groupId
-      : null;
+    const parentGroupId = normalizedGroupId(parentNode);
+    const childGroupId = normalizedGroupId(node);
 
-    if (parentGroupId === node.groupId) {
+    if (parentGroupId === childGroupId) {
       continue;
     }
 
@@ -428,16 +464,8 @@ function canPreserveParentChildOrder(childNode, parentNode) {
     return false;
   }
 
-  const childGroupId = Number.isInteger(childNode.groupId) && childNode.groupId >= 0
-    ? childNode.groupId
-    : null;
-  if (childGroupId === null) {
-    return true;
-  }
-
-  const parentGroupId = Number.isInteger(parentNode.groupId) && parentNode.groupId >= 0
-    ? parentNode.groupId
-    : null;
+  const childGroupId = normalizedGroupId(childNode);
+  const parentGroupId = normalizedGroupId(parentNode);
   return parentGroupId === childGroupId;
 }
 

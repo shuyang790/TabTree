@@ -353,8 +353,16 @@ function canReparent(tree, movingNodeId, parentNodeId) {
   if (!parent) {
     return false;
   }
+  if (parentNodeId === movingNodeId || getDescendantNodeIds(tree, movingNodeId).includes(parentNodeId)) {
+    return false;
+  }
   // Keep pinned tabs in the pinned zone.
   if (!!moving.pinned !== !!parent.pinned) {
+    return false;
+  }
+  const movingGroupId = Number.isInteger(moving.groupId) && moving.groupId >= 0 ? moving.groupId : null;
+  const parentGroupId = Number.isInteger(parent.groupId) && parent.groupId >= 0 ? parent.groupId : null;
+  if (movingGroupId !== null && parentGroupId === null) {
     return false;
   }
   return true;

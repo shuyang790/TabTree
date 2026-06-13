@@ -193,6 +193,19 @@ test("normalizeGroupedTabParents keeps grouped child when parent is same group",
   assert.deepEqual(tree.nodes[nodeIdFromTabId(1)].childNodeIds, [nodeIdFromTabId(2)]);
 });
 
+test("normalizeGroupedTabParents detaches ungrouped child from grouped parent", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0, groupId: 5 }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1, groupId: -1 }));
+  tree = moveNode(tree, nodeIdFromTabId(2), nodeIdFromTabId(1));
+
+  tree = normalizeGroupedTabParents(tree);
+
+  assert.equal(tree.nodes[nodeIdFromTabId(2)].parentNodeId, null);
+  assert.deepEqual(tree.rootNodeIds, [nodeIdFromTabId(1), nodeIdFromTabId(2)]);
+  assert.deepEqual(tree.nodes[nodeIdFromTabId(1)].childNodeIds, []);
+});
+
 test("normalizeGroupedTabParents keeps grouped subtree intact after boundary detach", () => {
   let tree = createEmptyWindowTree(1);
   tree = upsertTabNode(tree, tab({ id: 1, index: 0, groupId: -1 }));
@@ -244,6 +257,21 @@ test("normalizeTreeToTabOrder keeps the nearest valid ancestor in native order",
   assert.deepEqual(normalized.rootNodeIds, [nodeIdFromTabId(1)]);
   assert.deepEqual(normalized.nodes[nodeIdFromTabId(1)].childNodeIds, [
     nodeIdFromTabId(3),
+    nodeIdFromTabId(2)
+  ]);
+});
+
+test("normalizeTreeToTabOrder rejects parent preservation across group boundary", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0, groupId: 5, title: "Grouped Parent" }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1, groupId: -1, title: "Ungrouped Child" }));
+  tree = moveNode(tree, nodeIdFromTabId(2), nodeIdFromTabId(1));
+
+  const normalized = normalizeTreeToTabOrder(tree);
+
+  assert.equal(normalized.nodes[nodeIdFromTabId(2)].parentNodeId, null);
+  assert.deepEqual(normalized.rootNodeIds, [
+    nodeIdFromTabId(1),
     nodeIdFromTabId(2)
   ]);
 });
@@ -508,6 +536,96 @@ test("ensureValidTree dedupes root and child node ids while repairing missing pa
   assert.deepEqual(validated.rootNodeIds, [rootNodeId, orphanNodeId]);
   assert.deepEqual(validated.nodes[rootNodeId].childNodeIds, [childNodeId]);
   assert.equal(validated.nodes[orphanNodeId].parentNodeId, null);
+});
+
+test("ensureValidTree removes duplicate root and wrong-parent memberships", () => {
+  const rootNodeId = nodeIdFromTabId(1);
+  const childNodeId = nodeIdFromTabId(2);
+  const wrongParentNodeId = nodeIdFromTabId(3);
+  const missingChildListNodeId = nodeIdFromTabId(4);
+
+  const tree = createEmptyWindowTree(1);
+  tree.nodes = {
+    [rootNodeId]: {
+      nodeId: rootNodeId,
+      tabId: 1,
+      parentNodeId: null,
+      childNodeIds: [childNodeId],
+      collapsed: false,
+      lastKnownTitle: "Root",
+      lastKnownUrl: "https://example.com/1"
+    },
+    [childNodeId]: {
+      nodeId: childNodeId,
+      tabId: 2,
+      parentNodeId: rootNodeId,
+      childNodeIds: [],
+      collapsed: false,
+      lastKnownTitle: "Child",
+      lastKnownUrl: "https://example.com/2"
+    },
+    [wrongParentNodeId]: {
+      nodeId: wrongParentNodeId,
+      tabId: 3,
+      parentNodeId: null,
+      childNodeIds: [childNodeId],
+      collapsed: false,
+      lastKnownTitle: "Wrong Parent",
+      lastKnownUrl: "https://example.com/3"
+    },
+    [missingChildListNodeId]: {
+      nodeId: missingChildListNodeId,
+      tabId: 4,
+      parentNodeId: rootNodeId,
+      childNodeIds: [],
+      collapsed: false,
+      lastKnownTitle: "Missing Child List Entry",
+      lastKnownUrl: "https://example.com/4"
+    }
+  };
+  tree.rootNodeIds = [rootNodeId, childNodeId, wrongParentNodeId];
+
+  const validated = ensureValidTree(tree);
+
+  assert.deepEqual(validated.rootNodeIds, [rootNodeId, wrongParentNodeId]);
+  assert.deepEqual(validated.nodes[rootNodeId].childNodeIds, [childNodeId, missingChildListNodeId]);
+  assert.deepEqual(validated.nodes[wrongParentNodeId].childNodeIds, []);
+});
+
+test("ensureValidTree breaks parent cycles", () => {
+  const firstNodeId = nodeIdFromTabId(1);
+  const secondNodeId = nodeIdFromTabId(2);
+
+  const tree = createEmptyWindowTree(1);
+  tree.nodes = {
+    [firstNodeId]: {
+      nodeId: firstNodeId,
+      tabId: 1,
+      parentNodeId: secondNodeId,
+      childNodeIds: [secondNodeId],
+      collapsed: false,
+      lastKnownTitle: "First",
+      lastKnownUrl: "https://example.com/1"
+    },
+    [secondNodeId]: {
+      nodeId: secondNodeId,
+      tabId: 2,
+      parentNodeId: firstNodeId,
+      childNodeIds: [firstNodeId],
+      collapsed: false,
+      lastKnownTitle: "Second",
+      lastKnownUrl: "https://example.com/2"
+    }
+  };
+  tree.rootNodeIds = [];
+
+  const validated = ensureValidTree(tree);
+
+  assert.deepEqual(validated.rootNodeIds, [firstNodeId]);
+  assert.equal(validated.nodes[firstNodeId].parentNodeId, null);
+  assert.equal(validated.nodes[secondNodeId].parentNodeId, firstNodeId);
+  assert.deepEqual(validated.nodes[firstNodeId].childNodeIds, [secondNodeId]);
+  assert.deepEqual(validated.nodes[secondNodeId].childNodeIds, []);
 });
 
 test("normalizeUrl strips hash and trailing slash while preserving query", () => {

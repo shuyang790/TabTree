@@ -119,6 +119,62 @@ test("dropBlockReason returns specific reason codes", () => {
   );
 });
 
+test("canDrop blocks grouped tabs under ungrouped parents", () => {
+  const tree = {
+    rootNodeIds: ["tab:1", "tab:2", "tab:3"],
+    nodes: {
+      "tab:1": { tabId: 1, index: 0, parentNodeId: null, pinned: false, groupId: null, childNodeIds: [] },
+      "tab:2": { tabId: 2, index: 1, parentNodeId: null, pinned: false, groupId: 7, childNodeIds: [] },
+      "tab:3": { tabId: 3, index: 2, parentNodeId: null, pinned: false, groupId: null, childNodeIds: [] }
+    }
+  };
+
+  assert.equal(
+    dropBlockReason({
+      tree,
+      sourceTabIds: [2],
+      targetTabId: 1,
+      position: "inside",
+      nodeIdFromTabId,
+      isDescendant
+    }),
+    DROP_BLOCK_REASONS.GROUP_BOUNDARY
+  );
+  assert.equal(
+    canDrop({
+      tree,
+      sourceTabIds: [2],
+      targetTabId: 1,
+      position: "inside",
+      nodeIdFromTabId,
+      isDescendant
+    }),
+    false
+  );
+});
+
+test("canDrop allows ungrouped tabs under grouped parents", () => {
+  const tree = {
+    rootNodeIds: ["tab:1", "tab:2"],
+    nodes: {
+      "tab:1": { tabId: 1, index: 0, parentNodeId: null, pinned: false, groupId: 7, childNodeIds: [] },
+      "tab:2": { tabId: 2, index: 1, parentNodeId: null, pinned: false, groupId: null, childNodeIds: [] }
+    }
+  };
+
+  assert.equal(
+    canDrop({
+      tree,
+      sourceTabIds: [2],
+      targetTabId: 1,
+      position: "inside",
+      nodeIdFromTabId,
+      isDescendant
+    }),
+    true
+  );
+});
+
 test("canDrop accepts valid before/after root moves", () => {
   const tree = sampleTree();
   const valid = canDrop({

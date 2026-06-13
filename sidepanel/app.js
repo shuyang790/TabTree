@@ -1581,6 +1581,9 @@ function blockedReasonLabel(reason) {
   if (reason === GROUP_DROP_BLOCK_REASONS.NON_ROOT_TARGET) {
     return t("dropBlockedGroupBoundary", [], "group boundary");
   }
+  if (reason === DROP_BLOCK_REASONS.GROUP_BOUNDARY) {
+    return t("dropBlockedGroupBoundary", [], "group boundary");
+  }
   if (reason === GROUP_DROP_BLOCK_REASONS.SAME_GROUP) {
     return t("dropBlockedSameGroup", [], "same group");
   }
