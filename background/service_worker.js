@@ -2436,11 +2436,23 @@ chrome.tabs.onUpdated.addListener((tabId, _changeInfo, tab) => {
       return;
     }
 
+    const existing = tree.nodes[nodeIdFromTabId(tabId)] || null;
+    const previousGroupId = Number.isInteger(existing?.groupId) && existing.groupId >= 0 ? existing.groupId : null;
+    const nextGroupId = Number.isInteger(tab.groupId) && tab.groupId >= 0 ? tab.groupId : null;
+    const orderingSensitiveChange = !!existing && (
+      existing.index !== tab.index
+      || !!existing.pinned !== !!tab.pinned
+      || previousGroupId !== nextGroupId
+    );
+
     let next = upsertTabNode(tree, tab);
     if (tab.active && tree.selectedTabId !== tabId) {
       next = setActiveTab(next, tabId);
     }
     setWindowTree(next);
+    if (orderingSensitiveChange) {
+      scheduleWindowOrderingSync(tab.windowId);
+    }
     if (tab.active) {
       await ensureSelectedTabVisible(tab.windowId, tabId);
     }
@@ -2507,6 +2519,7 @@ chrome.tabs.onAttached.addListener((tabId, attachInfo) => {
     }
     const tree = windowTree(attachInfo.newWindowId);
     setWindowTree(upsertTabNode(tree, tab));
+    scheduleWindowOrderingSync(attachInfo.newWindowId);
   }, {
     operation: "tabs.onAttached",
     tabId,
@@ -2557,6 +2570,7 @@ chrome.tabGroups.onCreated.addListener((group) => {
     if (Number.isInteger(windowId)) {
       await queueMutation(windowId, async () => {
         await refreshGroupMetadata(windowId);
+        scheduleWindowOrderingSync(windowId);
       }, {
         operation: "tabGroups.onCreated.refreshGroupMetadata",
         groupId: group?.id,
@@ -2602,6 +2616,7 @@ chrome.tabGroups.onRemoved.addListener((group) => {
     if (Number.isInteger(windowId)) {
       await queueMutation(windowId, async () => {
         await refreshGroupMetadata(windowId);
+        scheduleWindowOrderingSync(windowId);
       }, {
         operation: "tabGroups.onRemoved.refreshGroupMetadata",
         groupId: group?.id,
