@@ -469,6 +469,56 @@ function canPreserveParentChildOrder(childNode, parentNode) {
   return parentGroupId === childGroupId;
 }
 
+function hasHashOnlyUrlIdentityMatch(childNode, parentNode) {
+  const childUrl = typeof childNode?.lastKnownUrl === "string" ? childNode.lastKnownUrl : "";
+  const parentUrl = typeof parentNode?.lastKnownUrl === "string" ? parentNode.lastKnownUrl : "";
+  if (!childUrl || !parentUrl || childUrl === parentUrl) {
+    return false;
+  }
+  const childNormalizedUrl = normalizeUrl(childUrl);
+  return !!childNormalizedUrl && childNormalizedUrl === normalizeUrl(parentUrl);
+}
+
+function restoreOutOfOrderHashIdentityParents(base, next) {
+  let changed = false;
+
+  for (const nodeId of Object.keys(base.nodes)) {
+    const baseNode = base.nodes[nodeId];
+    const parentNodeId = baseNode?.parentNodeId || null;
+    if (!parentNodeId || !base.nodes[parentNodeId]) {
+      continue;
+    }
+
+    const node = next.nodes[nodeId];
+    const parentNode = next.nodes[parentNodeId];
+    if (!node || !parentNode || node.parentNodeId === parentNodeId) {
+      continue;
+    }
+    if (!canPreserveParentChildOrder(node, parentNode)) {
+      continue;
+    }
+    if (!hasHashOnlyUrlIdentityMatch(baseNode, base.nodes[parentNodeId])) {
+      continue;
+    }
+    if (isDescendant(next, nodeId, parentNodeId)) {
+      continue;
+    }
+
+    if (node.parentNodeId && next.nodes[node.parentNodeId]) {
+      removeFromArray(next.nodes[node.parentNodeId].childNodeIds, nodeId);
+    } else {
+      removeFromArray(next.rootNodeIds, nodeId);
+    }
+    node.parentNodeId = parentNodeId;
+    if (!parentNode.childNodeIds.includes(nodeId)) {
+      parentNode.childNodeIds.push(nodeId);
+    }
+    changed = true;
+  }
+
+  return changed ? sortTreeByIndex(ensureValidTree(next)) : next;
+}
+
 export function normalizeTreeToTabOrder(tree) {
   const base = ensureValidTree(tree);
   const next = cloneTree(base);
@@ -515,7 +565,7 @@ export function normalizeTreeToTabOrder(tree) {
   }
 
   next.updatedAt = Date.now();
-  return sortTreeByIndex(next);
+  return restoreOutOfOrderHashIdentityParents(base, sortTreeByIndex(next));
 }
 
 export function buildTreeFromTabs(tabs, previousTree = null) {

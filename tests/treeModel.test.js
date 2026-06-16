@@ -396,6 +396,59 @@ test("buildTreeFromTabs preserves only order-compatible parents for reordered sa
   assert.deepEqual(restored.nodes[nodeIdFromTabId(1)].childNodeIds, [nodeIdFromTabId(3)]);
 });
 
+test("buildTreeFromTabs restores hash-distinct same-url siblings under original parent", () => {
+  const parentUrl = "https://dup-parent.test/path?token=1#parent";
+  const childAUrl = "https://dup-parent.test/path?token=1#child-a";
+  const childBUrl = "https://dup-parent.test/path?token=1#child-b";
+  const tabs = [
+    tab({ id: 2, index: 0, title: "Child A", url: childAUrl }),
+    tab({ id: 1, index: 1, title: "Parent", url: parentUrl }),
+    tab({ id: 3, index: 2, title: "Child B", url: childBUrl })
+  ];
+
+  const previousTree = createEmptyWindowTree(1);
+  previousTree.nodes = {
+    [nodeIdFromTabId(1)]: {
+      nodeId: nodeIdFromTabId(1),
+      tabId: 1,
+      parentNodeId: null,
+      childNodeIds: [nodeIdFromTabId(2), nodeIdFromTabId(3)],
+      collapsed: false,
+      lastKnownTitle: "Parent",
+      lastKnownUrl: parentUrl
+    },
+    [nodeIdFromTabId(2)]: {
+      nodeId: nodeIdFromTabId(2),
+      tabId: 2,
+      parentNodeId: nodeIdFromTabId(1),
+      childNodeIds: [],
+      collapsed: false,
+      lastKnownTitle: "Child A",
+      lastKnownUrl: childAUrl
+    },
+    [nodeIdFromTabId(3)]: {
+      nodeId: nodeIdFromTabId(3),
+      tabId: 3,
+      parentNodeId: nodeIdFromTabId(1),
+      childNodeIds: [],
+      collapsed: false,
+      lastKnownTitle: "Child B",
+      lastKnownUrl: childBUrl
+    }
+  };
+  previousTree.rootNodeIds = [nodeIdFromTabId(1)];
+
+  const restored = buildTreeFromTabs(tabs, previousTree);
+
+  assert.equal(restored.nodes[nodeIdFromTabId(2)].parentNodeId, nodeIdFromTabId(1));
+  assert.equal(restored.nodes[nodeIdFromTabId(3)].parentNodeId, nodeIdFromTabId(1));
+  assert.deepEqual(restored.rootNodeIds, [nodeIdFromTabId(1)]);
+  assert.deepEqual(restored.nodes[nodeIdFromTabId(1)].childNodeIds, [
+    nodeIdFromTabId(2),
+    nodeIdFromTabId(3)
+  ]);
+});
+
 test("buildTreeFromTabs prefers pinned-aware matching when duplicate url/title tabs exist", () => {
   const sharedTitle = "Inbox";
   const sharedUrl = "https://mail.test/inbox";
