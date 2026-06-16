@@ -2229,21 +2229,21 @@ test.describe("TabTree extension", () => {
       ["Keyboard Move Root", "Keyboard Move Source A", "Keyboard Move Source B", "Keyboard Move Target"]
     );
 
-    await rowByTitle(sidePanelPage, "Keyboard Move Source A").focus();
-    await sidePanelPage.evaluate((title) => {
-      const rows = Array.from(document.querySelectorAll(".tree-row[data-tab-id]"));
-      const row = rows.find((entry) => entry.querySelector(".title")?.textContent?.trim() === title);
-      if (!row) {
-        throw new Error("Keyboard move source row missing");
-      }
-      row.focus();
-      row.dispatchEvent(new KeyboardEvent("keydown", {
-        key: "ArrowRight",
-        altKey: true,
-        shiftKey: true,
-        bubbles: true
-      }));
-    }, "Keyboard Move Source A");
+    await expect.poll(() => renderedOrderByTitles(sidePanelPage, [
+      "Keyboard Move Root",
+      "Keyboard Move Source A",
+      "Keyboard Move Source B",
+      "Keyboard Move Target"
+    ])).toEqual([
+      "Keyboard Move Root",
+      "Keyboard Move Source A",
+      "Keyboard Move Source B",
+      "Keyboard Move Target"
+    ]);
+
+    const rowSourceAAfterMove = rowByTitle(sidePanelPage, "Keyboard Move Source A");
+    await rowSourceAAfterMove.focus();
+    await rowSourceAAfterMove.press("Alt+Shift+ArrowRight");
     await expect.poll(async () => {
       const tree = await getCurrentWindowTree(sidePanelPage);
       return {
