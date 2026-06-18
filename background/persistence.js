@@ -9,15 +9,23 @@ export function createPersistCoordinator({
   onError = () => {},
   flushDebounceMs = STORAGE_WRITE_DEBOUNCE_MS,
   snapshotMinIntervalMs = 2000,
+  heavySnapshotMinIntervalMs = 30000,
   retryBaseMs = 500,
-  retryMaxMs = 4000
+  retryMaxMs = 4000,
+  snapshotRetryMaxFailures = 3,
+  snapshotFailureCooldownMs = 5 * 60 * 1000
 }) {
   const dirtyWindowIds = new Set();
-  let snapshotDirty = false;
+  let syncSnapshotDirty = false;
+  let heavySnapshotDirty = false;
   let flushTimer = null;
   let flushInFlight = false;
-  let retryDelayMs = retryBaseMs;
-  let lastSnapshotAt = 0;
+  let windowRetryDelayMs = retryBaseMs;
+  let snapshotRetryDelayMs = retryBaseMs;
+  let snapshotFailureCount = 0;
+  let snapshotsPausedUntil = 0;
+  let lastSyncSnapshotAt = 0;
+  let lastHeavySnapshotAt = 0;
 
   function scheduleFlush(delayMs) {
     if (flushTimer) {
@@ -35,6 +43,97 @@ export function createPersistCoordinator({
       flushTimer = null;
     }
     await flushPending();
+  }
+
+  function pendingSnapshotWaitMs(now = Date.now()) {
+    if (!syncSnapshotDirty && !heavySnapshotDirty) {
+      return null;
+    }
+    if (snapshotsPausedUntil > now) {
+      return snapshotsPausedUntil - now;
+    }
+
+    const waits = [];
+    if (syncSnapshotDirty) {
+      waits.push(Math.max(0, snapshotMinIntervalMs - (now - lastSyncSnapshotAt)));
+    }
+    if (heavySnapshotDirty) {
+      waits.push(Math.max(0, heavySnapshotMinIntervalMs - (now - lastHeavySnapshotAt)));
+    }
+    return waits.length ? Math.min(...waits) : null;
+  }
+
+  function nextPendingDelayMs() {
+    if (dirtyWindowIds.size > 0) {
+      return flushDebounceMs;
+    }
+    return pendingSnapshotWaitMs();
+  }
+
+  function handleSnapshotFailure(error) {
+    onError(error, { phase: "snapshot" });
+    snapshotFailureCount += 1;
+    if (snapshotFailureCount >= snapshotRetryMaxFailures) {
+      snapshotsPausedUntil = Date.now() + snapshotFailureCooldownMs;
+      snapshotFailureCount = 0;
+      snapshotRetryDelayMs = retryBaseMs;
+      scheduleFlush(snapshotFailureCooldownMs);
+      return;
+    }
+
+    snapshotRetryDelayMs = Math.min(snapshotRetryDelayMs * 2, retryMaxMs);
+    scheduleFlush(snapshotRetryDelayMs);
+  }
+
+  async function flushSnapshots(windowsState) {
+    const now = Date.now();
+    if (!syncSnapshotDirty && !heavySnapshotDirty) {
+      return;
+    }
+    if (snapshotsPausedUntil > now) {
+      scheduleFlush(snapshotsPausedUntil - now);
+      return;
+    }
+
+    const syncDue = syncSnapshotDirty && (now - lastSyncSnapshotAt) >= snapshotMinIntervalMs;
+    const heavyDue = heavySnapshotDirty && (now - lastHeavySnapshotAt) >= heavySnapshotMinIntervalMs;
+    if (!syncDue && !heavyDue) {
+      const waitMs = pendingSnapshotWaitMs(now);
+      if (Number.isFinite(waitMs)) {
+        scheduleFlush(waitMs);
+      }
+      return;
+    }
+
+    const errors = [];
+    if (heavyDue) {
+      try {
+        await saveLocalSnapshot(windowsState);
+        await saveRestoreArchive(windowsState);
+        heavySnapshotDirty = false;
+        lastHeavySnapshotAt = Date.now();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+
+    if (syncDue) {
+      try {
+        await saveSyncSnapshot(windowsState);
+        syncSnapshotDirty = false;
+        lastSyncSnapshotAt = Date.now();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+
+    if (errors.length) {
+      handleSnapshotFailure(errors[0]);
+      return;
+    }
+
+    snapshotFailureCount = 0;
+    snapshotRetryDelayMs = retryBaseMs;
   }
 
   async function flushPending() {
@@ -61,33 +160,22 @@ export function createPersistCoordinator({
         await Promise.all(writeTasks);
       }
 
-      await saveLocalSnapshot(windowsState);
-      await saveRestoreArchive(windowsState);
-
-      if (snapshotDirty) {
-        const now = Date.now();
-        const waitMs = snapshotMinIntervalMs - (now - lastSnapshotAt);
-        if (waitMs > 0) {
-          scheduleFlush(waitMs);
-        } else {
-          await saveSyncSnapshot(windowsState);
-          snapshotDirty = false;
-          lastSnapshotAt = Date.now();
-        }
-      }
-
-      retryDelayMs = retryBaseMs;
+      windowRetryDelayMs = retryBaseMs;
+      await flushSnapshots(windowsState);
     } catch (error) {
       for (const windowId of pendingWindowIds) {
         dirtyWindowIds.add(windowId);
       }
-      onError(error);
-      retryDelayMs = Math.min(retryDelayMs * 2, retryMaxMs);
-      scheduleFlush(retryDelayMs);
+      onError(error, { phase: "window" });
+      windowRetryDelayMs = Math.min(windowRetryDelayMs * 2, retryMaxMs);
+      scheduleFlush(windowRetryDelayMs);
     } finally {
       flushInFlight = false;
-      if ((dirtyWindowIds.size > 0 || snapshotDirty) && !flushTimer) {
-        scheduleFlush(flushDebounceMs);
+      if (!flushTimer) {
+        const pendingDelayMs = nextPendingDelayMs();
+        if (Number.isFinite(pendingDelayMs)) {
+          scheduleFlush(pendingDelayMs);
+        }
       }
     }
   }
@@ -96,18 +184,21 @@ export function createPersistCoordinator({
     if (Number.isInteger(windowId)) {
       dirtyWindowIds.add(windowId);
     }
-    snapshotDirty = true;
+    syncSnapshotDirty = true;
+    heavySnapshotDirty = true;
     scheduleFlush(flushDebounceMs);
   }
 
   function markSnapshotDirty() {
-    snapshotDirty = true;
+    syncSnapshotDirty = true;
+    heavySnapshotDirty = true;
     scheduleFlush(flushDebounceMs);
   }
 
   function forgetWindow(windowId) {
     dirtyWindowIds.delete(windowId);
-    snapshotDirty = true;
+    syncSnapshotDirty = true;
+    heavySnapshotDirty = true;
     scheduleFlush(flushDebounceMs);
   }
 
@@ -117,7 +208,8 @@ export function createPersistCoordinator({
       flushTimer = null;
     }
     dirtyWindowIds.clear();
-    snapshotDirty = false;
+    syncSnapshotDirty = false;
+    heavySnapshotDirty = false;
   }
 
   return {

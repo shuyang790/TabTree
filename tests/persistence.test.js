@@ -43,7 +43,8 @@ test("persist coordinator flushes dirty windows and coalesces snapshot writes", 
     },
     getWindowsState: () => windowsState,
     flushDebounceMs: 15,
-    snapshotMinIntervalMs: 0
+    snapshotMinIntervalMs: 0,
+    heavySnapshotMinIntervalMs: 0
   });
 
   coordinator.markWindowDirty(1);
@@ -93,6 +94,7 @@ test("persist coordinator retries when flush fails", async () => {
     },
     flushDebounceMs: 10,
     snapshotMinIntervalMs: 0,
+    heavySnapshotMinIntervalMs: 0,
     retryBaseMs: 10,
     retryMaxMs: 40
   });
@@ -133,7 +135,8 @@ test("persist coordinator throttles snapshot writes but still flushes window tre
     },
     getWindowsState: () => windowsState,
     flushDebounceMs: 10,
-    snapshotMinIntervalMs: 80
+    snapshotMinIntervalMs: 80,
+    heavySnapshotMinIntervalMs: 0
   });
 
   coordinator.markWindowDirty(1);
@@ -175,7 +178,8 @@ test("persist coordinator flushNow bypasses debounce and clears pending timer", 
     },
     getWindowsState: () => windowsState,
     flushDebounceMs: 1000,
-    snapshotMinIntervalMs: 0
+    snapshotMinIntervalMs: 0,
+    heavySnapshotMinIntervalMs: 0
   });
 
   coordinator.markWindowDirty(1);
@@ -218,12 +222,98 @@ test("persist coordinator writes local snapshot even when no windows are dirty",
     },
     getWindowsState: () => windowsState,
     flushDebounceMs: 10,
-    snapshotMinIntervalMs: 0
+    snapshotMinIntervalMs: 0,
+    heavySnapshotMinIntervalMs: 0
   });
 
   coordinator.markSnapshotDirty();
   await waitFor(() => localSnapshotWrites >= 1 && syncSnapshotWrites >= 1 && restoreArchiveWrites >= 1);
   assert.equal(windowWrites, 0);
+
+  coordinator.dispose();
+});
+
+test("persist coordinator throttles heavy snapshots separately from window tree writes", async () => {
+  const windowsState = {
+    1: { windowId: 1, nodes: {}, rootNodeIds: [] }
+  };
+  let windowWrites = 0;
+  let syncSnapshotWrites = 0;
+  let localSnapshotWrites = 0;
+  let restoreArchiveWrites = 0;
+
+  const coordinator = createPersistCoordinator({
+    saveWindowTree: async () => {
+      windowWrites += 1;
+    },
+    saveSyncSnapshot: async () => {
+      syncSnapshotWrites += 1;
+    },
+    saveLocalSnapshot: async () => {
+      localSnapshotWrites += 1;
+    },
+    saveRestoreArchive: async () => {
+      restoreArchiveWrites += 1;
+    },
+    getWindowsState: () => windowsState,
+    flushDebounceMs: 10,
+    snapshotMinIntervalMs: 0,
+    heavySnapshotMinIntervalMs: 80
+  });
+
+  coordinator.markWindowDirty(1);
+  await waitFor(() => windowWrites === 1 && syncSnapshotWrites === 1 && localSnapshotWrites === 1 && restoreArchiveWrites === 1);
+
+  coordinator.markWindowDirty(1);
+  await waitFor(() => windowWrites === 2 && syncSnapshotWrites === 2, { timeoutMs: 600 });
+  assert.equal(localSnapshotWrites, 1);
+  assert.equal(restoreArchiveWrites, 1);
+
+  await waitFor(() => localSnapshotWrites === 2 && restoreArchiveWrites === 2, { timeoutMs: 1200 });
+
+  coordinator.dispose();
+});
+
+test("persist coordinator does not rewrite saved windows when snapshot backups fail", async () => {
+  const windowsState = {
+    1: { windowId: 1, nodes: {}, rootNodeIds: [] }
+  };
+  let windowWrites = 0;
+  let localSnapshotWrites = 0;
+  let syncSnapshotWrites = 0;
+  let errorCount = 0;
+
+  const coordinator = createPersistCoordinator({
+    saveWindowTree: async () => {
+      windowWrites += 1;
+    },
+    saveSyncSnapshot: async () => {
+      syncSnapshotWrites += 1;
+    },
+    saveLocalSnapshot: async () => {
+      localSnapshotWrites += 1;
+      throw new Error("simulated backup quota failure");
+    },
+    saveRestoreArchive: async () => {
+      throw new Error("should not write archive after local snapshot failure");
+    },
+    getWindowsState: () => windowsState,
+    onError: () => {
+      errorCount += 1;
+    },
+    flushDebounceMs: 10,
+    snapshotMinIntervalMs: 0,
+    heavySnapshotMinIntervalMs: 0,
+    retryBaseMs: 10,
+    retryMaxMs: 10,
+    snapshotRetryMaxFailures: 1,
+    snapshotFailureCooldownMs: 1000
+  });
+
+  coordinator.markWindowDirty(1);
+  await waitFor(() => windowWrites === 1 && localSnapshotWrites === 1 && syncSnapshotWrites === 1 && errorCount === 1);
+  await sleep(60);
+  assert.equal(windowWrites, 1);
 
   coordinator.dispose();
 });

@@ -5,7 +5,7 @@
   "version": "0.4.8",
   "default_locale": "en",
   "minimum_chrome_version": "140",
-  "permissions": ["tabs", "storage", "sidePanel", "tabGroups"],
+  "permissions": ["tabs", "storage", "unlimitedStorage", "sidePanel", "tabGroups"],
   "background": {
     "service_worker": "background/service_worker.js",
     "type": "module"
