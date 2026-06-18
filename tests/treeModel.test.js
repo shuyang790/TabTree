@@ -19,7 +19,8 @@ import {
   setActiveTab,
   sortTreeByIndex,
   toggleNodeCollapsed,
-  upsertTabNode
+  upsertTabNode,
+  upsertTabNodes
 } from "../shared/treeModel.js";
 
 function tab(partial) {
@@ -36,6 +37,23 @@ function tab(partial) {
   };
 }
 
+function stripTimestamps(tree) {
+  return {
+    ...tree,
+    updatedAt: 0,
+    nodes: Object.fromEntries(
+      Object.entries(tree.nodes).map(([nodeId, node]) => [
+        nodeId,
+        {
+          ...node,
+          createdAt: 0,
+          updatedAt: 0
+        }
+      ])
+    )
+  };
+}
+
 test("upsertTabNode builds roots and preserves active selection", () => {
   let tree = createEmptyWindowTree(1);
   tree = upsertTabNode(tree, tab({ id: 1, index: 0 }));
@@ -43,6 +61,36 @@ test("upsertTabNode builds roots and preserves active selection", () => {
 
   assert.deepEqual(tree.rootNodeIds, [nodeIdFromTabId(1), nodeIdFromTabId(2)]);
   assert.equal(tree.selectedTabId, 2);
+});
+
+test("upsertTabNodes matches repeated single-tab upserts", () => {
+  let tree = createEmptyWindowTree(1);
+  tree = upsertTabNode(tree, tab({ id: 1, index: 0, title: "Parent" }));
+  tree = upsertTabNode(tree, tab({ id: 2, index: 1, title: "Child" }));
+  tree = upsertTabNode(tree, tab({ id: 3, index: 2, title: "Root" }));
+  tree = moveNode(tree, nodeIdFromTabId(2), nodeIdFromTabId(1));
+
+  const updates = [
+    tab({ id: 1, index: 0, title: "Parent renamed" }),
+    tab({ id: 2, index: 2, active: true, title: "Child moved later" }),
+    tab({ id: 3, index: 1, title: "Root moved earlier" }),
+    tab({ id: 4, index: 3, title: "New root" })
+  ];
+
+  let repeated = tree;
+  for (const update of updates) {
+    repeated = upsertTabNode(repeated, update);
+  }
+  const batched = upsertTabNodes(tree, updates);
+
+  assert.deepEqual(stripTimestamps(batched), stripTimestamps(repeated));
+  assert.equal(batched.selectedTabId, 2);
+  assert.equal(batched.nodes[nodeIdFromTabId(2)].parentNodeId, nodeIdFromTabId(1));
+});
+
+test("upsertTabNodes skips empty batches without cloning", () => {
+  const tree = createEmptyWindowTree(1);
+  assert.equal(upsertTabNodes(tree, []), tree);
 });
 
 test("moveNode reparents and rejects cycle", () => {

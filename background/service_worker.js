@@ -21,7 +21,8 @@ import {
   setActiveTab,
   sortTreeByIndex,
   toggleNodeCollapsed,
-  upsertTabNode
+  upsertTabNode,
+  upsertTabNodes
 } from "../shared/treeModel.js";
 import { dedupeRootNodeIds } from "../shared/treeUtils.js";
 import {
@@ -719,9 +720,7 @@ async function syncWindowOrdering(windowId) {
   let next = windowTree(windowId);
   const liveTabIds = new Set(tabs.map((tab) => tab.id));
 
-  for (const tab of tabs) {
-    next = upsertTabNode(next, tab);
-  }
+  next = upsertTabNodes(next, tabs);
   const activeTabId = tabs.find((tab) => tab.active)?.id ?? null;
   next = pruneTreeAgainstLiveTabs(next, liveTabIds, activeTabId).tree;
 

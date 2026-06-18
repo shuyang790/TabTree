@@ -154,6 +154,37 @@ function sortChildrenByTabIndex(tree, parentNodeId) {
   parent.childNodeIds.sort((a, b) => (tree.nodes[a]?.index || 0) - (tree.nodes[b]?.index || 0));
 }
 
+function createSortTracker() {
+  return {
+    roots: false,
+    parentNodeIds: new Set()
+  };
+}
+
+function markLocationForSort(tree, nodeId, sortTracker) {
+  if (!sortTracker) {
+    return;
+  }
+  const parentNodeId = tree.nodes[nodeId]?.parentNodeId || null;
+  if (parentNodeId && tree.nodes[parentNodeId]) {
+    sortTracker.parentNodeIds.add(parentNodeId);
+  } else {
+    sortTracker.roots = true;
+  }
+}
+
+function sortTouchedLocations(tree, sortTracker) {
+  if (!sortTracker) {
+    return;
+  }
+  if (sortTracker.roots) {
+    sortRootsByTabIndex(tree);
+  }
+  for (const parentNodeId of sortTracker.parentNodeIds) {
+    sortChildrenByTabIndex(tree, parentNodeId);
+  }
+}
+
 function normalizedGroupId(node) {
   return Number.isInteger(node?.groupId) && node.groupId >= 0 ? node.groupId : null;
 }
@@ -186,8 +217,7 @@ function reparentNode(next, nodeId, parentNodeId, newIndex = null) {
   }
 }
 
-export function upsertTabNode(tree, tab, options = {}) {
-  const next = cloneTree(tree);
+function applyTabToTree(next, tab, options = {}, sortTracker = null) {
   const nodeId = asNodeId(tab.id);
   const existing = next.nodes[nodeId];
   if (!existing) {
@@ -196,12 +226,21 @@ export function upsertTabNode(tree, tab, options = {}) {
     next.nodes[nodeId] = nodeFromTab(tab, parentNodeId, collapsed);
     if (parentNodeId && next.nodes[parentNodeId]) {
       next.nodes[parentNodeId].childNodeIds.push(nodeId);
-      sortChildrenByTabIndex(next, parentNodeId);
+      if (sortTracker) {
+        sortTracker.parentNodeIds.add(parentNodeId);
+      } else {
+        sortChildrenByTabIndex(next, parentNodeId);
+      }
     } else {
       next.rootNodeIds.push(nodeId);
-      sortRootsByTabIndex(next);
+      if (sortTracker) {
+        sortTracker.roots = true;
+      } else {
+        sortRootsByTabIndex(next);
+      }
     }
   } else {
+    const previousParentNodeId = existing.parentNodeId || null;
     existing.pinned = !!tab.pinned;
     existing.groupId = Number.isInteger(tab.groupId) && tab.groupId >= 0 ? tab.groupId : null;
     existing.index = typeof tab.index === "number" ? tab.index : existing.index;
@@ -213,14 +252,47 @@ export function upsertTabNode(tree, tab, options = {}) {
     existing.updatedAt = Date.now();
     if (options.parentNodeId && options.parentNodeId !== existing.parentNodeId) {
       reparentNode(next, nodeId, options.parentNodeId, options.newIndex ?? null);
+      if (sortTracker) {
+        if (previousParentNodeId && next.nodes[previousParentNodeId]) {
+          sortTracker.parentNodeIds.add(previousParentNodeId);
+        } else {
+          sortTracker.roots = true;
+        }
+      }
     }
-    if (existing.parentNodeId) {
+    if (sortTracker) {
+      markLocationForSort(next, nodeId, sortTracker);
+    } else if (existing.parentNodeId) {
       sortChildrenByTabIndex(next, existing.parentNodeId);
     } else {
       sortRootsByTabIndex(next);
     }
   }
   next.selectedTabId = tab.active ? tab.id : next.selectedTabId;
+}
+
+export function upsertTabNode(tree, tab, options = {}) {
+  const next = cloneTree(tree);
+  applyTabToTree(next, tab, options);
+  next.updatedAt = Date.now();
+  return next;
+}
+
+export function upsertTabNodes(tree, tabs) {
+  const next = cloneTree(tree);
+  const sortTracker = createSortTracker();
+  let applied = false;
+  for (const tab of tabs || []) {
+    if (!Number.isFinite(tab?.id)) {
+      continue;
+    }
+    applyTabToTree(next, tab, {}, sortTracker);
+    applied = true;
+  }
+  if (!applied) {
+    return tree;
+  }
+  sortTouchedLocations(next, sortTracker);
   next.updatedAt = Date.now();
   return next;
 }
