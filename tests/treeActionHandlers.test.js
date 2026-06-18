@@ -9,7 +9,7 @@ import {
 
 test("handleToggleGroupCollapseAction resolves target window and applies collapsed state", async () => {
   const calls = [];
-  await handleToggleGroupCollapseAction(
+  const result = await handleToggleGroupCollapseAction(
     { groupId: 12, windowId: 44 },
     {
       resolveGroupWindowId: async () => 44,
@@ -17,16 +17,45 @@ test("handleToggleGroupCollapseAction resolves target window and applies collaps
       updateGroupCollapsed: async (groupId, collapsed) => {
         calls.push(["update", groupId, collapsed]);
       },
-      refreshGroupMetadata: async (windowId) => {
-        calls.push(["refresh", windowId]);
+      refreshGroupMetadata: async (windowId, options) => {
+        calls.push(["refresh", windowId, options]);
       }
     }
   );
 
   assert.deepEqual(calls, [
     ["update", 12, true],
-    ["refresh", 44]
+    ["refresh", 44, {
+      groupOverrides: {
+        12: { collapsed: true }
+      }
+    }]
   ]);
+  assert.deepEqual(result, { windowId: 44, groupId: 12, collapsed: true });
+});
+
+test("handleToggleGroupCollapseAction does not override metadata when native update fails", async () => {
+  const calls = [];
+  const result = await handleToggleGroupCollapseAction(
+    { groupId: 12, windowId: 44 },
+    {
+      resolveGroupWindowId: async () => 44,
+      windowTree: () => ({ groups: { 12: { collapsed: false } } }),
+      updateGroupCollapsed: async () => {
+        calls.push(["update"]);
+        throw new Error("update failed");
+      },
+      refreshGroupMetadata: async (windowId, options) => {
+        calls.push(["refresh", windowId, options]);
+      }
+    }
+  );
+
+  assert.deepEqual(calls, [
+    ["update"],
+    ["refresh", 44, undefined]
+  ]);
+  assert.equal(result, null);
 });
 
 test("handleCloseSubtreeAction closes live subtree and falls back to stale cleanup", async () => {
@@ -118,6 +147,44 @@ test("handleReparentTabAction updates tree, browser position, grouping, and orde
   ]);
 });
 
+test("handleReparentTabAction derives browser index for parent reparent without explicit index", async () => {
+  const calls = [];
+  const tree = {
+    nodes: {
+      "tab:1": { tabId: 1, pinned: false, index: 3, childNodeIds: ["tab:3"] },
+      "tab:2": { tabId: 2, pinned: false, index: 20, childNodeIds: [] },
+      "tab:3": { tabId: 3, pinned: false, index: 8, childNodeIds: [] }
+    }
+  };
+  const nextTree = { windowId: 5, nodes: tree.nodes };
+
+  await handleReparentTabAction(
+    {
+      payload: { tabId: 2, newParentTabId: 1 },
+      tab: { windowId: 5, index: 20 },
+      tree,
+      nodeId: "tab:2"
+    },
+    {
+      nodeIdFromTabId: (tabId) => `tab:${tabId}`,
+      canReparent: () => true,
+      moveNode: () => nextTree,
+      sortTreeByIndex: (value) => value,
+      resolveBrowserMoveIndex: async (_windowId, requestedIndex) => requestedIndex,
+      moveTab: async (tabId, index) => {
+        calls.push(["moveTab", tabId, index]);
+      },
+      logUnexpectedFailure: () => {},
+      setWindowTree: () => {},
+      getTab: async () => null,
+      groupTabs: async () => {},
+      syncWindowOrdering: async () => {}
+    }
+  );
+
+  assert.deepEqual(calls, [["moveTab", 2, 9]]);
+});
+
 test("handleReparentTabAction skips tree update when browser move fails", async () => {
   const calls = [];
   const tree = {
@@ -199,4 +266,3 @@ test("handleMoveToRootAction moves in browser then persists sorted tree", async 
     ["sync", 6]
   ]);
 });
-

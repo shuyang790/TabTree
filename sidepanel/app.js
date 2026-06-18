@@ -1450,6 +1450,29 @@ function groupDisplay(tree, groupId) {
   };
 }
 
+function applyGroupCollapsedState(windowId, groupId, collapsed) {
+  const tree = state.windows?.[windowId];
+  const group = tree?.groups?.[groupId];
+  if (!tree || !group || group.collapsed === collapsed) {
+    return;
+  }
+
+  state.windows = {
+    ...state.windows,
+    [windowId]: {
+      ...tree,
+      groups: {
+        ...tree.groups,
+        [groupId]: {
+          ...group,
+          collapsed
+        }
+      }
+    }
+  };
+  render();
+}
+
 function getDropPosition(event, row, options = {}) {
   const { allowInside = true } = options;
   const rect = row.getBoundingClientRect();
@@ -3503,11 +3526,19 @@ function bindEvents() {
       const groupId = Number(header.dataset.groupId);
       const windowId = Number(header.dataset.windowId);
       if (Number.isInteger(groupId)) {
-        await send(MESSAGE_TYPES.TREE_ACTION, {
+        const response = await send(MESSAGE_TYPES.TREE_ACTION, {
           type: TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE,
           groupId,
           windowId: Number.isInteger(windowId) ? windowId : currentWindowTree()?.windowId
         });
+        const result = response?.payload;
+        if (
+          Number.isInteger(result?.windowId)
+          && Number.isInteger(result?.groupId)
+          && typeof result?.collapsed === "boolean"
+        ) {
+          applyGroupCollapsedState(result.windowId, result.groupId, result.collapsed);
+        }
       }
       return;
     }

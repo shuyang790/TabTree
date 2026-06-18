@@ -20,13 +20,25 @@ export async function handleToggleGroupCollapseAction(payload, deps) {
   const group = tree.groups?.[groupId];
   const collapsed = typeof payload.collapsed === "boolean" ? payload.collapsed : !group?.collapsed;
 
+  let updatedNativeGroup = false;
   try {
     await updateGroupCollapsed(groupId, collapsed);
+    updatedNativeGroup = true;
   } catch {
     // Best effort.
   }
 
-  await refreshGroupMetadata(windowId);
+  if (!updatedNativeGroup) {
+    await refreshGroupMetadata(windowId);
+    return null;
+  }
+
+  await refreshGroupMetadata(windowId, {
+    groupOverrides: {
+      [groupId]: { collapsed }
+    }
+  });
+  return { windowId, groupId, collapsed };
 }
 
 export async function handleCloseSubtreeAction(payload, deps) {
@@ -53,6 +65,28 @@ export async function handleCloseSubtreeAction(payload, deps) {
 
   removeTabIdsFromWindowTree(staleWindowId, [payload.tabId]);
   await pruneWindowTreeAgainstLiveTabs(staleWindowId);
+}
+
+function subtreeMaxBrowserIndex(tree, nodeId, fallbackIndex) {
+  const root = tree.nodes[nodeId];
+  if (!root) {
+    return fallbackIndex;
+  }
+
+  let maxIndex = typeof root.index === "number" ? root.index : fallbackIndex;
+  const stack = [...(root.childNodeIds || [])];
+  while (stack.length) {
+    const currentId = stack.pop();
+    const node = tree.nodes[currentId];
+    if (!node) {
+      continue;
+    }
+    if (typeof node.index === "number") {
+      maxIndex = Math.max(maxIndex, node.index);
+    }
+    stack.push(...(node.childNodeIds || []));
+  }
+  return maxIndex;
 }
 
 export async function handleReparentTabAction({ payload, tab, tree, nodeId }, deps) {
@@ -86,7 +120,12 @@ export async function handleReparentTabAction({ payload, tab, tree, nodeId }, de
   next = sortTreeByIndex(next);
 
   let movedInBrowser = true;
-  const browserIndex = await resolveBrowserMoveIndex(tab.windowId, payload.browserIndex);
+  const requestedBrowserIndex = Number.isFinite(payload.browserIndex)
+    ? payload.browserIndex
+    : parentNodeId
+      ? subtreeMaxBrowserIndex(tree, parentNodeId, tab.index) + 1
+      : payload.browserIndex;
+  const browserIndex = await resolveBrowserMoveIndex(tab.windowId, requestedBrowserIndex);
   if (browserIndex !== null) {
     try {
       await moveTab(payload.tabId, browserIndex);

@@ -291,7 +291,7 @@ async function getActiveTab() {
   return null;
 }
 
-async function refreshGroupMetadata(windowId) {
+async function refreshGroupMetadata(windowId, options = {}) {
   const current = windowTree(windowId);
   let groups = [];
   try {
@@ -307,6 +307,20 @@ async function refreshGroupMetadata(windowId) {
       title: group.title || t("unnamedGroup", "Unnamed group"),
       color: group.color,
       collapsed: !!group.collapsed
+    };
+  }
+  for (const [rawGroupId, override] of Object.entries(options.groupOverrides || {})) {
+    const groupId = Number(rawGroupId);
+    if (!Number.isInteger(groupId)) {
+      continue;
+    }
+    const existing = groupMap[groupId] || current.groups?.[groupId] || {};
+    groupMap[groupId] = {
+      ...existing,
+      id: groupId,
+      title: existing.title || t("unnamedGroup", "Unnamed group"),
+      color: existing.color || "grey",
+      ...override
     };
   }
 
@@ -347,7 +361,7 @@ function isBrowserNewTabUrl(url) {
   if (typeof url !== "string" || !url) {
     return false;
   }
-  return url === "chrome://newtab/" || url === "chrome://newtab";
+  return url === "about:blank" || url === "chrome://newtab/" || url === "chrome://newtab";
 }
 
 function canReparent(tree, movingNodeId, parentNodeId) {
@@ -429,6 +443,27 @@ function captureTabMoveRecords(tree, tabIds) {
     }
   }
   return records;
+}
+
+function tabIdsForNodeBlocks(tree, nodeIds) {
+  const out = [];
+  for (const nodeId of nodeIds || []) {
+    const stack = [nodeId];
+    while (stack.length) {
+      const currentId = stack.pop();
+      const node = tree.nodes[currentId];
+      if (!node) {
+        continue;
+      }
+      if (Number.isFinite(node.tabId)) {
+        out.push(node.tabId);
+      }
+      for (let i = (node.childNodeIds || []).length - 1; i >= 0; i -= 1) {
+        stack.push(node.childNodeIds[i]);
+      }
+    }
+  }
+  return uniqueFiniteTabIdsInOrder(out);
 }
 
 async function groupLiveTabIdsByWindowInRequestOrder(tabIds) {
@@ -1543,9 +1578,7 @@ async function batchMoveToRoot(tabIds, options = {}) {
         } catch {
           windowTabs = [];
         }
-        const moveTabIds = orderedNodeIds
-          .map((nodeId) => tree.nodes[nodeId]?.tabId)
-          .filter((id) => Number.isFinite(id));
+        const moveTabIds = tabIdsForNodeBlocks(tree, orderedNodeIds);
         browserMoveIndex = browserInsertionIndexForRelativePlacement(
           windowTabs,
           moveTabIds,
@@ -1561,7 +1594,7 @@ async function batchMoveToRoot(tabIds, options = {}) {
 
     const moveRecords = captureTabMoveRecords(
       tree,
-      orderedNodeIds.map((nodeId) => tree.nodes[nodeId]?.tabId).filter((id) => Number.isFinite(id))
+      tabIdsForNodeBlocks(tree, orderedNodeIds)
     );
 
     let next = tree;
@@ -1589,7 +1622,7 @@ async function batchMoveToRoot(tabIds, options = {}) {
         next = moveNode(next, nodeId, null, null);
       }
     }
-    const moveTabIds = orderedNodeIds.map((nodeId) => next.nodes[nodeId]?.tabId).filter((id) => Number.isFinite(id));
+    const moveTabIds = tabIdsForNodeBlocks(next, orderedNodeIds);
     let movedInBrowser = !moveTabIds.length;
     if (moveTabIds.length) {
       if (hasRelativePlacement && Number.isFinite(targetTabId) && placement) {
@@ -1660,7 +1693,7 @@ async function batchReparent(tabIds, newParentTabId, options = {}) {
 
   const moveRecords = captureTabMoveRecords(
     tree,
-    reparentableNodeIds.map((nodeId) => tree.nodes[nodeId]?.tabId).filter((id) => Number.isFinite(id))
+    tabIdsForNodeBlocks(tree, reparentableNodeIds)
   );
 
   let browserMoveIndex = childInsertIndex(tree, parentNodeId, parentTab.index + 1);
@@ -1690,9 +1723,7 @@ async function batchReparent(tabIds, newParentTabId, options = {}) {
       } catch {
         windowTabs = [];
       }
-      const moveTabIds = reparentableNodeIds
-        .map((nodeId) => tree.nodes[nodeId]?.tabId)
-        .filter((id) => Number.isFinite(id));
+      const moveTabIds = tabIdsForNodeBlocks(tree, reparentableNodeIds);
       browserMoveIndex = browserInsertionIndexForRelativePlacement(
         windowTabs,
         moveTabIds,
@@ -1727,7 +1758,7 @@ async function batchReparent(tabIds, newParentTabId, options = {}) {
       next = moveNode(next, sourceNodeId, parentNodeId, null);
     }
   }
-  const moveTabIds = reparentableNodeIds.map((id) => next.nodes[id]?.tabId).filter((id) => Number.isFinite(id));
+  const moveTabIds = tabIdsForNodeBlocks(next, reparentableNodeIds);
   let movedInBrowser = !moveTabIds.length;
   if (moveTabIds.length) {
     if (hasRelativePlacement && Number.isFinite(targetTabId) && placement) {
@@ -2097,13 +2128,12 @@ const TREE_ACTION_HANDLER_REGISTRY = Object.freeze({
   [TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE]: {
     resolveWindowId: (payload) => resolveWindowIdFromGroupId(payload.groupId),
     run: async (payload) => {
-      await handleToggleGroupCollapseAction(payload, {
+      return handleToggleGroupCollapseAction(payload, {
         resolveGroupWindowId,
         windowTree,
         updateGroupCollapsed: (groupId, collapsed) => chrome.tabGroups.update(groupId, { collapsed }),
         refreshGroupMetadata
       });
-      return null;
     }
   },
   [TREE_ACTIONS.CLOSE_SUBTREE]: {
@@ -2428,13 +2458,20 @@ chrome.tabs.onCreated.addListener((tab) => {
     const openerNodeId = Number.isInteger(tab.openerTabId) ? nodeIdFromTabId(tab.openerTabId) : null;
     const openerNode = openerNodeId ? tree.nodes[openerNodeId] : null;
     const createdUrl = initialTabUrl(tab);
+    const shouldScheduleCreateSync = !!createdUrl && !isBrowserNewTabUrl(createdUrl);
 
     if (openerNode && !!openerNode.pinned === !!tab.pinned && !isBrowserNewTabUrl(createdUrl)) {
       setWindowTree(upsertTabNode(tree, tab, { parentNodeId: openerNodeId }));
+      if (shouldScheduleCreateSync) {
+        scheduleWindowOrderingSync(tab.windowId);
+      }
       return;
     }
 
     setWindowTree(upsertTabNode(tree, tab));
+    if (shouldScheduleCreateSync) {
+      scheduleWindowOrderingSync(tab.windowId);
+    }
   }, {
     operation: "tabs.onCreated",
     tabId: tab.id,
