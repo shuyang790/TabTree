@@ -34,6 +34,7 @@ import {
 import { shouldProcessTabUpdate } from "./tabUpdates.js";
 import { groupLiveTabIdsByWindow } from "./liveTabGrouping.js";
 import { pruneTreeAgainstLiveTabs, removeTabIdsFromTree } from "./windowTreeReconciler.js";
+import { classifyWindowTreeChange } from "./windowTreeChange.js";
 import {
   loadAllWindowTrees,
   loadLocalSnapshot,
@@ -180,9 +181,16 @@ function setWindowTree(nextTree, options = {}) {
     lastSeenAt: now,
     persistenceVersion: 1
   };
+  const changeKind = classifyWindowTreeChange(state.windows[persistedTree.windowId], persistedTree);
+  if (changeKind === "none") {
+    return state.windows[persistedTree.windowId];
+  }
   state.windows[persistedTree.windowId] = persistedTree;
   persistCoordinator.markWindowDirty(persistedTree.windowId);
-  broadcastState(persistedTree.windowId, persistedTree.windowId);
+  if (changeKind === "render") {
+    broadcastState(persistedTree.windowId, persistedTree.windowId);
+  }
+  return persistedTree;
 }
 
 async function archiveWindowTree(windowId) {
