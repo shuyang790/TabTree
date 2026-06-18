@@ -53,6 +53,23 @@ function rowByTitle(sidePanelPage, title) {
     .first();
 }
 
+async function fillAcrossRenders(page, locator, value, options = {}) {
+  const attempts = options.attempts ?? 5;
+  const timeout = options.timeout ?? 1200;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      await expect(locator).toBeVisible({ timeout });
+      await locator.fill(value, { timeout });
+      await expect(locator).toHaveValue(value, { timeout });
+      return;
+    } catch {
+      await page.waitForTimeout(120);
+    }
+  }
+  await locator.fill(value, { timeout: Math.max(timeout, 4000) });
+  await expect(locator).toHaveValue(value);
+}
+
 async function tabIdByTitle(sidePanelPage, title) {
   return sidePanelPage.evaluate(async (tabTitle) => {
     const tabs = await chrome.tabs.query({ currentWindow: true });
@@ -1237,12 +1254,16 @@ test.describe("TabTree extension", () => {
       await expect(row).toBeVisible();
 
       const groupSearchInput = sidePanelPage.locator("#context-menu .context-group-search-input").first();
-      let opened = false;
-      for (let attempt = 0; attempt < 6; attempt++) {
+      let filled = false;
+      for (let attempt = 0; attempt < 8; attempt++) {
         await row.click({ button: "right" });
         try {
           await expect(groupSearchInput).toBeVisible({ timeout: 1200 });
-          opened = true;
+          await fillAcrossRenders(sidePanelPage, groupSearchInput, targetGroupTitle, {
+            attempts: 2,
+            timeout: 1000
+          });
+          filled = true;
           break;
         } catch {
           await sidePanelPage.keyboard.press("Escape").catch(() => {});
@@ -1250,8 +1271,7 @@ test.describe("TabTree extension", () => {
         }
       }
 
-      expect(opened).toBeTruthy();
-      await groupSearchInput.fill(targetGroupTitle, { timeout: 2000 });
+      expect(filled).toBeTruthy();
 
       const targetGroupItem = sidePanelPage.locator(".context-group-item")
         .filter({ has: sidePanelPage.locator(".context-group-label", { hasText: targetGroupTitle }) })

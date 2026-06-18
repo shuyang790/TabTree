@@ -225,6 +225,8 @@ const state = {
     groupId: null,
     windowId: null,
     renameOpen: false,
+    groupSearchActive: false,
+    groupSearchQuery: "",
     returnTabId: null
   },
   lastRenderedWindowId: null,
@@ -351,6 +353,8 @@ function resetContextMenuState() {
     groupId: null,
     windowId: null,
     renameOpen: false,
+    groupSearchActive: false,
+    groupSearchQuery: "",
     returnTabId: null
   };
 }
@@ -869,6 +873,8 @@ function openTabContextMenu(event, tabId) {
     groupId: null,
     windowId: currentWindowTree()?.windowId || null,
     renameOpen: false,
+    groupSearchActive: false,
+    groupSearchQuery: "",
     returnTabId: tabId
   };
   renderContextMenu();
@@ -888,6 +894,8 @@ function openGroupContextMenu(event, groupId, windowId) {
     groupId,
     windowId,
     renameOpen: false,
+    groupSearchActive: false,
+    groupSearchQuery: "",
     returnTabId: null
   };
   renderContextMenu();
@@ -1095,7 +1103,45 @@ function groupLabelForSearch(group) {
   return group.title?.trim() || t("groupFallbackName", [String(group.id)], `Group ${group.id}`);
 }
 
-function buildSearchableExistingGroupSection(existingGroups, canAssignExistingGroup) {
+function filteredExistingGroups(existingGroups, query) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return existingGroups;
+  }
+
+  return existingGroups.filter((group) => {
+    const label = groupLabelForSearch(group).toLowerCase();
+    return label.includes(normalizedQuery) || `group ${group.id}`.includes(normalizedQuery);
+  });
+}
+
+function renderExistingGroupSearchResults(results, empty, existingGroups, canAssignExistingGroup, query = "") {
+  const matches = filteredExistingGroups(existingGroups, query);
+  results.innerHTML = "";
+  for (const group of matches) {
+    results.appendChild(createExistingGroupMenuItem(group, !canAssignExistingGroup));
+  }
+  empty.hidden = matches.length > 0 || !canAssignExistingGroup;
+}
+
+function updateOpenSearchableExistingGroupSection(existingGroups, canAssignExistingGroup) {
+  const input = dom.contextMenu.querySelector(".context-group-search-input");
+  const results = dom.contextMenu.querySelector(".context-group-search-results");
+  const empty = dom.contextMenu.querySelector(".context-group-search-empty");
+  if (!input || !results || !empty) {
+    return false;
+  }
+
+  const query = state.contextMenu.groupSearchQuery ?? input.value ?? "";
+  if (input.value !== query) {
+    input.value = query;
+  }
+  input.disabled = !canAssignExistingGroup;
+  renderExistingGroupSearchResults(results, empty, existingGroups, canAssignExistingGroup, query);
+  return true;
+}
+
+function buildSearchableExistingGroupSection(existingGroups, canAssignExistingGroup, initialQuery = "") {
   const wrapper = document.createElement("div");
   wrapper.className = "context-group-search";
 
@@ -1106,6 +1152,7 @@ function buildSearchableExistingGroupSection(existingGroups, canAssignExistingGr
   input.setAttribute("aria-label", t("searchGroupsAriaLabel", [], "Search groups"));
   input.autocomplete = "off";
   input.disabled = !canAssignExistingGroup;
+  input.value = initialQuery;
 
   const results = document.createElement("div");
   results.className = "context-inline-group-list context-group-search-results";
@@ -1115,29 +1162,9 @@ function buildSearchableExistingGroupSection(existingGroups, canAssignExistingGr
   empty.textContent = t("noMatchingGroups", [], "No matching groups");
   empty.hidden = true;
 
-  const filteredResults = (query) => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) {
-      return existingGroups;
-    }
-
-    return existingGroups.filter((group) => {
-      const label = groupLabelForSearch(group).toLowerCase();
-      return label.includes(normalizedQuery) || `group ${group.id}`.includes(normalizedQuery);
-    });
-  };
-
-  const renderResults = (query = "") => {
-    const matches = filteredResults(query);
-    results.innerHTML = "";
-    for (const group of matches) {
-      results.appendChild(createExistingGroupMenuItem(group, !canAssignExistingGroup));
-    }
-    empty.hidden = matches.length > 0 || !canAssignExistingGroup;
-  };
-
   input.addEventListener("input", () => {
-    renderResults(input.value);
+    state.contextMenu.groupSearchQuery = input.value;
+    renderExistingGroupSearchResults(results, empty, existingGroups, canAssignExistingGroup, input.value);
   });
 
   input.addEventListener("keydown", (event) => {
@@ -1171,7 +1198,7 @@ function buildSearchableExistingGroupSection(existingGroups, canAssignExistingGr
     }
   });
 
-  renderResults();
+  renderExistingGroupSearchResults(results, empty, existingGroups, canAssignExistingGroup, initialQuery);
 
   wrapper.append(input, results, empty);
   return wrapper;
@@ -1203,11 +1230,17 @@ function buildTabContextMenu(tree) {
     )
   );
 
-  if (existingGroups.length) {
+  if (existingGroups.length || state.contextMenu.groupSearchActive) {
     fragment.appendChild(createContextMenuSectionLabel(t("addToExistingTabGroup", [], "Add to existing tab group")));
 
-    if (existingGroups.length >= CONTEXT_GROUP_SEARCH_MIN) {
-      fragment.appendChild(buildSearchableExistingGroupSection(existingGroups, canAssignExistingGroup));
+    const useSearchableGroups = existingGroups.length >= CONTEXT_GROUP_SEARCH_MIN || state.contextMenu.groupSearchActive;
+    if (useSearchableGroups) {
+      state.contextMenu.groupSearchActive = true;
+      fragment.appendChild(buildSearchableExistingGroupSection(
+        existingGroups,
+        canAssignExistingGroup,
+        state.contextMenu.groupSearchQuery
+      ));
     } else {
       const inlineGroups = existingGroups.slice(0, CONTEXT_INLINE_GROUP_LIMIT);
       const overflowGroups = existingGroups.slice(CONTEXT_INLINE_GROUP_LIMIT);
@@ -1389,6 +1422,10 @@ function renderContextMenu() {
     return;
   }
 
+  const activeElement = document.activeElement;
+  const restoreGroupSearchFocus = activeElement?.classList?.contains("context-group-search-input");
+  const groupSearchSelectionStart = restoreGroupSearchFocus ? activeElement.selectionStart : null;
+  const groupSearchSelectionEnd = restoreGroupSearchFocus ? activeElement.selectionEnd : null;
   const tree = currentWindowTree();
   if (!tree) {
     closeContextMenu();
@@ -1409,6 +1446,18 @@ function renderContextMenu() {
     return;
   }
 
+  if (state.contextMenu.kind === "tab" && state.contextMenu.groupSearchActive) {
+    const existingGroups = orderedExistingGroups(tree);
+    const canAssignExistingGroup = state.contextMenu.scopeTabIds.length > 0;
+    if (updateOpenSearchableExistingGroupSection(existingGroups, canAssignExistingGroup)) {
+      dom.contextMenu.hidden = false;
+      dom.contextMenu.classList.remove("context-menu-group");
+      positionContextMenu();
+      updateContextSubmenuDirection();
+      return;
+    }
+  }
+
   dom.contextMenu.innerHTML = "";
   dom.contextMenu.hidden = false;
   dom.contextMenu.classList.toggle("context-menu-group", state.contextMenu.kind === "group");
@@ -1427,6 +1476,17 @@ function renderContextMenu() {
     if (input) {
       input.focus();
       input.select();
+    }
+  } else if (restoreGroupSearchFocus) {
+    const input = dom.contextMenu.querySelector(".context-group-search-input");
+    if (input) {
+      input.focus();
+      if (
+        Number.isInteger(groupSearchSelectionStart)
+        && Number.isInteger(groupSearchSelectionEnd)
+      ) {
+        input.setSelectionRange(groupSearchSelectionStart, groupSearchSelectionEnd);
+      }
     }
   } else {
     focusFirstContextMenuItem();
@@ -1452,8 +1512,13 @@ function groupDisplay(tree, groupId) {
 
 function applyGroupCollapsedState(windowId, groupId, collapsed) {
   const tree = state.windows?.[windowId];
-  const group = tree?.groups?.[groupId];
-  if (!tree || !group || group.collapsed === collapsed) {
+  const group = tree?.groups?.[groupId] || {
+    id: groupId,
+    title: t("groupFallbackName", [String(groupId)], `Group ${groupId}`),
+    color: "grey",
+    collapsed: !collapsed
+  };
+  if (!tree || group.collapsed === collapsed) {
     return;
   }
 
@@ -1471,6 +1536,43 @@ function applyGroupCollapsedState(windowId, groupId, collapsed) {
     }
   };
   render();
+}
+
+async function toggleGroupCollapsedFromHeader(header) {
+  const groupId = Number(header.dataset.groupId);
+  const headerWindowId = Number(header.dataset.windowId);
+  const windowId = Number.isInteger(headerWindowId) ? headerWindowId : currentWindowTree()?.windowId;
+  if (!Number.isInteger(groupId)) {
+    return;
+  }
+
+  const previousCollapsed = header.getAttribute("aria-expanded") === "false";
+  const collapsed = !previousCollapsed;
+  if (Number.isInteger(windowId)) {
+    applyGroupCollapsedState(windowId, groupId, collapsed);
+  }
+
+  try {
+    const response = await send(MESSAGE_TYPES.TREE_ACTION, {
+      type: TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE,
+      groupId,
+      collapsed,
+      windowId
+    });
+    const result = response?.payload;
+    if (
+      Number.isInteger(result?.windowId)
+      && Number.isInteger(result?.groupId)
+      && typeof result?.collapsed === "boolean"
+    ) {
+      applyGroupCollapsedState(result.windowId, result.groupId, result.collapsed);
+    }
+  } catch (error) {
+    if (Number.isInteger(windowId)) {
+      applyGroupCollapsedState(windowId, groupId, previousCollapsed);
+    }
+    throw error;
+  }
 }
 
 function getDropPosition(event, row, options = {}) {
@@ -3523,23 +3625,7 @@ function bindEvents() {
 
     const header = event.target.closest(".group-header[data-group-id]");
     if (header) {
-      const groupId = Number(header.dataset.groupId);
-      const windowId = Number(header.dataset.windowId);
-      if (Number.isInteger(groupId)) {
-        const response = await send(MESSAGE_TYPES.TREE_ACTION, {
-          type: TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE,
-          groupId,
-          windowId: Number.isInteger(windowId) ? windowId : currentWindowTree()?.windowId
-        });
-        const result = response?.payload;
-        if (
-          Number.isInteger(result?.windowId)
-          && Number.isInteger(result?.groupId)
-          && typeof result?.collapsed === "boolean"
-        ) {
-          applyGroupCollapsedState(result.windowId, result.groupId, result.collapsed);
-        }
-      }
+      await toggleGroupCollapsedFromHeader(header);
       return;
     }
 
@@ -3587,15 +3673,7 @@ function bindEvents() {
         return;
       }
       event.preventDefault();
-      const groupId = Number(header.dataset.groupId);
-      const windowId = Number(header.dataset.windowId);
-      if (Number.isInteger(groupId)) {
-        await send(MESSAGE_TYPES.TREE_ACTION, {
-          type: TREE_ACTIONS.TOGGLE_GROUP_COLLAPSE,
-          groupId,
-          windowId: Number.isInteger(windowId) ? windowId : currentWindowTree()?.windowId
-        });
-      }
+      await toggleGroupCollapsedFromHeader(header);
       return;
     }
 
@@ -4146,9 +4224,6 @@ function bindEvents() {
     }
   });
 
-  window.addEventListener("blur", () => {
-    closeContextMenu();
-  });
   window.addEventListener("beforeunload", () => {
     if (state.virtualScrollRafId) {
       cancelAnimationFrame(state.virtualScrollRafId);

@@ -18,6 +18,9 @@ export function orderedExistingGroups(tree, blocks, options = {}) {
       continue;
     }
     const tabCount = groupTabIds(tree, group.id).length;
+    if (tabCount === 0) {
+      continue;
+    }
     ordered.push({
       id: group.id,
       title: group.title || unnamedGroupLabel,
@@ -32,6 +35,9 @@ export function orderedExistingGroups(tree, blocks, options = {}) {
       continue;
     }
     const tabCount = groupTabIds(tree, group.id).length;
+    if (tabCount === 0) {
+      continue;
+    }
     ordered.push({
       id: group.id,
       title: group.title || unnamedGroupLabel,
@@ -43,4 +49,3 @@ export function orderedExistingGroups(tree, blocks, options = {}) {
 
   return ordered;
 }
-

@@ -331,6 +331,18 @@ async function refreshGroupMetadata(windowId, options = {}) {
   });
 }
 
+function groupMetadataOverrideFromEvent(group) {
+  if (!Number.isInteger(group?.id)) {
+    return null;
+  }
+  return {
+    id: group.id,
+    title: group.title || t("unnamedGroup", "Unnamed group"),
+    color: group.color || "grey",
+    collapsed: !!group.collapsed
+  };
+}
+
 function childInsertIndex(tree, parentNodeId, fallbackIndex) {
   const parentNode = tree.nodes[parentNodeId];
   if (!parentNode) {
@@ -2620,8 +2632,13 @@ chrome.tabGroups.onCreated.addListener((group) => {
     await ensureInitialized();
     const windowId = await resolveGroupWindowIdFromEvent(group);
     if (Number.isInteger(windowId)) {
+      const override = groupMetadataOverrideFromEvent(group);
       await queueMutation(windowId, async () => {
-        await refreshGroupMetadata(windowId);
+        await refreshGroupMetadata(windowId, override ? {
+          groupOverrides: {
+            [override.id]: override
+          }
+        } : undefined);
         scheduleWindowOrderingSync(windowId);
       }, {
         operation: "tabGroups.onCreated.refreshGroupMetadata",
@@ -2640,7 +2657,14 @@ chrome.tabGroups.onUpdated.addListener((group) => {
     await ensureInitialized();
     const windowId = await resolveGroupWindowIdFromEvent(group);
     if (Number.isInteger(windowId)) {
-      scheduleWindowOrderingSync(windowId);
+      await queueMutation(windowId, async () => {
+        await refreshGroupMetadata(windowId);
+        scheduleWindowOrderingSync(windowId);
+      }, {
+        operation: "tabGroups.onUpdated.refreshGroupMetadata",
+        groupId: group?.id,
+        windowId
+      });
     }
   }, {
     operation: "tabGroups.onUpdated",

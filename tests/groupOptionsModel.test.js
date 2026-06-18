@@ -32,15 +32,15 @@ test("orderedExistingGroups prioritizes groups by block order and dedupes", () =
 
   assert.deepEqual(groups, [
     { id: 30, title: "Gamma", color: "red", tabCount: 1 },
-    { id: 10, title: "Alpha", color: "blue", tabCount: 2 },
-    { id: 20, title: "Unnamed group", color: "green", tabCount: 0 }
+    { id: 10, title: "Alpha", color: "blue", tabCount: 2 }
   ]);
 });
 
-test("orderedExistingGroups skips invalid group metadata", () => {
+test("orderedExistingGroups skips invalid and empty group metadata", () => {
   const tree = {
     groups: {
       foo: { id: "foo", title: "Bad", color: "grey" },
+      10: { id: 10, title: "Empty", color: "red" },
       11: { id: 11, title: "Valid", color: "blue" }
     },
     nodes: {
@@ -51,4 +51,3 @@ test("orderedExistingGroups skips invalid group metadata", () => {
   const groups = orderedExistingGroups(tree, [], { unnamedGroupLabel: "Unnamed group" });
   assert.deepEqual(groups, [{ id: 11, title: "Valid", color: "blue", tabCount: 1 }]);
 });
-
