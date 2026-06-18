@@ -2845,12 +2845,31 @@ function createVirtualSpacer(heightPx) {
   return spacer;
 }
 
+function pruneVirtualHeightCache(entries) {
+  if (!state.virtualHeightCache.size) {
+    return;
+  }
+  const liveKeys = new Set(entries.map((entry) => entry.key).filter(Boolean));
+  for (const key of state.virtualHeightCache.keys()) {
+    if (!liveKeys.has(key)) {
+      state.virtualHeightCache.delete(key);
+    }
+  }
+}
+
+function clearVirtualHeightCache() {
+  if (state.virtualHeightCache.size) {
+    state.virtualHeightCache.clear();
+  }
+}
+
 function renderVirtualTree(tree, query, visibilityByNodeId, summary = null) {
   dom.treeRoot.innerHTML = "";
   dom.treeRoot.classList.toggle("hide-favicons", !state.settings?.showFavicons);
   dom.treeRoot.classList.add("virtualized");
 
   const { entries, allVisibleTabIds, totalVisibleRows } = summary || buildVirtualEntries(tree, query, visibilityByNodeId);
+  pruneVirtualHeightCache(entries);
   state.virtualAllVisibleTabIds = allVisibleTabIds;
 
   if (!entries.length) {
@@ -2985,6 +3004,7 @@ function fullRebuildTree() {
   state.virtualLayout = null;
   state.virtualAllVisibleTabIds = [];
   state.visibleTabIds = [];
+  clearVirtualHeightCache();
   const tree = currentWindowTree();
   if (!tree) {
     const empty = document.createElement("div");
@@ -3069,6 +3089,7 @@ function patchTree() {
   state.virtualModeActive = false;
   state.virtualLayout = null;
   state.virtualAllVisibleTabIds = [];
+  clearVirtualHeightCache();
 
   if (!tree) {
     dom.treeRoot.innerHTML = "";
