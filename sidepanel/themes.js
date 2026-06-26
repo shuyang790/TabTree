@@ -285,6 +285,32 @@ export const THEME_PRESETS = {
     shadow: "0 10px 24px rgba(0, 0, 0, 0.35)",
     focusRing: "color-mix(in srgb, var(--accent), black 20%)",
     accent: "#61afef"
+  },
+  "rose-pine-light": {
+    mode: "light",
+    bg: "#faf4ed",
+    bgElev: "#fffaf3",
+    text: "#575279",
+    textMuted: "#797593",
+    border: "#dfdad9",
+    rowHover: "#f4ede8",
+    rowActive: "#cecacd",
+    shadow: "0 8px 20px rgba(87, 82, 121, 0.14)",
+    focusRing: "color-mix(in srgb, var(--accent), white 28%)",
+    accent: "#286983"
+  },
+  "rose-pine-dark": {
+    mode: "dark",
+    bg: "#191724",
+    bgElev: "#1f1d2e",
+    text: "#e0def4",
+    textMuted: "#908caa",
+    border: "#403d52",
+    rowHover: "#26233a",
+    rowActive: "#403d52",
+    shadow: "0 10px 24px rgba(0, 0, 0, 0.36)",
+    focusRing: "color-mix(in srgb, var(--accent), black 22%)",
+    accent: "#9ccfd8"
   }
 };
 

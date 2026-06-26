@@ -55,7 +55,9 @@ const SHARED_THEME_PRESET_KEYS = [
   "dracula-light",
   "dracula-dark",
   "one-light",
-  "one-dark"
+  "one-dark",
+  "rose-pine-light",
+  "rose-pine-dark"
 ];
 
 export const THEME_PRESET_LIGHT_KEYS = [

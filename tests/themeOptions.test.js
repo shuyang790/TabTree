@@ -30,7 +30,9 @@ test("theme selectors include all expected families and variants in both dropdow
     "dracula-light",
     "dracula-dark",
     "one-light",
-    "one-dark"
+    "one-dark",
+    "rose-pine-light",
+    "rose-pine-dark"
   ];
 
   for (const value of presetValues) {
@@ -63,7 +65,9 @@ test("theme labels include family name and avoid bare Light/Dark labels", () => 
     "Dracula — Light",
     "Dracula — Dark",
     "One — Light",
-    "One — Dark"
+    "One — Dark",
+    "Rose Pine — Light",
+    "Rose Pine — Dark"
   ];
 
   for (const label of expectedLabels) {
