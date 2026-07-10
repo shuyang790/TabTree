@@ -311,6 +311,19 @@ export const THEME_PRESETS = {
     shadow: "0 10px 24px rgba(0, 0, 0, 0.36)",
     focusRing: "color-mix(in srgb, var(--accent), black 22%)",
     accent: "#9ccfd8"
+  },
+  "rose-pine-moon": {
+    mode: "dark",
+    bg: "#232136",
+    bgElev: "#2a273f",
+    text: "#e0def4",
+    textMuted: "#908caa",
+    border: "#393552",
+    rowHover: "#2a283e",
+    rowActive: "#44415a",
+    shadow: "0 10px 24px rgba(0, 0, 0, 0.34)",
+    focusRing: "color-mix(in srgb, var(--accent), black 22%)",
+    accent: "#c4a7e7"
   }
 };
 

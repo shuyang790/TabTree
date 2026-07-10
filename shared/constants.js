@@ -57,7 +57,8 @@ const SHARED_THEME_PRESET_KEYS = [
   "one-light",
   "one-dark",
   "rose-pine-light",
-  "rose-pine-dark"
+  "rose-pine-dark",
+  "rose-pine-moon"
 ];
 
 export const THEME_PRESET_LIGHT_KEYS = [
