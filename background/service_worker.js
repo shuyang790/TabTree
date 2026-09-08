@@ -18,6 +18,7 @@ import {
   reconcileSelectedTabId,
   removeNodePromoteChildren,
   removeSubtree,
+  replaceTabNode,
   setActiveTab,
   sortTreeByIndex,
   toggleNodeCollapsed,
@@ -2493,9 +2494,22 @@ chrome.tabs.onCreated.addListener((tab) => {
 
 chrome.tabs.onUpdated.addListener((tabId, _changeInfo, tab) => {
   const windowId = Number.isInteger(tab?.windowId) ? tab.windowId : null;
+  if (!Number.isInteger(windowId)) {
+    return;
+  }
   queueMutationFireAndForget(windowId, async () => {
     await ensureInitialized();
-    const tree = windowTree(tab.windowId);
+    let tree = windowTree(windowId);
+    if (!tree.nodes[nodeIdFromTabId(tabId)]) {
+      // A queued update can outlive a replacement, removal, or window move.
+      const liveTab = await getTab(tabId);
+      if (!liveTab || liveTab.windowId !== windowId) {
+        scheduleWindowOrderingSync(windowId);
+        return;
+      }
+      tab = liveTab;
+      tree = windowTree(windowId);
+    }
     if (!shouldProcessTabUpdate(tree, tabId, tab)) {
       return;
     }
@@ -2503,7 +2517,7 @@ chrome.tabs.onUpdated.addListener((tabId, _changeInfo, tab) => {
     const existing = tree.nodes[nodeIdFromTabId(tabId)] || null;
     const previousGroupId = Number.isInteger(existing?.groupId) && existing.groupId >= 0 ? existing.groupId : null;
     const nextGroupId = Number.isInteger(tab.groupId) && tab.groupId >= 0 ? tab.groupId : null;
-    const orderingSensitiveChange = !!existing && (
+    const orderingSensitiveChange = !existing || (
       existing.index !== tab.index
       || !!existing.pinned !== !!tab.pinned
       || previousGroupId !== nextGroupId
@@ -2525,6 +2539,37 @@ chrome.tabs.onUpdated.addListener((tabId, _changeInfo, tab) => {
     tabId,
     windowId
   });
+});
+
+chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
+  queueMutationFireAndForget(null, async () => {
+    await ensureInitialized();
+    const oldWindowId = resolveStaleWindowIdByNodeId(nodeIdFromTabId(removedTabId));
+    const addedTab = await getTab(addedTabId);
+    const windowId = oldWindowId ?? addedTab?.windowId;
+    if (!Number.isInteger(windowId)) {
+      return;
+    }
+
+    await queueMutation(windowId, async () => {
+      const liveTab = await getTab(addedTabId);
+      if (liveTab?.windowId === windowId) {
+        let next = replaceTabNode(windowTree(windowId), removedTabId, liveTab);
+        if (liveTab.active) {
+          next = setActiveTab(next, addedTabId);
+        }
+        setWindowTree(next);
+        await ensureSelectedTabVisible(windowId, addedTabId);
+      } else {
+        // The replacement may have closed or moved before this queue ran.
+        removeTabIdsFromWindowTree(windowId, [removedTabId]);
+        if (Number.isInteger(liveTab?.windowId)) {
+          scheduleWindowOrderingSync(liveTab.windowId);
+        }
+      }
+      scheduleWindowOrderingSync(windowId);
+    }, { operation: "tabs.onReplaced.apply", addedTabId, removedTabId, windowId });
+  }, { operation: "tabs.onReplaced", addedTabId, removedTabId });
 });
 
 chrome.tabs.onMoved.addListener((tabId) => {

@@ -278,6 +278,44 @@ export function upsertTabNode(tree, tab, options = {}) {
   return next;
 }
 
+export function replaceTabNode(tree, removedTabId, tab) {
+  const removedNodeId = asNodeId(removedTabId);
+  const addedNodeId = asNodeId(tab.id);
+  if (removedNodeId === addedNodeId || !tree.nodes[removedNodeId]) {
+    return upsertTabNode(tree, tab);
+  }
+
+  const next = cloneTree(tree);
+  const removedNode = next.nodes[removedNodeId];
+  const addedNode = next.nodes[addedNodeId];
+  next.nodes[addedNodeId] = {
+    ...removedNode,
+    nodeId: addedNodeId,
+    tabId: tab.id,
+    childNodeIds: [...removedNode.childNodeIds, ...(addedNode?.childNodeIds || [])]
+  };
+  delete next.nodes[removedNodeId];
+
+  // Keep the old node's position if an update already inserted the new ID.
+  const replaceMembership = (ids) => ids
+    .filter((id) => id !== addedNodeId)
+    .map((id) => id === removedNodeId ? addedNodeId : id);
+  next.rootNodeIds = replaceMembership(next.rootNodeIds);
+  for (const node of Object.values(next.nodes)) {
+    if (node.parentNodeId === removedNodeId) {
+      node.parentNodeId = addedNodeId;
+    }
+    node.childNodeIds = replaceMembership(node.childNodeIds);
+  }
+  if (next.selectedTabId === removedTabId) {
+    next.selectedTabId = tab.id;
+  }
+
+  applyTabToTree(next, tab);
+  sortChildrenByTabIndex(next, addedNodeId);
+  return ensureValidTree(next);
+}
+
 export function upsertTabNodes(tree, tabs) {
   const next = cloneTree(tree);
   const sortTracker = createSortTracker();
