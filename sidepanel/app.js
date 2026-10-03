@@ -166,6 +166,7 @@ const state = {
   settings: null,
   windows: {},
   persistenceError: null,
+  closeFailed: false,
   panelWindowId: null,
   focusedWindowId: null,
   search: "",
@@ -251,6 +252,7 @@ const dom = {
   settingsForm: document.getElementById("settings-form"),
   hintBar: document.getElementById("hint-bar"),
   persistenceWarning: document.getElementById("persistence-warning"),
+  closeError: document.getElementById("close-error"),
   confirmOverlay: document.getElementById("confirm-overlay"),
   confirmMessage: document.getElementById("confirm-message"),
   confirmSkip: document.getElementById("confirm-skip"),
@@ -2049,34 +2051,46 @@ async function moveGroupBlockToTarget(tree, target, position) {
 }
 
 async function executeCloseAction(action) {
-  if (action.kind === "single") {
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.CLOSE_SUBTREE,
-      tabId: action.tabId,
-      includeDescendants: action.includeDescendants ?? true
-    });
-    return;
-  }
+  state.closeFailed = false;
+  renderCloseError();
+  try {
+    if (action.kind === "single") {
+      await send(MESSAGE_TYPES.TREE_ACTION, {
+        type: TREE_ACTIONS.CLOSE_SUBTREE,
+        tabId: action.tabId,
+        includeDescendants: action.includeDescendants ?? true
+      });
+      return;
+    }
 
-  if (action.kind === "batch-tabs") {
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.BATCH_CLOSE_TABS,
-      tabIds: action.tabIds
-    });
-    replaceSelection([], null);
-    return;
-  }
+    if (action.kind === "batch-tabs") {
+      await send(MESSAGE_TYPES.TREE_ACTION, {
+        type: TREE_ACTIONS.BATCH_CLOSE_TABS,
+        tabIds: action.tabIds
+      });
+      replaceSelection([], null);
+      return;
+    }
 
-  if (action.kind === "batch") {
-    await send(MESSAGE_TYPES.TREE_ACTION, {
-      type: TREE_ACTIONS.BATCH_CLOSE_SUBTREES,
-      tabIds: action.tabIds
-    });
-    replaceSelection([], null);
+    if (action.kind === "batch") {
+      await send(MESSAGE_TYPES.TREE_ACTION, {
+        type: TREE_ACTIONS.BATCH_CLOSE_SUBTREES,
+        tabIds: action.tabIds
+      });
+      replaceSelection([], null);
+    }
+  } catch (error) {
+    // Keep the surviving selection available for a retry. Background state
+    // updates remove only the tabs Chrome actually closed.
+    state.closeFailed = true;
+    renderCloseError();
+    console.warn("Failed to close tabs", error);
   }
 }
 
 async function requestClose(action, totalTabs, isBatch) {
+  state.closeFailed = false;
+  renderCloseError();
   if (!shouldConfirmClose(state.settings, totalTabs, isBatch)) {
     await executeCloseAction(action);
     return;
@@ -3432,6 +3446,19 @@ function renderPersistenceWarning() {
   dom.persistenceWarning.hidden = !message;
 }
 
+function renderCloseError() {
+  if (!dom.closeError) {
+    return;
+  }
+  const message = state.closeFailed
+    ? t("closeTabsFailed", [], "Some tabs could not be closed. Please try again.")
+    : "";
+  if (dom.closeError.textContent !== message) {
+    dom.closeError.textContent = message;
+  }
+  dom.closeError.hidden = !message;
+}
+
 function render() {
   const tree = currentWindowTree();
   if (tree) {
@@ -3442,6 +3469,7 @@ function render() {
   hydrateSettingsFormIfNeeded();
   updateShortcutHint();
   renderPersistenceWarning();
+  renderCloseError();
   renderTree();
   renderContextMenu();
   updateSearchDropAffordance();

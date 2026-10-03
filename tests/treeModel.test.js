@@ -559,6 +559,58 @@ test("buildTreeFromTabs prefers pinned-aware matching when duplicate url/title t
   assert.deepEqual(restored.rootNodeIds, [nodeIdFromTabId(10), nodeIdFromTabId(11)]);
 });
 
+for (const [scenario, firstUrl] of [
+  ["a changed title", "https://restore.test/a"],
+  ["an early title-only candidate", "https://restore.test/new"]
+]) {
+  test(`buildTreeFromTabs reserves later exact URLs before matching ${scenario}`, () => {
+    let previousTree = createEmptyWindowTree(1);
+    previousTree = upsertTabNode(previousTree, tab({ id: 1, index: 0, title: "Page A", url: "https://restore.test/a" }));
+    previousTree = upsertTabNode(previousTree, tab({ id: 3, index: 1, title: "Parent", url: "https://restore.test/parent" }));
+    previousTree = upsertTabNode(previousTree, tab({ id: 2, index: 2, title: "Home", url: "https://restore.test/b" }));
+    previousTree = moveNode(previousTree, nodeIdFromTabId(2), nodeIdFromTabId(3));
+    previousTree = toggleNodeCollapsed(previousTree, nodeIdFromTabId(2));
+
+    const restored = buildTreeFromTabs([
+      tab({ id: 10, index: 0, title: "Home", url: firstUrl }),
+      tab({ id: 30, index: 1, title: "Parent", url: "https://restore.test/parent" }),
+      tab({ id: 20, index: 2, title: "Home", url: "https://restore.test/b" })
+    ], previousTree);
+
+    assert.equal(restored.nodes[nodeIdFromTabId(10)].collapsed, false);
+    assert.equal(restored.nodes[nodeIdFromTabId(10)].parentNodeId, null);
+    assert.equal(restored.nodes[nodeIdFromTabId(20)].collapsed, true);
+    assert.equal(restored.nodes[nodeIdFromTabId(20)].parentNodeId, nodeIdFromTabId(30));
+    assert.deepEqual(restored.rootNodeIds, [nodeIdFromTabId(10), nodeIdFromTabId(30)]);
+    assert.deepEqual(restored.nodes[nodeIdFromTabId(30)].childNodeIds, [nodeIdFromTabId(20)]);
+  });
+}
+
+test("buildTreeFromTabs reserves duplicate URL title identities before URL-only fallback", () => {
+  let previousTree = createEmptyWindowTree(1);
+  // Insertion order deliberately differs from tab order: the first saved record
+  // belongs to the later current tab, whose title still identifies it exactly.
+  previousTree = upsertTabNode(previousTree, tab({ id: 4, index: 3, title: "Home", url: "https://restore.test/shared" }));
+  previousTree = upsertTabNode(previousTree, tab({ id: 1, index: 0, title: "First Parent", url: "https://restore.test/first" }));
+  previousTree = upsertTabNode(previousTree, tab({ id: 2, index: 1, title: "Work", url: "https://restore.test/shared" }));
+  previousTree = upsertTabNode(previousTree, tab({ id: 3, index: 2, title: "Second Parent", url: "https://restore.test/second" }));
+  previousTree = moveNode(previousTree, nodeIdFromTabId(2), nodeIdFromTabId(1));
+  previousTree = moveNode(previousTree, nodeIdFromTabId(4), nodeIdFromTabId(3));
+  previousTree = toggleNodeCollapsed(previousTree, nodeIdFromTabId(4));
+
+  const restored = buildTreeFromTabs([
+    tab({ id: 10, index: 0, title: "First Parent", url: "https://restore.test/first" }),
+    tab({ id: 20, index: 1, title: "Loading...", url: "https://restore.test/shared" }),
+    tab({ id: 30, index: 2, title: "Second Parent", url: "https://restore.test/second" }),
+    tab({ id: 40, index: 3, title: "Home", url: "https://restore.test/shared" })
+  ], previousTree);
+
+  assert.equal(restored.nodes[nodeIdFromTabId(20)].collapsed, false);
+  assert.equal(restored.nodes[nodeIdFromTabId(20)].parentNodeId, nodeIdFromTabId(10));
+  assert.equal(restored.nodes[nodeIdFromTabId(40)].collapsed, true);
+  assert.equal(restored.nodes[nodeIdFromTabId(40)].parentNodeId, nodeIdFromTabId(30));
+});
+
 test("buildTreeFromTabs falls back to title matching when urls are missing", () => {
   const tabs = [
     tab({ id: 1, index: 0, title: "Persist Parent", url: "" }),

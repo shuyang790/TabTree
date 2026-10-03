@@ -740,44 +740,41 @@ export function buildTreeFromTabs(tabs, previousTree = null) {
   }
 
   const matchedByTabId = new Map();
-  for (const tab of sortedTabs) {
-    const url = normalizeUrl(tab.url);
-    const title = typeof tab.title === "string" ? tab.title : "";
-    const pinned = !!tab.pinned;
-    const compositeKey = `${pinned ? 1 : 0}\u0000${title}\u0000${url}`;
-    let match = null;
-    if (title || url) {
-      match = takeFirstUnconsumed(previousByComposite.get(compositeKey));
-    }
-    if (title) {
-      // Prefer stable identity when duplicate URLs exist.
-      match = match || takeFirstUnconsumed(previousByTitle.get(title), (record) =>
-        record.url === url && record.pinned === pinned
-      );
-      if (!match) {
-        match = takeFirstUnconsumed(previousByTitle.get(title), (record) => record.url === url);
+  const currentRecords = sortedTabs.map((tab) => ({
+    tabId: tab.id,
+    url: normalizeUrl(tab.url),
+    title: typeof tab.title === "string" ? tab.title : "",
+    pinned: !!tab.pinned
+  }));
+  const matchPass = (findMatch) => {
+    for (const current of currentRecords) {
+      if (matchedByTabId.has(current.tabId)) {
+        continue;
       }
-      if (!match) {
-        match = takeFirstUnconsumed(previousByTitle.get(title), (record) => record.pinned === pinned);
-      }
-      if (!match) {
-        match = takeFirstUnconsumed(previousByTitle.get(title));
+      const match = findMatch(current);
+      if (match) {
+        matchedByTabId.set(current.tabId, match);
       }
     }
-    if (!match) {
-      match = takeFirstUnconsumed(previousByUrl.get(url), (record) => record.pinned === pinned);
-    }
-    if (!match) {
-      match = takeFirstUnconsumed(previousByUrl.get(url));
-    }
-    if (!match && title) {
-      match = takeFirstUnconsumed(previousByTitle.get(title), (record) => record.pinned === pinned)
-        || takeFirstUnconsumed(previousByTitle.get(title));
-    }
-    if (match) {
-      matchedByTabId.set(tab.id, match);
-    }
-  }
+  };
+
+  // Reserve stronger identities across ALL tabs before trying weaker fallbacks.
+  // Otherwise an earlier renamed/loading tab can consume the exact URL/title
+  // record of a later tab, moving its collapse state and subtree to the wrong tab.
+  matchPass(({ url, title, pinned }) => url && takeFirstUnconsumed(
+    previousByComposite.get(`${pinned ? 1 : 0}\u0000${title}\u0000${url}`)
+  ));
+  matchPass(({ url, title }) => url && takeFirstUnconsumed(
+    previousByUrl.get(url), (record) => record.title === title
+  ));
+  matchPass(({ url, pinned }) => url && takeFirstUnconsumed(
+    previousByUrl.get(url), (record) => record.pinned === pinned
+  ));
+  matchPass(({ url }) => url && takeFirstUnconsumed(previousByUrl.get(url)));
+  matchPass(({ title, pinned }) => title && takeFirstUnconsumed(
+    previousByTitle.get(title), (record) => record.pinned === pinned
+  ));
+  matchPass(({ title }) => title && takeFirstUnconsumed(previousByTitle.get(title)));
 
   const firstTabByUrl = new Map();
   const secondTabByUrl = new Map();

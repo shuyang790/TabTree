@@ -35,6 +35,9 @@
   "searchDropHint": {
     "message": "搜索标签页后可拖放到这里移动到顶层"
   },
+  "closeTabsFailed": {
+    "message": "部分标签页未能关闭，请重试。"
+  },
   "localStorageCapacityWarning": {
     "message": "本地存储空间已满。最近的树结构更改可能在重启后丢失。请减少打开的标签页；系统会自动重试保存。"
   },

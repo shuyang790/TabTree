@@ -17,6 +17,7 @@ import {
 } from "./constants.js";
 import { buildSyncSnapshot } from "./treeModel.js";
 import { LOCAL_STORAGE_BUDGET_BYTES, planLocalStorage, storageBytes } from "./localStorageBudget.js";
+import { boundSyncSnapshot } from "./syncSnapshotBudget.js";
 
 // All local writers share a queue: checking a budget outside this queue races
 // other windows' writes. Use the area as the key so tests/contexts stay isolated.
@@ -378,11 +379,11 @@ export async function loadRestoreArchive() {
 }
 
 export async function saveSyncSnapshot(windowsState) {
-  const snapshot = buildSyncSnapshot(windowsState, {
+  const snapshot = boundSyncSnapshot(buildSyncSnapshot(windowsState, {
     maxWindows: SYNC_MAX_WINDOWS,
     maxNodesPerWindow: SYNC_MAX_NODES_PER_WINDOW,
     maxUrlLength: SYNC_MAX_URL_LENGTH
-  });
+  }));
   await chrome.storage.sync.set({ [SYNC_SNAPSHOT_KEY]: snapshot });
   return snapshot;
 }

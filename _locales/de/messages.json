@@ -35,6 +35,9 @@
   "searchDropHint": {
     "message": "Tabs suchen und hierhin ziehen, um sie auf oberste Ebene zu verschieben"
   },
+  "closeTabsFailed": {
+    "message": "Einige Tabs konnten nicht geschlossen werden. Bitte versuche es erneut."
+  },
   "localStorageCapacityWarning": {
     "message": "Der lokale Speicher ist voll. Die letzten Änderungen am Baum können beim Neustart verloren gehen. Reduziere die Anzahl offener Tabs; das Speichern wird automatisch erneut versucht."
   },

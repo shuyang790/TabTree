@@ -3,6 +3,7 @@ import {
   LOCAL_RESTORE_ARCHIVE_KEY,
   LOCAL_SNAPSHOT_KEY,
   MESSAGE_TYPES,
+  SETTINGS_KEY,
   TREE_ACTIONS
 } from "../shared/constants.js";
 import {
@@ -1354,27 +1355,26 @@ async function closeSubtree(windowId, tabId, includeDescendants = true) {
   if (!includeDescendants) {
     try {
       await chrome.tabs.remove(tabId);
-    } catch {
-      // Tab may already be closed.
+    } finally {
+      await pruneWindowTreeAgainstLiveTabs(windowId);
     }
-    await pruneWindowTreeAgainstLiveTabs(windowId);
     return;
   }
 
   const tree = windowTree(windowId);
   const nodeId = nodeIdFromTabId(tabId);
-  const { tree: next, removedTabIds } = removeSubtree(tree, nodeId);
+  const { removedTabIds } = removeSubtree(tree, nodeId);
   if (!removedTabIds.length) {
     await pruneWindowTreeAgainstLiveTabs(windowId);
     return;
   }
-  setWindowTree(next);
   try {
     await chrome.tabs.remove(removedTabIds);
-  } catch {
-    // Best effort.
+  } finally {
+    // Chrome can reject or partially complete a close. Keep each surviving
+    // node's relationships until the live tab list confirms its removal.
+    await pruneWindowTreeAgainstLiveTabs(windowId);
   }
-  await pruneWindowTreeAgainstLiveTabs(windowId);
 }
 
 async function activateTab(tabId) {
@@ -1393,6 +1393,7 @@ async function batchCloseSubtrees(tabIds) {
     queryTabs: () => chrome.tabs.query({}),
     getTab
   });
+  let firstError = null;
   for (const [windowId, ids] of grouped.entries()) {
     const tree = windowTree(windowId);
     const nodeIds = ids.map((id) => nodeIdFromTabId(id)).filter((id) => !!tree.nodes[id]);
@@ -1410,16 +1411,17 @@ async function batchCloseSubtrees(tabIds) {
     }
 
     const uniqueRemoveIds = Array.from(new Set(removeTabIds));
-    setWindowTree(next);
     if (uniqueRemoveIds.length) {
       try {
         await chrome.tabs.remove(uniqueRemoveIds);
       } catch (error) {
         logUnexpectedFailure("batchCloseSubtrees.removeTabs", error, { windowId, tabIds: uniqueRemoveIds });
+        firstError ||= error;
       }
     }
     await pruneWindowTreeAgainstLiveTabs(windowId);
   }
+  if (firstError) throw firstError;
 }
 
 async function batchCloseTabs(tabIds) {
@@ -1452,6 +1454,7 @@ async function batchCloseTabs(tabIds) {
     ...liveByWindow.keys()
   ]);
 
+  let firstError = null;
   for (const windowId of affectedWindowIds) {
     const requestedInWindow = Array.from(new Set(requestedByWindow.get(windowId) || []));
     const liveInWindow = Array.from(new Set(liveByWindow.get(windowId) || []));
@@ -1467,10 +1470,12 @@ async function batchCloseTabs(tabIds) {
         await chrome.tabs.remove(liveInWindow);
       } catch (error) {
         logUnexpectedFailure("batchCloseTabs.removeTabs", error, { windowId, tabIds: liveInWindow });
+        firstError ||= error;
       }
     }
     await pruneWindowTreeAgainstLiveTabs(windowId);
   }
+  if (firstError) throw firstError;
 }
 
 async function batchGroupNew(tabIds) {
@@ -2382,6 +2387,22 @@ chrome.runtime.onSuspend.addListener(() => {
   void persistCoordinator.flushNow();
 });
 
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "sync" || !Object.hasOwn(changes, SETTINGS_KEY)) {
+    return;
+  }
+  queueMutationFireAndForget(null, async () => {
+    await ensureInitialized();
+    // Read the latest durable value instead of replaying an event's newValue:
+    // our own write events may arrive after a newer local or remote change.
+    const settings = await loadSettings();
+    if (JSON.stringify(settings) !== JSON.stringify(state.settings)) {
+      state.settings = settings;
+      broadcastState(null, null, false);
+    }
+  }, { operation: "settings.onChanged" });
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
     await ensureInitialized();
@@ -2398,11 +2419,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message?.type === MESSAGE_TYPES.PATCH_SETTINGS) {
-      state.settings = await queueMutation(null, async () => {
-        return saveSettings({ ...state.settings, ...message.payload.settingsPatch });
+      const settings = await queueMutation(null, async () => {
+        const latest = await loadSettings();
+        const saved = await saveSettings({ ...latest, ...message.payload.settingsPatch });
+        state.settings = saved;
+        broadcastState(null, null, false);
+        return saved;
       }, { operation: "settings.patch" });
-      broadcastState(null, null, false);
-      sendResponse({ ok: true, payload: state.settings });
+      sendResponse({ ok: true, payload: settings });
       return;
     }
 

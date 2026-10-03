@@ -35,6 +35,9 @@
   "searchDropHint": {
     "message": "Search tabs and drag here to move to top-level"
   },
+  "closeTabsFailed": {
+    "message": "Some tabs could not be closed. Please try again."
+  },
   "localStorageCapacityWarning": {
     "message": "Local storage is full. Recent tree changes may not survive restart. Reduce open tabs; saving retries automatically."
   },

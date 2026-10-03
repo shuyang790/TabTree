@@ -117,6 +117,13 @@ after startup recovery; if its indispensable data cannot fit, the same warning
 appears instead of silently deleting active tree data. The budget covers local
 storage; Chrome Sync has separate quotas.
 
+The lightweight sync snapshot stays within Chrome's 8 KiB per-item limit,
+including the storage key and encoded JSON. When needed, it retains fewer whole
+nodes, prioritizing recently updated windows and keeping parents before children.
+This limits the fallback information synced across browsers; it does not trim
+the complete local trees. Settings synced from another browser update open
+panels, and local settings edits merge with the latest stored settings.
+
 ## Behavior Notes
 
 - Parent-close behavior promotes children when needed.

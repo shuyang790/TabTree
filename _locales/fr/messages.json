@@ -35,6 +35,9 @@
   "searchDropHint": {
     "message": "Recherchez des onglets puis glissez ici pour les deplacer au niveau racine"
   },
+  "closeTabsFailed": {
+    "message": "Certains onglets n’ont pas pu être fermés. Veuillez réessayer."
+  },
   "localStorageCapacityWarning": {
     "message": "Le stockage local est plein. Les dernières modifications de l’arborescence pourraient être perdues au redémarrage. Réduisez le nombre d’onglets ouverts ; l’enregistrement sera réessayé automatiquement."
   },
