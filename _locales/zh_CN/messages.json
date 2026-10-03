@@ -35,6 +35,12 @@
   "searchDropHint": {
     "message": "搜索标签页后可拖放到这里移动到顶层"
   },
+  "localStorageCapacityWarning": {
+    "message": "本地存储空间已满。最近的树结构更改可能在重启后丢失。请减少打开的标签页；系统会自动重试保存。"
+  },
+  "localStorageWriteWarning": {
+    "message": "最近的树结构更改未能保存，可能在重启后丢失。系统会自动重试保存。"
+  },
   "addChildTab": {
     "message": "添加子标签页"
   },

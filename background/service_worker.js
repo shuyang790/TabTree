@@ -1,7 +1,7 @@
 import {
   isTreeActionType,
-  LOCAL_ARCHIVE_MAX_TREES,
-  LOCAL_ARCHIVE_RETENTION_MS,
+  LOCAL_RESTORE_ARCHIVE_KEY,
+  LOCAL_SNAPSHOT_KEY,
   MESSAGE_TYPES,
   TREE_ACTIONS
 } from "../shared/constants.js";
@@ -43,12 +43,13 @@ import {
   loadSettings,
   loadSyncSnapshot,
   loadWindowTree,
-  removeWindowTree,
+  migrateLocalStorage,
   saveLocalSnapshot,
   saveRestoreArchive,
   saveSettings,
   saveSyncSnapshot,
-  saveWindowTree
+  saveWindowTree,
+  saveWindowTrees
 } from "../shared/treeStore.js";
 import { createPersistCoordinator } from "./persistence.js";
 import { createInitCoordinator } from "./initCoordinator.js";
@@ -70,6 +71,8 @@ const state = {
   restoreArchive: null,
   restoreArchiveIds: {},
   syncSnapshot: null,
+  startupRestoreTrees: [],
+  persistenceError: null,
   lastMoveByWindow: {}
 };
 
@@ -94,16 +97,20 @@ function logUnexpectedFailure(operation, error, context = {}) {
 
 const persistCoordinator = createPersistCoordinator({
   saveWindowTree,
+  saveWindowTrees,
   saveLocalSnapshot: async (windowsState) => {
     state.localSnapshot = await saveLocalSnapshot(windowsState);
   },
   saveRestoreArchive: async (windowsState) => {
-    state.restoreArchive = await saveRestoreArchive(windowsState, state.restoreArchiveIds, state.restoreArchive);
+    state.restoreArchive = await saveRestoreArchive(windowsState, state.restoreArchiveIds);
   },
   saveSyncSnapshot,
   getWindowsState: () => state.windows,
-  onError: (error) => {
+  isReady: () => state.initialized,
+  onLocalSuccess: () => setPersistenceError(null),
+  onError: (error, { phase }) => {
     console.warn("TabTree persistence flush failed", error);
+    if (phase !== "syncSnapshot") setPersistenceError(error);
   }
 });
 
@@ -123,6 +130,7 @@ function getStatePayload(targetWindowId = null, changedWindowId = null, includeW
 
   return {
     settings: state.settings,
+    persistenceError: state.persistenceError,
     windows: windowsPayload,
     focusedWindowId: targetWindowId,
     partial: includeWindows ? partial : false,
@@ -137,6 +145,15 @@ function broadcastState(windowId = null, changedWindowId = null, includeWindows 
   }).catch(() => {
     // No active side panel listener.
   });
+}
+
+function setPersistenceError(error) {
+  const next = error ? {
+    code: error.code === "LOCAL_STORAGE_CAPACITY" ? error.code : "LOCAL_STORAGE_WRITE_FAILED"
+  } : null;
+  if (state.persistenceError?.code === next?.code) return;
+  state.persistenceError = next;
+  broadcastState(null, null, false);
 }
 
 function windowTree(windowId) {
@@ -1090,45 +1107,12 @@ async function treeWithCurrentGroupMetadata(windowId, tree) {
   };
 }
 
-async function pruneArchivedLocalTrees(currentWindowIds = []) {
-  const trees = await loadAllWindowTrees();
-  if (!trees.length) {
-    return;
-  }
-
-  const currentSet = new Set(currentWindowIds.filter((id) => Number.isInteger(id)));
-  const now = Date.now();
-  const removalIds = new Set();
-  const archivedCandidates = [];
-
-  for (const tree of trees) {
-    if (!tree || !Number.isInteger(tree.windowId) || currentSet.has(tree.windowId)) {
-      continue;
-    }
-    if (Number.isFinite(tree.archivedAt) && (now - tree.archivedAt) > LOCAL_ARCHIVE_RETENTION_MS) {
-      removalIds.add(tree.windowId);
-      continue;
-    }
-    if (Number.isFinite(tree.archivedAt)) {
-      archivedCandidates.push(tree);
-    }
-  }
-
-  archivedCandidates.sort((a, b) => treeTimestamp(b) - treeTimestamp(a));
-  const overflow = archivedCandidates.slice(LOCAL_ARCHIVE_MAX_TREES);
-  for (const tree of overflow) {
-    removalIds.add(tree.windowId);
-  }
-
-  if (!removalIds.size) {
-    return;
-  }
-
-  await Promise.all(Array.from(removalIds).map((windowId) => removeWindowTree(windowId)));
-}
-
 async function collectRestoreTreePool() {
-  const storedTrees = await loadAllWindowTrees();
+  const [storedTrees, snapshot, archive] = await Promise.all([
+    loadAllWindowTrees(), loadLocalSnapshot(), loadRestoreArchive()
+  ]);
+  state.localSnapshot = snapshot;
+  state.restoreArchive = archive;
   const snapshotTrees = Array.isArray(state.localSnapshot?.windows)
     ? state.localSnapshot.windows
     : [];
@@ -1138,7 +1122,7 @@ async function collectRestoreTreePool() {
       restoreArchiveId: entry.id
     }))
     : [];
-  return dedupeTreePool([...storedTrees, ...snapshotTrees, ...archivedTrees]);
+  return dedupeTreePool([...storedTrees, ...snapshotTrees, ...archivedTrees, ...state.startupRestoreTrees]);
 }
 
 async function hydrateWindow(windowId, tabs, options = {}) {
@@ -1253,6 +1237,7 @@ async function attemptLowConfidenceRehydrate(windowId, candidatePool, options = 
 function scheduleStartupReconcile(windowIds) {
   const targets = (windowIds || []).filter((id) => Number.isInteger(id));
   if (!targets.length) {
+    state.startupRestoreTrees = [];
     return;
   }
 
@@ -1266,6 +1251,7 @@ function scheduleStartupReconcile(windowIds) {
             isFinalAttempt: delayMs === finalDelayMs
           });
         }
+        if (delayMs === finalDelayMs) state.startupRestoreTrees = [];
       }, {
         operation: "startup.reconcile",
         windowIds: targets,
@@ -1304,12 +1290,20 @@ const ensureInitialized = createInitCoordinator({
   initialize: async () => {
     state.settings = await loadSettings();
     state.syncSnapshot = await loadSyncSnapshot();
-    state.localSnapshot = await loadLocalSnapshot();
-    state.restoreArchive = await loadRestoreArchive();
     const windows = await chrome.windows.getAll({ populate: true });
-    await pruneArchivedLocalTrees(windows.map((win) => win.id));
     const previousTrees = await collectRestoreTreePool();
+    state.startupRestoreTrees = previousTrees;
     await hydrateAllWindows(windows, previousTrees);
+    try {
+      const saved = await migrateLocalStorage(state.windows);
+      state.localSnapshot = saved[LOCAL_SNAPSHOT_KEY] || null;
+      state.restoreArchive = saved[LOCAL_RESTORE_ARCHIVE_KEY] || null;
+      setPersistenceError(null);
+    } catch (error) {
+      // Keep the live tree usable and the last committed recovery data intact.
+      setPersistenceError(error);
+      logUnexpectedFailure("storage.migrate", error);
+    }
     state.initialized = true;
 
     try {
@@ -2659,7 +2653,12 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
 chrome.windows.onRemoved.addListener((windowId) => {
   queueMutationFireAndForget(windowId, async () => {
     await ensureInitialized();
-    await archiveWindowTree(windowId);
+    try {
+      await archiveWindowTree(windowId);
+    } catch (error) {
+      setPersistenceError(error);
+      logUnexpectedFailure("storage.archiveWindow", error, { windowId });
+    }
     delete state.windows[windowId];
     delete state.restoreArchiveIds[windowId];
     clearLastMove(windowId);

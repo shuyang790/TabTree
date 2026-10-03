@@ -35,6 +35,12 @@
   "searchDropHint": {
     "message": "Busca pestanas y arrastra aqui para mover al nivel superior"
   },
+  "localStorageCapacityWarning": {
+    "message": "El almacenamiento local está lleno. Los cambios recientes del árbol podrían perderse al reiniciar. Reduce las pestañas abiertas; el guardado se reintentará automáticamente."
+  },
+  "localStorageWriteWarning": {
+    "message": "No se pudieron guardar los cambios recientes del árbol y podrían perderse al reiniciar. El guardado se reintentará automáticamente."
+  },
   "addChildTab": {
     "message": "Anadir pestana hija"
   },

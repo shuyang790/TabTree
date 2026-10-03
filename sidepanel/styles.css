@@ -194,6 +194,19 @@ button:focus-visible {
   border: 0;
 }
 
+.persistence-warning {
+  flex: 0 0 auto;
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, #b7791f, var(--border) 40%);
+  border-radius: calc(var(--radius) - 2px);
+  background: color-mix(in srgb, #b7791f, var(--bg-elev) 90%);
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .tree-root {
   flex: 1;
   overflow: auto;

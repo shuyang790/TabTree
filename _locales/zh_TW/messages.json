@@ -35,6 +35,12 @@
   "searchDropHint": {
     "message": "搜尋分頁後可拖放到這裡移到頂層"
   },
+  "localStorageCapacityWarning": {
+    "message": "本機儲存空間已滿。最近的樹狀結構變更可能在重新啟動後遺失。請減少開啟的分頁；系統會自動重試儲存。"
+  },
+  "localStorageWriteWarning": {
+    "message": "最近的樹狀結構變更無法儲存，可能在重新啟動後遺失。系統會自動重試儲存。"
+  },
   "addChildTab": {
     "message": "新增子分頁"
   },

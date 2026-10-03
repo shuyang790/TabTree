@@ -35,6 +35,12 @@
   "searchDropHint": {
     "message": "Search tabs and drag here to move to top-level"
   },
+  "localStorageCapacityWarning": {
+    "message": "Local storage is full. Recent tree changes may not survive restart. Reduce open tabs; saving retries automatically."
+  },
+  "localStorageWriteWarning": {
+    "message": "Recent tree changes could not be saved and may not survive restart. Saving retries automatically."
+  },
   "addChildTab": {
     "message": "Add child tab"
   },

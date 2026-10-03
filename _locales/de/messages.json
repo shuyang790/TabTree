@@ -35,6 +35,12 @@
   "searchDropHint": {
     "message": "Tabs suchen und hierhin ziehen, um sie auf oberste Ebene zu verschieben"
   },
+  "localStorageCapacityWarning": {
+    "message": "Der lokale Speicher ist voll. Die letzten Änderungen am Baum können beim Neustart verloren gehen. Reduziere die Anzahl offener Tabs; das Speichern wird automatisch erneut versucht."
+  },
+  "localStorageWriteWarning": {
+    "message": "Die letzten Änderungen am Baum konnten nicht gespeichert werden und können beim Neustart verloren gehen. Das Speichern wird automatisch erneut versucht."
+  },
   "addChildTab": {
     "message": "Kind-Tab hinzufugen"
   },

@@ -7,6 +7,84 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+test("startup waits for recovery and migration before atomically saving dirty windows", async (t) => {
+  let ready = false;
+  const batches = [];
+  const windows = { 1: { windowId: 1 }, 2: { windowId: 2 } };
+  const coordinator = createPersistCoordinator({
+    saveWindowTree: async () => assert.fail("production must batch window writes"),
+    saveWindowTrees: async (state, ids) => batches.push({ state, ids }),
+    saveSyncSnapshot: async () => {},
+    getWindowsState: () => windows,
+    isReady: () => ready,
+    flushDebounceMs: 10000,
+    snapshotMinIntervalMs: 0,
+    heavySnapshotMinIntervalMs: 0
+  });
+  t.after(() => coordinator.dispose());
+  coordinator.markWindowDirty(1);
+  coordinator.markWindowDirty(2);
+  await coordinator.flushNow();
+  assert.deepEqual(batches, []);
+  ready = true;
+  await coordinator.flushNow();
+  assert.deepEqual(batches, [{ state: windows, ids: [1, 2] }]);
+});
+
+test("capacity failure keeps the whole batch dirty until a successful local retry", async (t) => {
+  let fail = true;
+  let successes = 0;
+  const attempts = [];
+  const phases = [];
+  const coordinator = createPersistCoordinator({
+    saveWindowTrees: async (_state, ids) => {
+      attempts.push(ids);
+      if (fail) throw Object.assign(new Error("full"), { code: "LOCAL_STORAGE_CAPACITY" });
+    },
+    saveSyncSnapshot: async () => {},
+    getWindowsState: () => ({ 1: { windowId: 1 }, 2: { windowId: 2 } }),
+    onError: (_error, { phase }) => phases.push(phase),
+    onLocalSuccess: () => successes++,
+    flushDebounceMs: 10000,
+    retryBaseMs: 10000,
+    retryMaxMs: 10000,
+    snapshotMinIntervalMs: 0,
+    heavySnapshotMinIntervalMs: 0
+  });
+  t.after(() => coordinator.dispose());
+  coordinator.markWindowDirty(1);
+  coordinator.markWindowDirty(2);
+  await coordinator.flushNow();
+  assert.equal(successes, 0);
+  assert.deepEqual(phases, ["window"]);
+  fail = false;
+  await coordinator.flushNow();
+  assert.deepEqual(attempts, [[1, 2], [1, 2]]);
+  assert.equal(successes, 1);
+});
+
+test("sync quota failures are distinguished from local persistence failures", async (t) => {
+  let successes = 0;
+  const phases = [];
+  const coordinator = createPersistCoordinator({
+    saveWindowTree: async () => {},
+    saveSyncSnapshot: async () => { throw new Error("sync quota"); },
+    getWindowsState: () => ({ 1: { windowId: 1 } }),
+    onError: (_error, { phase }) => phases.push(phase),
+    onLocalSuccess: () => successes++,
+    flushDebounceMs: 10000,
+    retryBaseMs: 10000,
+    retryMaxMs: 10000,
+    snapshotMinIntervalMs: 0,
+    heavySnapshotMinIntervalMs: 0
+  });
+  t.after(() => coordinator.dispose());
+  coordinator.markWindowDirty(1);
+  await coordinator.flushNow();
+  assert.equal(successes, 1);
+  assert.deepEqual(phases, ["syncSnapshot"]);
+});
+
 async function waitFor(predicate, { timeoutMs = 600, intervalMs = 10 } = {}) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {

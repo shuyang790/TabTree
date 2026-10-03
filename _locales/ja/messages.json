@@ -35,6 +35,12 @@
   "searchDropHint": {
     "message": "タブを検索し、ここにドラッグしてトップレベルへ移動"
   },
+  "localStorageCapacityWarning": {
+    "message": "ローカルストレージがいっぱいです。最近のツリーの変更は再起動後に失われる可能性があります。開いているタブを減らしてください。保存は自動的に再試行されます。"
+  },
+  "localStorageWriteWarning": {
+    "message": "最近のツリーの変更を保存できませんでした。再起動後に失われる可能性があります。保存は自動的に再試行されます。"
+  },
   "addChildTab": {
     "message": "子タブを追加"
   },

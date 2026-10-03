@@ -16,6 +16,49 @@ import {
   SYNC_SNAPSHOT_KEY
 } from "./constants.js";
 import { buildSyncSnapshot } from "./treeModel.js";
+import { LOCAL_STORAGE_BUDGET_BYTES, planLocalStorage, storageBytes } from "./localStorageBudget.js";
+
+// All local writers share a queue: checking a budget outside this queue races
+// other windows' writes. Use the area as the key so tests/contexts stay isolated.
+const localWriteQueues = new WeakMap();
+
+function queueLocalWrite(operation) {
+  const area = chrome.storage.local;
+  const previous = localWriteQueues.get(area) || Promise.resolve();
+  const result = previous.then(() => operation(area));
+  localWriteQueues.set(area, result.catch(() => {}));
+  return result;
+}
+
+async function updateLocalStorage(createUpdates, options = {}) {
+  return queueLocalWrite(async (area) => {
+    const current = await area.get(null);
+    const updates = createUpdates(current);
+    let plan = planLocalStorage(current, updates, options);
+    const tombstonesFor = (next) => Object.fromEntries(
+      next.removedKeys.filter((key) => Object.hasOwn(current, key)).map((key) => [key, null])
+    );
+    let tombstones = tombstonesFor(plan);
+    if (plan.bytes + storageBytes(tombstones) > LOCAL_STORAGE_BUDGET_BYTES) {
+      // Reserve enough room for every possible deletion marker before replanning.
+      const reserve = storageBytes(Object.fromEntries(Object.keys(current).map((key) => [key, null])));
+      plan = planLocalStorage(current, updates, {
+        ...options, maxBytes: LOCAL_STORAGE_BUDGET_BYTES - reserve
+      });
+      tombstones = tombstonesFor(plan);
+    }
+    const changes = { ...tombstones };
+    for (const [key, value] of Object.entries(plan.values)) {
+      if (JSON.stringify(current[key]) !== JSON.stringify(value)) changes[key] = value;
+    }
+    // Replace removed values with tiny markers in the SAME set as new data.
+    // A rejected set therefore leaves the previous recovery data intact, even
+    // when migrating an old unlimited store which is already above Chrome's cap.
+    if (Object.keys(changes).length) await area.set(changes);
+    if (Object.keys(tombstones).length) await area.remove(Object.keys(tombstones));
+    return plan.values;
+  });
+}
 
 const LEGACY_LIGHT_PRESETS = new Set([
   "catppuccin-latte",
@@ -273,12 +316,43 @@ export async function loadAllWindowTrees() {
 
 export async function saveWindowTree(windowTree) {
   const key = `${LOCAL_WINDOW_PREFIX}${windowTree.windowId}`;
-  await chrome.storage.local.set({ [key]: normalizeWindowTreePersistenceMeta(windowTree) });
+  await updateLocalStorage(() => ({ [key]: normalizeWindowTreePersistenceMeta(windowTree) }));
+}
+
+export async function saveWindowTrees(windowsState, windowIds = Object.keys(windowsState)) {
+  await updateLocalStorage(() => Object.fromEntries(windowIds
+    .map((windowId) => windowsState[windowId])
+    .filter(Boolean)
+    .map((tree) => [`${LOCAL_WINDOW_PREFIX}${tree.windowId}`, normalizeWindowTreePersistenceMeta(tree)])), {
+    activeWindowIds: Object.values(windowsState).map((tree) => tree.windowId)
+  });
+}
+
+// Called only AFTER startup recovery has read old window IDs and hydrated all
+// current windows. Old IDs become optional recovery records, never live trees.
+export async function migrateLocalStorage(windowsState) {
+  const activeWindowIds = Object.values(windowsState).map((tree) => tree.windowId);
+  const active = new Set(activeWindowIds);
+  return updateLocalStorage((current) => {
+    const updates = {};
+    for (const [key, tree] of Object.entries(current)) {
+      if (key.startsWith(LOCAL_WINDOW_PREFIX) && tree?.nodes && !active.has(tree.windowId)) {
+        updates[key] = {
+          ...normalizeWindowTreePersistenceMeta(tree),
+          archivedAt: Number.isFinite(tree.archivedAt) ? tree.archivedAt : Date.now()
+        };
+      }
+    }
+    for (const tree of Object.values(windowsState)) {
+      updates[`${LOCAL_WINDOW_PREFIX}${tree.windowId}`] = normalizeWindowTreePersistenceMeta(tree);
+    }
+    return updates;
+  }, { activeWindowIds });
 }
 
 export async function removeWindowTree(windowId) {
   const key = `${LOCAL_WINDOW_PREFIX}${windowId}`;
-  await chrome.storage.local.remove([key]);
+  await queueLocalWrite((area) => area.remove([key]));
 }
 
 export async function loadSyncSnapshot() {
@@ -324,45 +398,49 @@ export async function saveLocalSnapshot(windowsState) {
     windows: windowEntries
   };
 
-  await chrome.storage.local.set({ [LOCAL_SNAPSHOT_KEY]: snapshot });
-  return snapshot;
+  const saved = await updateLocalStorage(() => ({ [LOCAL_SNAPSHOT_KEY]: snapshot }), {
+    activeWindowIds: windowEntries.map((tree) => tree.windowId)
+  });
+  return saved[LOCAL_SNAPSHOT_KEY] || null;
 }
 
-export async function saveRestoreArchive(windowsState, restoreArchiveIdByWindow = {}, existingArchive = null) {
-  const baseArchive = existingArchive && typeof existingArchive === "object"
-    ? existingArchive
-    : await loadRestoreArchive();
-  const byId = new Map(pruneRestoreArchiveEntries(baseArchive?.entries || []).map((entry) => [entry.id, entry]));
-  const now = Date.now();
+export async function saveRestoreArchive(windowsState, restoreArchiveIdByWindow = {}) {
+  const saved = await updateLocalStorage((current) => {
+    // Disk is authoritative: a cached archive could resurrect entries evicted by
+    // an intervening window write. Build the merge inside the same write queue.
+    const baseArchive = current[LOCAL_RESTORE_ARCHIVE_KEY];
+    const byId = new Map(pruneRestoreArchiveEntries(baseArchive?.entries || []).map((entry) => [entry.id, entry]));
+    const now = Date.now();
 
-  const trees = Object.values(windowsState || {})
-    .filter((tree) => tree && typeof tree === "object" && Number.isInteger(tree.windowId) && tree.nodes)
-    .map((tree, index) => {
-      const archiveId = nonEmptyString(restoreArchiveIdByWindow?.[tree.windowId])
-        ? restoreArchiveIdByWindow[tree.windowId]
-        : fallbackRestoreArchiveId(tree.windowId, now, index);
-      const normalizedTree = normalizeWindowTreePersistenceMeta(tree);
-      return {
-        id: archiveId,
-        windowId: tree.windowId,
-        savedAt: now,
-        tree: {
-          ...normalizedTree,
-          restoreArchiveId: archiveId
-        }
-      };
-    });
+    const trees = Object.values(windowsState || {})
+      .filter((tree) => tree && typeof tree === "object" && Number.isInteger(tree.windowId) && tree.nodes)
+      .map((tree, index) => {
+        const archiveId = nonEmptyString(restoreArchiveIdByWindow?.[tree.windowId])
+          ? restoreArchiveIdByWindow[tree.windowId]
+          : fallbackRestoreArchiveId(tree.windowId, now, index);
+        const normalizedTree = normalizeWindowTreePersistenceMeta(tree);
+        return {
+          id: archiveId,
+          windowId: tree.windowId,
+          savedAt: now,
+          tree: {
+            ...normalizedTree,
+            restoreArchiveId: archiveId
+          }
+        };
+      });
 
-  for (const entry of trees) {
-    byId.set(entry.id, entry);
-  }
+    for (const entry of trees) {
+      byId.set(entry.id, entry);
+    }
 
-  const archive = {
-    v: 1,
-    t: now,
-    entries: pruneRestoreArchiveEntries(Array.from(byId.values()))
-  };
+    const archive = {
+      v: 1,
+      t: now,
+      entries: pruneRestoreArchiveEntries(Array.from(byId.values()))
+    };
 
-  await chrome.storage.local.set({ [LOCAL_RESTORE_ARCHIVE_KEY]: archive });
-  return archive;
+    return { [LOCAL_RESTORE_ARCHIVE_KEY]: archive };
+  }, { activeWindowIds: Object.values(windowsState || {}).map((tree) => tree.windowId) });
+  return saved[LOCAL_RESTORE_ARCHIVE_KEY] || { v: 1, t: Date.now(), entries: [] };
 }

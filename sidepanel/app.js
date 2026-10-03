@@ -165,6 +165,7 @@ const SETTINGS_SIGNATURE_KEYS = Object.keys(DEFAULT_SETTINGS);
 const state = {
   settings: null,
   windows: {},
+  persistenceError: null,
   panelWindowId: null,
   focusedWindowId: null,
   search: "",
@@ -249,6 +250,7 @@ const dom = {
   resetSafetySettings: document.getElementById("reset-safety-settings"),
   settingsForm: document.getElementById("settings-form"),
   hintBar: document.getElementById("hint-bar"),
+  persistenceWarning: document.getElementById("persistence-warning"),
   confirmOverlay: document.getElementById("confirm-overlay"),
   confirmMessage: document.getElementById("confirm-message"),
   confirmSkip: document.getElementById("confirm-skip"),
@@ -3405,6 +3407,31 @@ function renderTree() {
   }
 }
 
+function renderPersistenceWarning() {
+  if (!dom.persistenceWarning) {
+    return;
+  }
+
+  const message = !state.persistenceError
+    ? ""
+    : state.persistenceError.code === "LOCAL_STORAGE_CAPACITY"
+      ? t(
+        "localStorageCapacityWarning",
+        [],
+        "Local storage is full. Recent tree changes may not survive restart. Reduce open tabs; saving retries automatically."
+      )
+      : t(
+        "localStorageWriteWarning",
+        [],
+        "Recent tree changes could not be saved and may not survive restart. Saving retries automatically."
+      );
+
+  if (dom.persistenceWarning.textContent !== message) {
+    dom.persistenceWarning.textContent = message;
+  }
+  dom.persistenceWarning.hidden = !message;
+}
+
 function render() {
   const tree = currentWindowTree();
   if (tree) {
@@ -3414,6 +3441,7 @@ function render() {
   applyThemeFromSettings();
   hydrateSettingsFormIfNeeded();
   updateShortcutHint();
+  renderPersistenceWarning();
   renderTree();
   renderContextMenu();
   updateSearchDropAffordance();
@@ -3448,6 +3476,7 @@ async function bootstrap() {
     if (response?.ok) {
       state.settings = response.payload.settings;
       state.windows = response.payload.windows || {};
+      state.persistenceError = response.payload.persistenceError || null;
       state.focusedWindowId = response.payload.focusedWindowId;
       if (!Number.isInteger(state.panelWindowId) && Number.isInteger(response.payload.focusedWindowId)) {
         state.panelWindowId = response.payload.focusedWindowId;
@@ -4278,6 +4307,10 @@ function bindEvents() {
       return;
     }
     const payload = message.payload;
+    if (payload && Object.prototype.hasOwnProperty.call(payload, "persistenceError")) {
+      state.persistenceError = payload.persistenceError || null;
+      renderPersistenceWarning();
+    }
     const next = applyRuntimeStateUpdate({
       settings: state.settings,
       windows: state.windows,

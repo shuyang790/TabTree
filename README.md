@@ -102,6 +102,21 @@ Configure all shortcuts at `chrome://extensions/shortcuts`.
 - `chrome.storage.sync`: Appearance and behavior settings plus a lightweight metadata snapshot
 - `chrome.storage.local`: Per-window heavy tree state
 
+Local writes have an 8 MiB budget, below Chrome's 10 MiB quota; TabTree does not
+request `unlimitedStorage`. Stored trees omit favicons, which Chrome supplies
+again for live tabs. When space is tight, duplicate snapshots, the oldest
+restore-archive entries, and inactive window records are discarded in that
+order. The existing 14-day / 50-tree archive limits still apply. Capacity pruning
+can shorten the available recovery history.
+
+Active trees retain all nodes, relationships, collapsed states, and exact titles
+and URLs. If these alone cannot fit, the write is rejected, the last successfully
+saved state is kept, and the side panel warns that recent changes may not survive
+a restart. Saving retries automatically. An oversized legacy store is compacted
+after startup recovery; if its indispensable data cannot fit, the same warning
+appears instead of silently deleting active tree data. The budget covers local
+storage; Chrome Sync has separate quotas.
+
 ## Behavior Notes
 
 - Parent-close behavior promotes children when needed.

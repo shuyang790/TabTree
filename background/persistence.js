@@ -2,11 +2,14 @@ import { STORAGE_WRITE_DEBOUNCE_MS } from "../shared/constants.js";
 
 export function createPersistCoordinator({
   saveWindowTree,
+  saveWindowTrees = null,
   saveSyncSnapshot,
   saveLocalSnapshot = async () => {},
   saveRestoreArchive = async () => {},
   getWindowsState,
   onError = () => {},
+  onLocalSuccess = () => {},
+  isReady = () => true,
   flushDebounceMs = STORAGE_WRITE_DEBOUNCE_MS,
   snapshotMinIntervalMs = 2000,
   heavySnapshotMinIntervalMs = 30000,
@@ -70,8 +73,8 @@ export function createPersistCoordinator({
     return pendingSnapshotWaitMs();
   }
 
-  function handleSnapshotFailure(error) {
-    onError(error, { phase: "snapshot" });
+  function handleSnapshotFailure(error, phase) {
+    onError(error, { phase });
     snapshotFailureCount += 1;
     if (snapshotFailureCount >= snapshotRetryMaxFailures) {
       snapshotsPausedUntil = Date.now() + snapshotFailureCooldownMs;
@@ -85,12 +88,14 @@ export function createPersistCoordinator({
     scheduleFlush(snapshotRetryDelayMs);
   }
 
-  async function flushSnapshots(windowsState) {
+  async function flushSnapshots(windowsState, wroteWindows) {
     const now = Date.now();
     if (!syncSnapshotDirty && !heavySnapshotDirty) {
+      if (wroteWindows) onLocalSuccess();
       return;
     }
     if (snapshotsPausedUntil > now) {
+      if (wroteWindows) onLocalSuccess();
       scheduleFlush(snapshotsPausedUntil - now);
       return;
     }
@@ -98,6 +103,7 @@ export function createPersistCoordinator({
     const syncDue = syncSnapshotDirty && (now - lastSyncSnapshotAt) >= snapshotMinIntervalMs;
     const heavyDue = heavySnapshotDirty && (now - lastHeavySnapshotAt) >= heavySnapshotMinIntervalMs;
     if (!syncDue && !heavyDue) {
+      if (wroteWindows) onLocalSuccess();
       const waitMs = pendingSnapshotWaitMs(now);
       if (Number.isFinite(waitMs)) {
         scheduleFlush(waitMs);
@@ -113,9 +119,11 @@ export function createPersistCoordinator({
         heavySnapshotDirty = false;
         lastHeavySnapshotAt = Date.now();
       } catch (error) {
-        errors.push(error);
+        errors.push({ error, phase: "localSnapshot" });
       }
     }
+
+    if ((wroteWindows || heavyDue) && !errors.length) onLocalSuccess();
 
     if (syncDue) {
       try {
@@ -123,12 +131,12 @@ export function createPersistCoordinator({
         syncSnapshotDirty = false;
         lastSyncSnapshotAt = Date.now();
       } catch (error) {
-        errors.push(error);
+        errors.push({ error, phase: "syncSnapshot" });
       }
     }
 
     if (errors.length) {
-      handleSnapshotFailure(errors[0]);
+      handleSnapshotFailure(errors[0].error, errors[0].phase);
       return;
     }
 
@@ -137,6 +145,10 @@ export function createPersistCoordinator({
   }
 
   async function flushPending() {
+    if (!isReady()) {
+      scheduleFlush(flushDebounceMs);
+      return;
+    }
     if (flushInFlight) {
       scheduleFlush(flushDebounceMs);
       return;
@@ -146,22 +158,22 @@ export function createPersistCoordinator({
     let pendingWindowIds = [];
     try {
       const windowsState = getWindowsState();
-      const writeTasks = [];
       pendingWindowIds = Array.from(dirtyWindowIds);
       dirtyWindowIds.clear();
 
-      for (const windowId of pendingWindowIds) {
-        const tree = windowsState[windowId];
-        if (tree) {
-          writeTasks.push(saveWindowTree(tree));
+      if (saveWindowTrees && pendingWindowIds.length) {
+        await saveWindowTrees(windowsState, pendingWindowIds);
+      } else {
+        const writeTasks = [];
+        for (const windowId of pendingWindowIds) {
+          const tree = windowsState[windowId];
+          if (tree) writeTasks.push(saveWindowTree(tree));
         }
-      }
-      if (writeTasks.length) {
-        await Promise.all(writeTasks);
+        if (writeTasks.length) await Promise.all(writeTasks);
       }
 
       windowRetryDelayMs = retryBaseMs;
-      await flushSnapshots(windowsState);
+      await flushSnapshots(windowsState, pendingWindowIds.length > 0);
     } catch (error) {
       for (const windowId of pendingWindowIds) {
         dirtyWindowIds.add(windowId);

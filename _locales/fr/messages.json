@@ -35,6 +35,12 @@
   "searchDropHint": {
     "message": "Recherchez des onglets puis glissez ici pour les deplacer au niveau racine"
   },
+  "localStorageCapacityWarning": {
+    "message": "Le stockage local est plein. Les dernières modifications de l’arborescence pourraient être perdues au redémarrage. Réduisez le nombre d’onglets ouverts ; l’enregistrement sera réessayé automatiquement."
+  },
+  "localStorageWriteWarning": {
+    "message": "Les dernières modifications de l’arborescence n’ont pas pu être enregistrées et pourraient être perdues au redémarrage. L’enregistrement sera réessayé automatiquement."
+  },
   "addChildTab": {
     "message": "Ajouter un onglet enfant"
   },
