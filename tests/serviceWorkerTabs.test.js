@@ -317,3 +317,111 @@ test("worker cleans up a replacement that closed before its event was processed"
   assert.deepEqual(tree.rootNodeIds, ["tab:2"]);
   assert.equal(tree.selectedTabId, 2);
 });
+
+function installNativeDragMutations(worker, initialTabs) {
+  let tabs = structuredClone(initialTabs);
+  const update = () => {
+    tabs = tabs.map((tab, index) => ({ ...tab, index }));
+    worker.setTabs(tabs);
+  };
+  worker.chrome.tabs.move = async (tabId, { index }) => {
+    assert.equal(typeof tabId, "number", "move each tab against a fresh native anchor");
+    const tab = tabs.find((candidate) => candidate.id === tabId);
+    assert.ok(tab);
+    tabs = tabs.filter((candidate) => candidate.id !== tabId);
+    const pinnedCount = tabs.filter((candidate) => candidate.pinned).length;
+    const requested = index < 0 ? tabs.length : Math.min(index, tabs.length);
+    const destination = tab.pinned ? Math.min(requested, pinnedCount) : Math.max(requested, pinnedCount);
+    tabs.splice(destination, 0, tab);
+    update();
+    return { ...tab };
+  };
+  worker.chrome.tabs.group = async ({ groupId, tabIds }) => {
+    tabs = tabs.map((tab) => tabIds.includes(tab.id) ? { ...tab, groupId } : tab);
+    update();
+    return groupId;
+  };
+  worker.chrome.tabGroups.query = async () => [...new Set(tabs.map((tab) => tab.groupId).filter((id) => id >= 0))]
+    .map((id) => ({ id, windowId: 1, title: "Group", color: "blue", collapsed: false }));
+  return () => structuredClone(tabs);
+}
+
+const dragCases = [
+  {
+    name: "single parent inside another branch keeps all descendants and target children",
+    count: 6, parents: [[2, 1], [3, 2], [5, 4]], sources: [1], target: 4, placement: "inside",
+    order: [4, 5, 1, 2, 3, 6], expectedParents: [[1, 4], [2, 1], [3, 2], [5, 4]]
+  },
+  {
+    name: "single leaf after a parent keeps the target subtree contiguous",
+    count: 4, parents: [[2, 1]], sources: [4], target: 1, placement: "after",
+    order: [1, 2, 4, 3], expectedParents: [[2, 1], [4, null]]
+  },
+  {
+    name: "multiple branches after a target preserve descendants selected with their parent",
+    count: 8, parents: [[2, 1], [4, 3], [7, 6]], sources: [3, 4, 6], target: 1, placement: "after",
+    order: [1, 2, 3, 4, 6, 7, 5, 8], expectedParents: [[2, 1], [4, 3], [7, 6]]
+  },
+  {
+    name: "moving an existing child branch to the end stays before the following root",
+    count: 6, parents: [[2, 1], [3, 2], [4, 1]], sources: [2], target: 1, placement: "inside",
+    order: [1, 4, 2, 3, 5, 6], expectedParents: [[2, 1], [3, 2], [4, 1]]
+  },
+  {
+    name: "after a nested target anchors beyond its descendants",
+    count: 6, parents: [[2, 1], [3, 2], [4, 1]], sources: [6], target: 2, placement: "after",
+    order: [1, 2, 3, 6, 4, 5], expectedParents: [[2, 1], [3, 2], [6, 1]]
+  },
+  {
+    name: "root drop promotes a branch while retaining its descendants",
+    count: 5, parents: [[2, 1], [3, 2]], sources: [2], root: true,
+    order: [1, 4, 5, 2, 3], expectedParents: [[2, null], [3, 2]]
+  },
+  {
+    name: "root drop keeps the pinned branch inside the pinned zone",
+    count: 5, pinned: [1, 2, 3], parents: [[2, 1]], sources: [1], root: true,
+    order: [3, 1, 2, 4, 5], expectedParents: [[1, null], [2, 1]]
+  },
+  {
+    name: "moving every tab retains child relationships without a stationary anchor",
+    count: 4, parents: [[2, 1], [4, 3]], sources: [3, 4, 1, 2], root: true,
+    order: [3, 4, 1, 2], expectedParents: [[2, 1], [4, 3]]
+  },
+  {
+    name: "inside a native group transfers the complete source branch",
+    count: 5, grouped: [4, 5], parents: [[2, 1], [5, 4]], sources: [1], target: 4, placement: "inside",
+    order: [3, 4, 5, 1, 2], expectedParents: [[1, 4], [2, 1], [5, 4]], expectedGrouped: [1, 2, 4, 5]
+  }
+];
+
+for (const scenario of dragCases) {
+  test(`drag: ${scenario.name}`, async (t) => {
+    const { buildDropPayload } = await import("../sidepanel/dropModel.js");
+    const { buildRootDropPayload } = await import("../sidepanel/rootDropModel.js");
+    const tabs = Array.from({ length: scenario.count }, (_, index) => tab(index + 1, {
+      pinned: scenario.pinned?.includes(index + 1) || false,
+      groupId: scenario.grouped?.includes(index + 1) ? 7 : -1
+    }));
+    let previous = buildTreeFromTabs(tabs);
+    for (const [child, parent] of scenario.parents) {
+      previous = moveNode(previous, `tab:${child}`, `tab:${parent}`);
+    }
+    const worker = await workerHarness(t, tabs, previous);
+    const nativeTabs = installNativeDragMutations(worker, tabs);
+    const tree = await worker.getTree();
+    const payload = scenario.root
+      ? buildRootDropPayload({ tree, draggingTabIds: scenario.sources })
+      : buildDropPayload({ tree, sourceTabIds: scenario.sources, targetTabId: scenario.target, position: scenario.placement });
+    const response = await worker.message({ type: "TREE_ACTION", payload });
+    assert.equal(response.ok, true);
+    assert.deepEqual(nativeTabs().map((tab) => tab.id), scenario.order);
+    const result = await worker.getTree();
+    for (const [child, parent] of scenario.expectedParents) {
+      assert.equal(result.nodes[`tab:${child}`].parentNodeId, parent === null ? null : `tab:${parent}`);
+    }
+    if (scenario.expectedGrouped) {
+      assert.deepEqual(nativeTabs().filter((tab) => tab.groupId === 7).map((tab) => tab.id).sort((a, b) => a - b), scenario.expectedGrouped);
+    }
+    assert.equal(Object.keys(result.nodes).length, scenario.count);
+  });
+}

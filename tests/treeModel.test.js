@@ -866,3 +866,64 @@ test("inferTreeFromSyncSnapshot reconstructs parent-child from snapshot urls", (
   assert.ok(inferred);
   assert.equal(inferred.nodes[nodeIdFromTabId(2)].parentNodeId, nodeIdFromTabId(1));
 });
+
+for (const version of [1, 2]) {
+  test(`sync v${version} recovery never matches duplicate tabs to synthetic parents`, () => {
+    const tabs = [
+      tab({ id: 1, index: 0, url: "https://restore.test/shared" }),
+      tab({ id: 2, index: 1, url: "https://restore.test/child" }),
+      tab({ id: 3, index: 2, url: "https://restore.test/shared" })
+    ];
+    let tree = moveNode(buildTreeFromTabs(tabs), "tab:2", "tab:1");
+    tree = toggleNodeCollapsed(tree, "tab:3");
+    const snapshot = buildSyncSnapshot({ 1: tree }, { maxWindows: 3, maxNodesPerWindow: 80, maxUrlLength: 220 });
+    if (version === 1) {
+      snapshot.v = 1;
+      snapshot.windows[0].n = snapshot.windows[0].n.map(({ u, p, c }) => ({ u, p, c }));
+    }
+
+    const restored = inferTreeFromSyncSnapshot(1, tabs, snapshot);
+
+    assert.equal(restored.nodes["tab:2"].parentNodeId, "tab:1");
+    assert.equal(restored.nodes["tab:3"].collapsed, true);
+    assert.deepEqual(restored.rootNodeIds, ["tab:1", "tab:3"]);
+  });
+}
+
+test("sync v2 preserves exact long URLs, parent indices, and pinned identity", () => {
+  const longUrl = `https://restore.test/${"segment".repeat(50)}`;
+  const tabs = [
+    tab({ id: 1, index: 0, url: longUrl, pinned: true }),
+    tab({ id: 2, index: 1, url: "https://restore.test/child", pinned: true }),
+    tab({ id: 3, index: 2, url: longUrl })
+  ];
+  let tree = moveNode(buildTreeFromTabs(tabs), "tab:2", "tab:1");
+  tree = toggleNodeCollapsed(tree, "tab:1");
+  const snapshot = buildSyncSnapshot({ 1: tree }, { maxWindows: 3, maxNodesPerWindow: 80, maxUrlLength: 220 });
+  assert.equal(snapshot.v, 2);
+  assert.equal(snapshot.windows[0].n[0].u.length, 220);
+  assert.equal(snapshot.windows[0].n[0].f, longUrl);
+  assert.equal(snapshot.windows[0].n[1].r, 0);
+
+  const restored = inferTreeFromSyncSnapshot(1, tabs, snapshot);
+
+  assert.equal(restored.nodes["tab:1"].collapsed, true);
+  assert.equal(restored.nodes["tab:3"].collapsed, false);
+  assert.equal(restored.nodes["tab:2"].parentNodeId, "tab:1");
+});
+
+test("sync v2 parent indices disambiguate identical-URL ancestors and siblings", () => {
+  const tabs = [
+    tab({ id: 1, index: 0, url: "https://restore.test/shared" }),
+    tab({ id: 2, index: 1, url: "https://restore.test/shared" }),
+    tab({ id: 3, index: 2, url: "https://restore.test/leaf" })
+  ];
+  let tree = moveNode(buildTreeFromTabs(tabs), "tab:2", "tab:1");
+  tree = moveNode(tree, "tab:3", "tab:1");
+  const snapshot = buildSyncSnapshot({ 1: tree }, { maxWindows: 3, maxNodesPerWindow: 80, maxUrlLength: 220 });
+
+  const restored = inferTreeFromSyncSnapshot(1, tabs, snapshot);
+
+  assert.equal(restored.nodes["tab:3"].parentNodeId, "tab:1");
+  assert.deepEqual(restored.nodes["tab:1"].childNodeIds, ["tab:2", "tab:3"]);
+});

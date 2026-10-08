@@ -3,7 +3,7 @@ import { storageBytes } from "./localStorageBudget.js";
 
 export const SYNC_SNAPSHOT_BUDGET_BYTES = 8 * 1024;
 
-// Keep the v1 format and a parent-first prefix of the newest windows. Sync is a
+// Keep the snapshot format and a parent-first prefix of the newest windows. Sync is a
 // lightweight recovery hint; the complete canonical trees remain in local.
 export function boundSyncSnapshot(snapshot) {
   const bounded = { ...snapshot, windows: [] };

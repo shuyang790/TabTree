@@ -51,6 +51,7 @@ function nodeFromTab(tab, parentNodeId = null, collapsed = false) {
     childNodeIds: [],
     collapsed,
     pinned: !!tab.pinned,
+    incognito: !!tab.incognito,
     groupId: Number.isInteger(tab.groupId) && tab.groupId >= 0 ? tab.groupId : null,
     index: typeof tab.index === "number" ? tab.index : 0,
     windowId: tab.windowId,
@@ -218,6 +219,7 @@ function reparentNode(next, nodeId, parentNodeId, newIndex = null) {
 }
 
 function applyTabToTree(next, tab, options = {}, sortTracker = null) {
+  if (tab.incognito) next.incognito = true;
   const nodeId = asNodeId(tab.id);
   const existing = next.nodes[nodeId];
   if (!existing) {
@@ -246,6 +248,7 @@ function applyTabToTree(next, tab, options = {}, sortTracker = null) {
     existing.index = typeof tab.index === "number" ? tab.index : existing.index;
     existing.windowId = tab.windowId;
     existing.active = !!tab.active;
+    existing.incognito = !!tab.incognito || !!existing.incognito;
     existing.lastKnownTitle = tab.title || existing.lastKnownTitle;
     existing.lastKnownUrl = tab.url || existing.lastKnownUrl;
     existing.favIconUrl = tab.favIconUrl || existing.favIconUrl;
@@ -680,6 +683,7 @@ export function normalizeTreeToTabOrder(tree) {
 
 export function buildTreeFromTabs(tabs, previousTree = null) {
   const tree = createEmptyWindowTree(tabs[0]?.windowId ?? -1);
+  tree.incognito = tabs.some((tab) => tab.incognito) || !!previousTree?.incognito;
   tree.groups = { ...(previousTree?.groups || {}) };
   const sortedTabs = [...tabs].sort((a, b) => a.index - b.index);
 
@@ -890,19 +894,28 @@ export function sortTreeByIndex(tree) {
 
 export function buildSyncSnapshot(windowsState, limits) {
   const windowEntries = Object.values(windowsState)
+    .filter((tree) => !tree.incognito && !Object.values(tree.nodes || {}).some((node) => node?.incognito))
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, limits.maxWindows)
     .map((windowTree) => {
       const nodes = [];
+      const snapshotIndexByNodeId = new Map();
       const pushNode = (nodeId) => {
         const node = windowTree.nodes[nodeId];
-        if (!node || nodes.length >= limits.maxNodesPerWindow) {
+        if (!node || snapshotIndexByNodeId.has(nodeId) || nodes.length >= limits.maxNodesPerWindow) {
           return;
         }
+        const fullUrl = normalizeUrl(node.lastKnownUrl);
+        const url = fullUrl.slice(0, limits.maxUrlLength);
+        const parentIndex = snapshotIndexByNodeId.get(node.parentNodeId);
+        snapshotIndexByNodeId.set(nodeId, nodes.length);
         nodes.push({
-          u: normalizeUrl(node.lastKnownUrl).slice(0, limits.maxUrlLength),
+          u: url,
           p: node.parentNodeId ? normalizeUrl(windowTree.nodes[node.parentNodeId]?.lastKnownUrl || "").slice(0, limits.maxUrlLength) : "",
-          c: node.collapsed ? 1 : 0
+          c: node.collapsed ? 1 : 0,
+          r: Number.isInteger(parentIndex) ? parentIndex : null,
+          s: node.pinned ? 1 : 0,
+          ...(fullUrl !== url ? { f: fullUrl } : {})
         });
         for (const child of node.childNodeIds) {
           pushNode(child);
@@ -918,7 +931,7 @@ export function buildSyncSnapshot(windowsState, limits) {
     });
 
   return {
-    v: 1,
+    v: 2,
     t: Date.now(),
     windows: windowEntries
   };
@@ -937,21 +950,25 @@ export function inferTreeFromSyncSnapshot(windowId, tabs, syncSnapshot) {
     nodes: {}
   };
 
+  const mostRecentIndexByUrl = new Map();
   windowCandidate.n.forEach((entry, idx) => {
     const nodeId = `snapshot:${idx}`;
-    const parentNodeId = entry.p ? `snapshot-parent:${idx}` : null;
+    // Parent references must point at actual saved nodes. Extra synthetic parent
+    // records can consume a duplicate-URL tab and redirect another tab's parent.
+    const parentIndex = syncSnapshot.v === 2
+      ? entry.r
+      : entry.p ? mostRecentIndexByUrl.get(normalizeUrl(entry.p)) : null;
+    const parentNodeId = Number.isInteger(parentIndex) && parentIndex >= 0 && parentIndex < idx
+      ? `snapshot:${parentIndex}`
+      : null;
+    const url = typeof entry.f === "string" ? entry.f : entry.u;
     syntheticPrevious.nodes[nodeId] = {
-      lastKnownUrl: entry.u,
+      lastKnownUrl: url,
       parentNodeId,
-      collapsed: !!entry.c
+      collapsed: !!entry.c,
+      pinned: !!entry.s
     };
-    if (parentNodeId) {
-      syntheticPrevious.nodes[parentNodeId] = {
-        lastKnownUrl: entry.p,
-        parentNodeId: null,
-        collapsed: false
-      };
-    }
+    mostRecentIndexByUrl.set(normalizeUrl(url), idx);
   });
 
   return buildTreeFromTabs(tabs, syntheticPrevious);

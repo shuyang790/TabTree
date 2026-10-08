@@ -2,34 +2,6 @@ export function uniqueFiniteTabIdsInOrder(tabIds) {
   return Array.from(new Set((tabIds || []).filter((id) => Number.isFinite(id))));
 }
 
-export function browserInsertionIndexForRelativePlacement(tabs, movingTabIds, targetTabId, placement) {
-  if (!Array.isArray(tabs) || !Array.isArray(movingTabIds)) {
-    return -1;
-  }
-  if (!Number.isFinite(targetTabId) || (placement !== "before" && placement !== "after")) {
-    return -1;
-  }
-
-  const ordered = [...tabs].sort((a, b) => a.index - b.index);
-  const movingSet = new Set(movingTabIds);
-  const remaining = ordered.filter((tab) => !movingSet.has(tab.id));
-  if (!remaining.length) {
-    return 0;
-  }
-
-  const targetPos = remaining.findIndex((tab) => tab.id === targetTabId);
-  if (targetPos < 0) {
-    return -1;
-  }
-
-  const insertionPos = placement === "after" ? targetPos + 1 : targetPos;
-  if (insertionPos >= remaining.length) {
-    return -1;
-  }
-
-  return insertionPos;
-}
-
 export function insertionIndexForGroupMove(tabs, sourceTabIds, payload) {
   const ordered = [...tabs].sort((a, b) => a.index - b.index);
   const sourceSet = new Set(sourceTabIds);
@@ -80,4 +52,39 @@ export function relativeMoveDestinationIndex(anchorIndex, movingIndex, placement
     destinationIndex -= 1;
   }
   return Math.max(0, destinationIndex);
+}
+
+// Plan against the desired tree, not the old browser indices. Nonmoving tabs
+// provide stable anchors, so source and target descendants stay contiguous.
+export function subtreeBlockMovePlan(tree, movingTabIds) {
+  const ordered = [];
+  const visited = new Set();
+  const stack = [...(tree.rootNodeIds || [])].reverse();
+  while (stack.length) {
+    const nodeId = stack.pop();
+    const node = tree.nodes[nodeId];
+    if (!node || visited.has(nodeId)) continue;
+    visited.add(nodeId);
+    ordered.push(node);
+    stack.push(...[...(node.childNodeIds || [])].reverse());
+  }
+  const moving = new Set(movingTabIds);
+  const plans = [];
+  const pinnedCount = ordered.filter((node) => node.pinned).length;
+  for (const pinned of [true, false]) {
+    const zone = ordered.filter((node) => !!node.pinned === pinned);
+    const tabs = zone.filter((node) => moving.has(node.tabId));
+    if (!tabs.length) continue;
+    const first = zone.indexOf(tabs[0]);
+    const last = zone.indexOf(tabs[tabs.length - 1]);
+    const after = zone.slice(last + 1).find((node) => !moving.has(node.tabId));
+    const before = zone.slice(0, first).reverse().find((node) => !moving.has(node.tabId));
+    plans.push({
+      tabIds: tabs.map((node) => node.tabId),
+      ...(after ? { targetTabId: after.tabId, placement: "before" }
+        : before ? { targetTabId: before.tabId, placement: "after" }
+          : { index: pinned ? 0 : pinnedCount })
+    });
+  }
+  return plans;
 }

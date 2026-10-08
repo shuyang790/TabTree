@@ -25,27 +25,25 @@ test("buildRootDropPayload returns batch payload for multi-selection", () => {
   });
 });
 
-test("buildRootDropPayload computes browser index for single-tab unpinned move", () => {
+test("buildRootDropPayload uses subtree blocks for a single unpinned tab", () => {
   const payload = buildRootDropPayload({
     tree: sampleTree(),
     draggingTabIds: [1]
   });
   assert.deepEqual(payload, {
-    type: TREE_ACTIONS.MOVE_TO_ROOT,
-    tabId: 1,
-    browserIndex: 8
+    type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
+    tabIds: [1]
   });
 });
 
-test("buildRootDropPayload computes browser index for pinned move", () => {
+test("buildRootDropPayload uses subtree blocks for a pinned tab", () => {
   const payload = buildRootDropPayload({
     tree: sampleTree(),
     draggingTabIds: [3]
   });
   assert.deepEqual(payload, {
-    type: TREE_ACTIONS.MOVE_TO_ROOT,
-    tabId: 3,
-    browserIndex: 5
+    type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
+    tabIds: [3]
   });
 });
 

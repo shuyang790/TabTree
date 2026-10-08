@@ -216,6 +216,7 @@ button:focus-visible {
 
 .tree-root.virtualized {
   contain: layout style paint;
+  overflow-anchor: none;
 }
 
 .virtual-spacer {

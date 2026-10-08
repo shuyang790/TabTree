@@ -18,6 +18,9 @@ import {
 import { buildSyncSnapshot } from "./treeModel.js";
 import { LOCAL_STORAGE_BUDGET_BYTES, planLocalStorage, storageBytes } from "./localStorageBudget.js";
 import { boundSyncSnapshot } from "./syncSnapshotBudget.js";
+import {
+  isPrivateTree, loadPrivateWindowTrees, removePrivateWindowTree, savePrivateWindowTrees
+} from "./privateSessionStore.js";
 
 // All local writers share a queue: checking a budget outside this queue races
 // other windows' writes. Use the area as the key so tests/contexts stay isolated.
@@ -35,6 +38,25 @@ async function updateLocalStorage(createUpdates, options = {}) {
   return queueLocalWrite(async (area) => {
     const current = await area.get(null);
     const updates = createUpdates(current);
+    const merged = { ...current, ...updates };
+    const privateIds = new Set(options.privateWindowIds || []);
+    for (const [key, tree] of Object.entries(merged)) {
+      if (key.startsWith(LOCAL_WINDOW_PREFIX) && isPrivateTree(tree)) privateIds.add(tree.windowId);
+    }
+    const privateRecord = (tree) => isPrivateTree(tree) || privateIds.has(tree?.windowId);
+    for (const [key, tree] of Object.entries(merged)) {
+      if (key.startsWith(LOCAL_WINDOW_PREFIX) && privateRecord(tree)) updates[key] = null;
+    }
+    if (Array.isArray(merged[LOCAL_SNAPSHOT_KEY]?.windows)) {
+      updates[LOCAL_SNAPSHOT_KEY] = {
+        ...merged[LOCAL_SNAPSHOT_KEY], windows: merged[LOCAL_SNAPSHOT_KEY].windows.filter((tree) => !privateRecord(tree))
+      };
+    }
+    if (Array.isArray(merged[LOCAL_RESTORE_ARCHIVE_KEY]?.entries)) {
+      updates[LOCAL_RESTORE_ARCHIVE_KEY] = {
+        ...merged[LOCAL_RESTORE_ARCHIVE_KEY], entries: merged[LOCAL_RESTORE_ARCHIVE_KEY].entries.filter((entry) => !privateRecord(entry.tree))
+      };
+    }
     let plan = planLocalStorage(current, updates, options);
     const tombstonesFor = (next) => Object.fromEntries(
       next.removedKeys.filter((key) => Object.hasOwn(current, key)).map((key) => [key, null])
@@ -265,7 +287,7 @@ function pruneRestoreArchiveEntries(entries) {
 
   for (const [index, entry] of (entries || []).entries()) {
     const normalized = normalizeRestoreArchiveEntry(entry, index);
-    if (!normalized) {
+    if (!normalized || isPrivateTree(normalized.tree)) {
       continue;
     }
     if ((now - normalized.savedAt) > LOCAL_ARCHIVE_RETENTION_MS) {
@@ -295,10 +317,12 @@ export async function saveSettings(settings) {
 }
 
 export async function loadWindowTree(windowId) {
+  const privateTree = (await loadPrivateWindowTrees()).find((tree) => tree.windowId === windowId);
+  if (privateTree) return normalizeWindowTreePersistenceMeta(privateTree);
   const key = `${LOCAL_WINDOW_PREFIX}${windowId}`;
   const raw = await chrome.storage.local.get([key]);
   const tree = raw[key] || null;
-  return tree ? normalizeWindowTreePersistenceMeta(tree) : null;
+  return tree && !isPrivateTree(tree) ? normalizeWindowTreePersistenceMeta(tree) : null;
 }
 
 export async function loadAllWindowTrees() {
@@ -308,33 +332,50 @@ export async function loadAllWindowTrees() {
     if (!key.startsWith(LOCAL_WINDOW_PREFIX)) {
       continue;
     }
-    if (value && typeof value === "object" && typeof value.windowId === "number" && value.nodes) {
+    if (value && typeof value === "object" && typeof value.windowId === "number" && value.nodes && !isPrivateTree(value)) {
       trees.push(normalizeWindowTreePersistenceMeta(value));
     }
   }
-  return trees;
+  return [...trees, ...await loadPrivateWindowTrees()];
 }
 
 export async function saveWindowTree(windowTree) {
+  if (isPrivateTree(windowTree)) {
+    const writes = await Promise.allSettled([
+      savePrivateWindowTrees([windowTree]),
+      updateLocalStorage(() => ({}), { privateWindowIds: [windowTree.windowId] })
+    ]);
+    const failure = writes.find((result) => result.status === "rejected");
+    if (failure) throw failure.reason;
+    return;
+  }
   const key = `${LOCAL_WINDOW_PREFIX}${windowTree.windowId}`;
   await updateLocalStorage(() => ({ [key]: normalizeWindowTreePersistenceMeta(windowTree) }));
 }
 
 export async function saveWindowTrees(windowsState, windowIds = Object.keys(windowsState)) {
-  await updateLocalStorage(() => Object.fromEntries(windowIds
+  const privateTrees = windowIds.map((id) => windowsState[id]).filter(isPrivateTree);
+  // Session and disk quotas are independent: attempt both so a full private
+  // session cannot prevent regular windows from reaching persistent storage.
+  const writes = await Promise.allSettled([savePrivateWindowTrees(privateTrees), updateLocalStorage(() => Object.fromEntries(windowIds
     .map((windowId) => windowsState[windowId])
-    .filter(Boolean)
+    .filter((tree) => tree && !isPrivateTree(tree))
     .map((tree) => [`${LOCAL_WINDOW_PREFIX}${tree.windowId}`, normalizeWindowTreePersistenceMeta(tree)])), {
-    activeWindowIds: Object.values(windowsState).map((tree) => tree.windowId)
-  });
+    activeWindowIds: Object.values(windowsState).filter((tree) => !isPrivateTree(tree)).map((tree) => tree.windowId),
+    privateWindowIds: Object.values(windowsState).filter(isPrivateTree).map((tree) => tree.windowId)
+  })]);
+  const failure = writes.find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
 }
 
 // Called only AFTER startup recovery has read old window IDs and hydrated all
 // current windows. Old IDs become optional recovery records, never live trees.
 export async function migrateLocalStorage(windowsState) {
-  const activeWindowIds = Object.values(windowsState).map((tree) => tree.windowId);
+  const privateTrees = Object.values(windowsState).filter(isPrivateTree);
+  const privateSave = savePrivateWindowTrees(privateTrees).then(() => null, (error) => error);
+  const activeWindowIds = Object.values(windowsState).filter((tree) => !isPrivateTree(tree)).map((tree) => tree.windowId);
   const active = new Set(activeWindowIds);
-  return updateLocalStorage((current) => {
+  const saved = await updateLocalStorage((current) => {
     const updates = {};
     for (const [key, tree] of Object.entries(current)) {
       if (key.startsWith(LOCAL_WINDOW_PREFIX) && tree?.nodes && !active.has(tree.windowId)) {
@@ -345,13 +386,30 @@ export async function migrateLocalStorage(windowsState) {
       }
     }
     for (const tree of Object.values(windowsState)) {
+      if (isPrivateTree(tree)) continue;
       updates[`${LOCAL_WINDOW_PREFIX}${tree.windowId}`] = normalizeWindowTreePersistenceMeta(tree);
     }
     return updates;
-  }, { activeWindowIds });
+  }, { activeWindowIds, privateWindowIds: privateTrees.map((tree) => tree.windowId) });
+  // Old releases had no privacy marker. Current private window IDs let us
+  // identify and remove their still-recognizable legacy sync hints safely.
+  if (privateTrees.length) {
+    const privateIds = new Set(privateTrees.map((tree) => String(tree.windowId)));
+    const snapshot = await loadSyncSnapshot();
+    if (Array.isArray(snapshot?.windows)) {
+      const windows = snapshot.windows.filter((win) => !privateIds.has(win.w));
+      if (windows.length !== snapshot.windows.length) {
+        await chrome.storage.sync.set({ [SYNC_SNAPSHOT_KEY]: { ...snapshot, windows } });
+      }
+    }
+  }
+  const privateError = await privateSave;
+  if (privateError) throw privateError;
+  return saved;
 }
 
 export async function removeWindowTree(windowId) {
+  await removePrivateWindowTree(windowId);
   const key = `${LOCAL_WINDOW_PREFIX}${windowId}`;
   await queueLocalWrite((area) => area.remove([key]));
 }
@@ -363,7 +421,10 @@ export async function loadSyncSnapshot() {
 
 export async function loadLocalSnapshot() {
   const raw = await chrome.storage.local.get([LOCAL_SNAPSHOT_KEY]);
-  return raw[LOCAL_SNAPSHOT_KEY] || null;
+  const snapshot = raw[LOCAL_SNAPSHOT_KEY] || null;
+  return Array.isArray(snapshot?.windows)
+    ? { ...snapshot, windows: snapshot.windows.filter((tree) => !isPrivateTree(tree)) }
+    : snapshot;
 }
 
 export async function loadRestoreArchive() {
@@ -379,7 +440,8 @@ export async function loadRestoreArchive() {
 }
 
 export async function saveSyncSnapshot(windowsState) {
-  const snapshot = boundSyncSnapshot(buildSyncSnapshot(windowsState, {
+  const regularWindows = Object.fromEntries(Object.entries(windowsState).filter(([, tree]) => !isPrivateTree(tree)));
+  const snapshot = boundSyncSnapshot(buildSyncSnapshot(regularWindows, {
     maxWindows: SYNC_MAX_WINDOWS,
     maxNodesPerWindow: SYNC_MAX_NODES_PER_WINDOW,
     maxUrlLength: SYNC_MAX_URL_LENGTH
@@ -390,7 +452,7 @@ export async function saveSyncSnapshot(windowsState) {
 
 export async function saveLocalSnapshot(windowsState) {
   const windowEntries = Object.values(windowsState || {})
-    .filter((tree) => tree && typeof tree === "object" && Number.isInteger(tree.windowId) && tree.nodes)
+    .filter((tree) => tree && typeof tree === "object" && Number.isInteger(tree.windowId) && tree.nodes && !isPrivateTree(tree))
     .map((tree) => normalizeWindowTreePersistenceMeta(tree));
 
   const snapshot = {
@@ -414,7 +476,7 @@ export async function saveRestoreArchive(windowsState, restoreArchiveIdByWindow 
     const now = Date.now();
 
     const trees = Object.values(windowsState || {})
-      .filter((tree) => tree && typeof tree === "object" && Number.isInteger(tree.windowId) && tree.nodes)
+      .filter((tree) => tree && typeof tree === "object" && Number.isInteger(tree.windowId) && tree.nodes && !isPrivateTree(tree))
       .map((tree, index) => {
         const archiveId = nonEmptyString(restoreArchiveIdByWindow?.[tree.windowId])
           ? restoreArchiveIdByWindow[tree.windowId]

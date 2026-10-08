@@ -124,6 +124,13 @@ This limits the fallback information synced across browsers; it does not trim
 the complete local trees. Settings synced from another browser update open
 panels, and local settings edits merge with the latest stored settings.
 
+If you enable **Allow in Incognito**, private window trees are kept only in
+`chrome.storage.session`, excluded from local recovery archives and Chrome Sync,
+and removed when the private window closes. They survive a background worker
+restart but are cleared when Chrome restarts or the extension reloads. Settings
+are still shared. On upgrade, recognizable private records are removed; older
+archives without privacy markers cannot always be identified safely.
+
 ## Behavior Notes
 
 - Parent-close behavior promotes children when needed.
@@ -197,5 +204,5 @@ Screenshot assets are generated at `docs/images/` (PNG, `1280x800`).
 
 ## Current Status
 
-- Version: `0.4.5`
+- Version: [Latest release](https://github.com/shuyang790/TabTree/releases/latest)
 - Status: Active development

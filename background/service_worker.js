@@ -27,8 +27,9 @@ import {
   upsertTabNodes
 } from "../shared/treeModel.js";
 import { dedupeRootNodeIds } from "../shared/treeUtils.js";
+import { isPrivateTree, prunePrivateWindowTrees, removePrivateWindowTree } from "../shared/privateSessionStore.js";
 import {
-  browserInsertionIndexForRelativePlacement,
+  subtreeBlockMovePlan,
   insertionIndexForGroupMove,
   relativeMoveDestinationIndex,
   uniqueFiniteTabIdsInOrder
@@ -73,6 +74,7 @@ const state = {
   restoreArchiveIds: {},
   syncSnapshot: null,
   startupRestoreTrees: [],
+  privateWindowIds: new Set(),
   persistenceError: null,
   lastMoveByWindow: {}
 };
@@ -188,6 +190,9 @@ function ensureWindowRestoreArchiveId(windowId, preferredId = null) {
 }
 
 function setWindowTree(nextTree, options = {}) {
+  const incognito = isPrivateTree(nextTree) || isPrivateTree(state.windows[nextTree.windowId])
+    || state.privateWindowIds.has(nextTree.windowId);
+  if (incognito) state.privateWindowIds.add(nextTree.windowId);
   const now = Date.now();
   const restoreArchiveId = ensureWindowRestoreArchiveId(
     nextTree.windowId,
@@ -195,6 +200,7 @@ function setWindowTree(nextTree, options = {}) {
   );
   const persistedTree = {
     ...nextTree,
+    incognito,
     restoreArchiveId,
     archivedAt: null,
     lastSeenAt: now,
@@ -217,6 +223,14 @@ async function archiveWindowTree(windowId) {
     return;
   }
   const existing = state.windows[windowId] || await loadWindowTree(windowId);
+  if (state.privateWindowIds.has(windowId) || isPrivateTree(existing)) {
+    markWindowRestoreModified(windowId);
+    delete state.windows[windowId];
+    persistCoordinator.forgetWindow(windowId);
+    state.startupRestoreTrees = state.startupRestoreTrees.filter((tree) => tree.windowId !== windowId);
+    await removePrivateWindowTree(windowId);
+    return;
+  }
   if (!existing || typeof existing !== "object") {
     return;
   }
@@ -985,6 +999,23 @@ function overlapCount(a, b) {
   return total;
 }
 
+const modifiedRestoreWindowIds = new Set();
+
+function markWindowRestoreModified(windowId) {
+  if (!Number.isInteger(windowId)) return;
+  modifiedRestoreWindowIds.add(windowId);
+  const tree = state.windows[windowId];
+  if (tree?.restoreStartupPending) {
+    state.windows[windowId] = { ...tree, restoreStartupPending: false };
+  }
+}
+
+function isPrivateRestoreTree(tree) {
+  return !!tree?.incognito
+    || !!state.privateWindowIds?.has(tree?.windowId)
+    || Object.values(tree?.nodes || {}).some((node) => !!node?.incognito);
+}
+
 function scorePreviousTreeAgainstTabs(tree, tabs) {
   if (!tree?.nodes || !tabs.length) {
     return 0;
@@ -1003,8 +1034,13 @@ function scorePreviousTreeAgainstTabs(tree, tabs) {
     return 0;
   }
 
-  const urlScore = overlapCount(buildCountMap(tabUrls), buildCountMap(treeUrls)) * 4;
-  const titleScore = overlapCount(buildCountMap(tabTitles), buildCountMap(treeTitles)) * 2;
+  const urlMatches = overlapCount(buildCountMap(tabUrls), buildCountMap(treeUrls));
+  const titleMatches = overlapCount(buildCountMap(tabTitles), buildCountMap(treeTitles));
+  // Similar window sizes and pin layouts are tie-breakers, not evidence that
+  // an unrelated archived window belongs to this browser session.
+  if (!urlMatches && !titleMatches) return 0;
+  const urlScore = urlMatches * 4;
+  const titleScore = titleMatches * 2;
   const sizeScore = Math.max(0, 10 - Math.abs(orderedTabs.length - treeNodes.length));
   const compareLength = Math.min(20, orderedTabs.length, treeNodes.length);
   let pinnedScore = 0;
@@ -1039,8 +1075,17 @@ function assignBestPreviousTrees(windows, treePool) {
   const pairs = [];
   for (const win of windows) {
     const tabs = win.tabs || [];
+    const privateWindow = !!win.incognito || !!state.privateWindowIds?.has(win.id)
+      || tabs.some((tab) => !!tab.incognito);
     for (let i = 0; i < treePool.length; i += 1) {
       const candidate = treePool[i];
+      if (isPrivateRestoreTree(candidate) !== privateWindow
+        || (privateWindow && candidate.windowId !== win.id)) continue;
+      // A reused/current private window ID is enough to exclude old unmarked
+      // disk records from regular recovery, but not enough to trust them as a
+      // private session record. Session trees explicitly carry the privacy flag.
+      if (privateWindow && !candidate.incognito
+        && !Object.values(candidate.nodes || {}).some((node) => !!node?.incognito)) continue;
       const score = scorePreviousTreeAgainstTabs(candidate, tabs);
       if (score <= 0) {
         continue;
@@ -1049,6 +1094,10 @@ function assignBestPreviousTrees(windows, treePool) {
         windowId: win.id,
         treeIndex: i,
         score,
+        provisional: !!candidate.restoreStartupPending && candidate.restoreSource === "flat",
+        sameArchive: !!candidate.restoreArchiveId
+          && candidate.restoreArchiveId === state.windows[win.id]?.restoreArchiveId,
+        sameWindow: candidate.windowId === win.id,
         treeTs: treeTimestamp(candidate)
       });
     }
@@ -1058,6 +1107,11 @@ function assignBestPreviousTrees(windows, treePool) {
     if (b.score !== a.score) {
       return b.score - a.score;
     }
+    // A flat placeholder saved before Chrome finishes loading startup URLs is
+    // not stronger history just because it already has the new window ID.
+    if (a.provisional !== b.provisional) return Number(a.provisional) - Number(b.provisional);
+    if (a.sameArchive !== b.sameArchive) return Number(b.sameArchive) - Number(a.sameArchive);
+    if (a.sameWindow !== b.sameWindow) return Number(b.sameWindow) - Number(a.sameWindow);
     if (b.treeTs !== a.treeTs) {
       return b.treeTs - a.treeTs;
     }
@@ -1127,7 +1181,11 @@ async function collectRestoreTreePool() {
 }
 
 async function hydrateWindow(windowId, tabs, options = {}) {
-  const previous = options.previousTree || null;
+  const incognito = !!options.incognito || !!state.privateWindowIds?.has(windowId)
+    || tabs.some((tab) => !!tab.incognito);
+  const candidate = options.previousTree || null;
+  const previous = candidate && isPrivateRestoreTree(candidate) === incognito
+    && (!incognito || candidate.windowId === windowId) ? candidate : null;
   const previousScore = Number.isFinite(options.previousScore) ? options.previousScore : 0;
   const shouldAdoptRestoreArchiveId = !!previous
     && previousScore >= LOW_CONFIDENCE_RESTORE_SCORE
@@ -1140,7 +1198,7 @@ async function hydrateWindow(windowId, tabs, options = {}) {
       tree = buildTreeFromTabs(tabs, previous);
       source = "previous";
     } else {
-      tree = inferTreeFromSyncSnapshot(windowId, tabs, state.syncSnapshot);
+      tree = incognito ? null : inferTreeFromSyncSnapshot(windowId, tabs, state.syncSnapshot);
       if (tree) {
         source = "sync";
       } else {
@@ -1155,6 +1213,7 @@ async function hydrateWindow(windowId, tabs, options = {}) {
   const hydrated = await treeWithCurrentGroupMetadata(windowId, tree);
   setWindowTree({
     ...hydrated,
+    incognito,
     restoreScore: previousScore,
     restoreSource: source,
     restoreStartupPending: tabs.length > 0,
@@ -1169,22 +1228,17 @@ async function hydrateWindow(windowId, tabs, options = {}) {
   };
 }
 
-async function attemptLowConfidenceRehydrate(windowId, candidatePool, options = {}) {
+async function attemptLowConfidenceRehydrate(windowId, assignment, options = {}) {
   if (!Number.isInteger(windowId)) {
     return;
   }
   const currentTree = state.windows[windowId];
-  if (!currentTree) {
+  if (!currentTree || modifiedRestoreWindowIds.has(windowId)) {
     return;
   }
   const isFinalAttempt = !!options.isFinalAttempt;
 
-  let tabs = [];
-  try {
-    tabs = await chrome.tabs.query({ windowId });
-  } catch {
-    return;
-  }
+  const tabs = options.tabs || [];
   if (!tabs.length) {
     return;
   }
@@ -1194,19 +1248,8 @@ async function attemptLowConfidenceRehydrate(windowId, candidatePool, options = 
   const currentRestoreIsWeak = currentTree.restoreSource !== "previous"
     || currentRestoreScore < LOW_CONFIDENCE_RESTORE_SCORE;
   const startupPending = !!currentTree.restoreStartupPending;
-  const candidates = (candidatePool || []).filter((tree) =>
-    Number.isInteger(tree?.windowId) && tree?.nodes
-  );
-
-  let bestTree = null;
-  let bestScore = 0;
-  for (const candidate of candidates) {
-    const score = scorePreviousTreeAgainstTabs(candidate, tabs);
-    if (score > bestScore) {
-      bestScore = score;
-      bestTree = candidate;
-    }
-  }
+  const bestTree = assignment?.tree || null;
+  const bestScore = assignment?.score || 0;
 
   if (!bestTree || bestScore < LOW_CONFIDENCE_RESTORE_SCORE) {
     if (startupPending && isFinalAttempt) {
@@ -1225,8 +1268,11 @@ async function attemptLowConfidenceRehydrate(windowId, candidatePool, options = 
 
   const rebuilt = buildTreeFromTabs(tabs, bestTree);
   const withGroups = await treeWithCurrentGroupMetadata(windowId, rebuilt);
+  // The window may close or change while group metadata is being read.
+  if (state.windows[windowId] !== currentTree || modifiedRestoreWindowIds.has(windowId)) return;
   setWindowTree({
     ...withGroups,
+    incognito: isPrivateRestoreTree(currentTree),
     restoreScore: bestScore,
     restoreSource: "previous",
     restoreStartupPending: !isFinalAttempt
@@ -1247,8 +1293,20 @@ function scheduleStartupReconcile(windowIds) {
     setTimeout(() => {
       queueMutationFireAndForget(null, async () => {
         const candidatePool = await collectRestoreTreePool();
-        for (const windowId of targets) {
-          await attemptLowConfidenceRehydrate(windowId, candidatePool, {
+        const currentWindows = await Promise.all(targets.map(async (windowId) => {
+          try {
+            return { id: windowId, tabs: await chrome.tabs.query({ windowId }) };
+          } catch {
+            return null;
+          }
+        }));
+        const availableWindows = currentWindows.filter(Boolean);
+        // Reuse the startup one-to-one assignment; independently selecting each
+        // window's best record can clone one archive into multiple windows.
+        const assignments = assignBestPreviousTrees(availableWindows, candidatePool);
+        for (const win of availableWindows) {
+          await attemptLowConfidenceRehydrate(win.id, assignments.get(win.id), {
+            tabs: win.tabs,
             isFinalAttempt: delayMs === finalDelayMs
           });
         }
@@ -1276,7 +1334,8 @@ async function hydrateAllWindows(windows, previousTrees = []) {
 
     const result = await hydrateWindow(win.id, tabs, {
       previousTree,
-      previousScore
+      previousScore,
+      incognito: !!win.incognito
     });
     if (tabs.length && (result.source !== "empty")) {
       reconcileWindows.push(win.id);
@@ -1292,6 +1351,8 @@ const ensureInitialized = createInitCoordinator({
     state.settings = await loadSettings();
     state.syncSnapshot = await loadSyncSnapshot();
     const windows = await chrome.windows.getAll({ populate: true });
+    state.privateWindowIds = new Set(windows.filter((win) => win.incognito || win.tabs?.some((tab) => tab.incognito)).map((win) => win.id));
+    await prunePrivateWindowTrees([...state.privateWindowIds]);
     const previousTrees = await collectRestoreTreePool();
     state.startupRestoreTrees = previousTrees;
     await hydrateAllWindows(windows, previousTrees);
@@ -1550,6 +1611,27 @@ async function batchGroupExisting(tabIds, groupId, windowIdHint = null) {
   await refreshGroupMetadata(targetWindowId);
 }
 
+async function moveTreeBlocksInBrowser(windowId, nextTree, moveTabIds) {
+  for (const plan of subtreeBlockMovePlan(nextTree, moveTabIds)) {
+    if (Number.isFinite(plan.targetTabId)) {
+      if (!await moveTabsRelativeToTarget(windowId, plan.tabIds, plan.targetTabId, plan.placement)) {
+        return false;
+      }
+      continue;
+    }
+    // This pinned/unpinned zone contains only moving tabs and has no anchor.
+    for (const [offset, tabId] of plan.tabIds.entries()) {
+      try {
+        await chrome.tabs.move(tabId, { index: plan.index + offset });
+      } catch (error) {
+        logUnexpectedFailure("moveTreeBlocks.moveTab", error, { windowId, tabId });
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 async function batchMoveToRoot(tabIds, options = {}) {
   const placement = options.placement === "before" || options.placement === "after"
     ? options.placement
@@ -1560,16 +1642,15 @@ async function batchMoveToRoot(tabIds, options = {}) {
   const undoByWindow = [];
   for (const [windowId, orderedTabIds] of grouped.entries()) {
     const tree = windowTree(windowId);
-    let orderedNodeIds = orderedTabIds
+    let orderedNodeIds = dedupeRootNodeIds(tree, orderedTabIds
       .map((id) => nodeIdFromTabId(id))
-      .filter((nodeId) => !!tree.nodes[nodeId]);
+      .filter((nodeId) => !!tree.nodes[nodeId]));
     if (!orderedNodeIds.length) {
       continue;
     }
 
     let targetNodeId = null;
     let hasRelativePlacement = false;
-    let browserMoveIndex = -1;
     if (placement && Number.isFinite(targetTabId)) {
       const liveTargetTab = await getTab(targetTabId);
       if (!liveTargetTab || liveTargetTab.windowId !== windowId) {
@@ -1578,26 +1659,13 @@ async function batchMoveToRoot(tabIds, options = {}) {
       }
       targetNodeId = nodeIdFromTabId(targetTabId);
       const targetNode = tree.nodes[targetNodeId];
-      if (targetNode && !targetNode.parentNodeId) {
-        orderedNodeIds = orderedNodeIds.filter((nodeId) =>
-          nodeId !== targetNodeId && !!tree.nodes[nodeId] && !!tree.nodes[nodeId].pinned === !!targetNode.pinned
-        );
-        hasRelativePlacement = true;
-
-        let windowTabs = [];
-        try {
-          windowTabs = await chrome.tabs.query({ windowId });
-        } catch {
-          windowTabs = [];
-        }
-        const moveTabIds = tabIdsForNodeBlocks(tree, orderedNodeIds);
-        browserMoveIndex = browserInsertionIndexForRelativePlacement(
-          windowTabs,
-          moveTabIds,
-          targetTabId,
-          placement
-        );
+      if (!targetNode || targetNode.parentNodeId) {
+        continue;
       }
+      orderedNodeIds = orderedNodeIds.filter((nodeId) =>
+        nodeId !== targetNodeId && !!tree.nodes[nodeId] && !!tree.nodes[nodeId].pinned === !!targetNode.pinned
+      );
+      hasRelativePlacement = true;
     }
 
     if (!orderedNodeIds.length) {
@@ -1635,20 +1703,7 @@ async function batchMoveToRoot(tabIds, options = {}) {
       }
     }
     const moveTabIds = tabIdsForNodeBlocks(next, orderedNodeIds);
-    let movedInBrowser = !moveTabIds.length;
-    if (moveTabIds.length) {
-      if (hasRelativePlacement && Number.isFinite(targetTabId) && placement) {
-        movedInBrowser = await moveTabsRelativeToTarget(windowId, moveTabIds, targetTabId, placement);
-      } else {
-        try {
-          await chrome.tabs.move(moveTabIds, { index: browserMoveIndex });
-          movedInBrowser = true;
-        } catch (error) {
-          logUnexpectedFailure("batchMoveToRoot.moveTabs", error, { windowId, tabIds: moveTabIds });
-          movedInBrowser = false;
-        }
-      }
-    }
+    const movedInBrowser = await moveTreeBlocksInBrowser(windowId, next, moveTabIds);
 
     if (movedInBrowser) {
       setWindowTree(next);
@@ -1686,9 +1741,9 @@ async function batchReparent(tabIds, newParentTabId, options = {}) {
     .filter((tab) => tab && tab.windowId === parentTab.windowId && tab.id !== newParentTabId)
     .map((tab) => tab.id);
 
-  let orderedNodeIds = sameWindowTabIds
+  const orderedNodeIds = dedupeRootNodeIds(tree, sameWindowTabIds
     .map((id) => nodeIdFromTabId(id))
-    .filter((id) => !!tree.nodes[id]);
+    .filter((id) => !!tree.nodes[id]));
   if (!orderedNodeIds.length) {
     return;
   }
@@ -1708,7 +1763,6 @@ async function batchReparent(tabIds, newParentTabId, options = {}) {
     tabIdsForNodeBlocks(tree, reparentableNodeIds)
   );
 
-  let browserMoveIndex = childInsertIndex(tree, parentNodeId, parentTab.index + 1);
   let targetNodeId = null;
   let hasRelativePlacement = false;
 
@@ -1726,23 +1780,10 @@ async function batchReparent(tabIds, newParentTabId, options = {}) {
       && targetNode.parentNodeId === parentNodeId
       && !reparentableNodeIds.includes(targetNodeId);
 
-    if (targetIsSibling) {
-      hasRelativePlacement = true;
-
-      let windowTabs = [];
-      try {
-        windowTabs = await chrome.tabs.query({ windowId: parentTab.windowId });
-      } catch {
-        windowTabs = [];
-      }
-      const moveTabIds = tabIdsForNodeBlocks(tree, reparentableNodeIds);
-      browserMoveIndex = browserInsertionIndexForRelativePlacement(
-        windowTabs,
-        moveTabIds,
-        targetTabId,
-        placement
-      );
+    if (!targetIsSibling) {
+      return null;
     }
+    hasRelativePlacement = true;
   }
 
   let next = tree;
@@ -1771,24 +1812,7 @@ async function batchReparent(tabIds, newParentTabId, options = {}) {
     }
   }
   const moveTabIds = tabIdsForNodeBlocks(next, reparentableNodeIds);
-  let movedInBrowser = !moveTabIds.length;
-  if (moveTabIds.length) {
-    if (hasRelativePlacement && Number.isFinite(targetTabId) && placement) {
-      movedInBrowser = await moveTabsRelativeToTarget(parentTab.windowId, moveTabIds, targetTabId, placement);
-    } else {
-      try {
-        await chrome.tabs.move(moveTabIds, { index: browserMoveIndex });
-        movedInBrowser = true;
-      } catch (error) {
-        logUnexpectedFailure("batchReparent.moveTabs", error, {
-          windowId: parentTab.windowId,
-          tabIds: moveTabIds,
-          parentTabId: newParentTabId
-        });
-        movedInBrowser = false;
-      }
-    }
-  }
+  const movedInBrowser = await moveTreeBlocksInBrowser(parentTab.windowId, next, moveTabIds);
 
   if (movedInBrowser) {
     setWindowTree(next);
@@ -2263,6 +2287,26 @@ async function handleTreeAction(payload) {
   }
 
   try {
+    if (type !== TREE_ACTIONS.ACTIVATE_TAB) {
+      const tabIds = new Set([
+        ...(Array.isArray(safePayload.tabIds) ? safePayload.tabIds : []),
+        safePayload.tabId, safePayload.parentTabId, safePayload.newParentTabId, safePayload.targetTabId
+      ].filter(Number.isInteger));
+      const groupIds = [safePayload.groupId, safePayload.sourceGroupId, safePayload.targetGroupId]
+        .filter(Number.isInteger);
+      let identified = false;
+      for (const tree of Object.values(state.windows)) {
+        if (tree.windowId === safePayload.windowId
+          || [...tabIds].some((tabId) => !!tree.nodes[nodeIdFromTabId(tabId)])
+          || groupIds.some((groupId) => !!tree.groups?.[groupId])) {
+          markWindowRestoreModified(tree.windowId);
+          identified = true;
+        }
+      }
+      if (!identified && typeof handler.resolveWindowId === "function") {
+        markWindowRestoreModified(await handler.resolveWindowId(safePayload));
+      }
+    }
     return await handler.run(safePayload);
   } catch (error) {
     if (error instanceof Error && !error.actionType) {
@@ -2293,6 +2337,7 @@ async function promoteActiveTab() {
   const fallbackIndex = Number.isFinite(parent.index) ? parent.index + 1 : active.index;
   const browserIndex = childInsertIndex(tree, parent.nodeId, fallbackIndex);
 
+  markWindowRestoreModified(active.windowId);
   try {
     await chrome.tabs.move(active.id, { index: browserIndex });
   } catch {
@@ -2327,6 +2372,7 @@ async function moveActiveUnderPreviousRootSibling() {
   const fallbackIndex = Number.isFinite(previousRootNode.index) ? previousRootNode.index + 1 : active.index;
   const browserIndex = childInsertIndex(tree, previousRoot, fallbackIndex);
 
+  markWindowRestoreModified(active.windowId);
   try {
     await chrome.tabs.move(active.id, { index: browserIndex });
   } catch {
@@ -2343,6 +2389,7 @@ async function toggleActiveNodeCollapse() {
   if (!active) {
     return;
   }
+  markWindowRestoreModified(active.windowId);
   const tree = windowTree(active.windowId);
   setWindowTree(toggleNodeCollapsed(tree, nodeIdFromTabId(active.id)));
 }
@@ -2684,6 +2731,8 @@ chrome.windows.onRemoved.addListener((windowId) => {
       logUnexpectedFailure("storage.archiveWindow", error, { windowId });
     }
     delete state.windows[windowId];
+    // Remember private IDs for this worker lifetime so delayed recovery cannot
+    // reinterpret an old, unmarked private record as regular after its close.
     delete state.restoreArchiveIds[windowId];
     clearLastMove(windowId);
     persistCoordinator.forgetWindow(windowId);
@@ -2780,6 +2829,7 @@ chrome.commands.onCommand.addListener((command) => {
     if (command === "add-child-tab") {
       const active = await getActiveTab();
       if (active) {
+        markWindowRestoreModified(active.windowId);
         await addChildTab(active.id);
       }
       return;

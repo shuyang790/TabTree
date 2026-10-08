@@ -27,21 +27,6 @@ function isDescendant(tree, ancestorNodeId, maybeDescendantNodeId) {
   return false;
 }
 
-function subtreeMaxIndex(tree, rootNodeId) {
-  let max = tree.nodes[rootNodeId]?.index ?? 0;
-  const stack = [...(tree.nodes[rootNodeId]?.childNodeIds || [])];
-  while (stack.length) {
-    const current = stack.pop();
-    const node = tree.nodes[current];
-    if (!node) {
-      continue;
-    }
-    max = Math.max(max, node.index);
-    stack.push(...node.childNodeIds);
-  }
-  return max;
-}
-
 function sampleTree() {
   return {
     rootNodeIds: ["tab:1", "tab:2", "tab:3"],
@@ -195,8 +180,7 @@ test("buildDropPayload returns batch root payload for multi-select root placemen
     sourceTabIds: [1, 3],
     targetTabId: 2,
     position: "after",
-    nodeIdFromTabId,
-    subtreeMaxIndex
+    nodeIdFromTabId
   });
 
   assert.deepEqual(payload, {
@@ -207,28 +191,26 @@ test("buildDropPayload returns batch root payload for multi-select root placemen
   });
 });
 
-test("buildDropPayload returns single-tab inside reparent payload", () => {
+test("buildDropPayload routes single-tab inside drops through subtree block reparenting", () => {
   const tree = sampleTree();
   const payload = buildDropPayload({
     tree,
     sourceTabIds: [3],
     targetTabId: 2,
     position: "inside",
-    nodeIdFromTabId,
-    subtreeMaxIndex
+    nodeIdFromTabId
   });
 
   assert.deepEqual(payload, {
-    type: TREE_ACTIONS.REPARENT_TAB,
-    tabId: 3,
+    type: TREE_ACTIONS.BATCH_REPARENT,
+    tabIds: [3],
     targetTabId: 2,
     newParentTabId: 2,
-    newIndex: 1,
-    browserIndex: 3
+    placement: "inside"
   });
 });
 
-test("buildDropPayload adjusts browser index for non-adjacent inside reparent", () => {
+test("buildDropPayload leaves non-adjacent inside placement to the background tree", () => {
   const tree = {
     rootNodeIds: ["tab:1", "tab:2", "tab:3", "tab:5"],
     nodes: {
@@ -244,55 +226,51 @@ test("buildDropPayload adjusts browser index for non-adjacent inside reparent", 
     sourceTabIds: [1],
     targetTabId: 3,
     position: "inside",
-    nodeIdFromTabId,
-    subtreeMaxIndex
+    nodeIdFromTabId
   });
 
   assert.deepEqual(payload, {
-    type: TREE_ACTIONS.REPARENT_TAB,
-    tabId: 1,
+    type: TREE_ACTIONS.BATCH_REPARENT,
+    tabIds: [1],
     targetTabId: 3,
     newParentTabId: 3,
-    newIndex: 1,
-    browserIndex: 3
+    placement: "inside"
   });
 });
 
-test("buildDropPayload adjusts browser index for root before move when source is before target", () => {
+test("buildDropPayload routes root before placement through subtree blocks", () => {
   const tree = sampleTree();
   const payload = buildDropPayload({
     tree,
     sourceTabIds: [1],
     targetTabId: 3,
     position: "before",
-    nodeIdFromTabId,
-    subtreeMaxIndex
+    nodeIdFromTabId
   });
 
   assert.deepEqual(payload, {
-    type: TREE_ACTIONS.MOVE_TO_ROOT,
-    tabId: 1,
-    index: 1,
-    browserIndex: 1
+    type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
+    tabIds: [1],
+    targetTabId: 3,
+    placement: "before"
   });
 });
 
-test("buildDropPayload keeps browser index unchanged when source is after target", () => {
+test("buildDropPayload routes backwards root placement through subtree blocks", () => {
   const tree = sampleTree();
   const payload = buildDropPayload({
     tree,
     sourceTabIds: [4],
     targetTabId: 2,
     position: "before",
-    nodeIdFromTabId,
-    subtreeMaxIndex
+    nodeIdFromTabId
   });
 
   assert.deepEqual(payload, {
-    type: TREE_ACTIONS.MOVE_TO_ROOT,
-    tabId: 4,
-    index: 1,
-    browserIndex: 1
+    type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
+    tabIds: [4],
+    targetTabId: 2,
+    placement: "before"
   });
 });
 
@@ -313,9 +291,9 @@ test("dropModel works with default helper dependencies", () => {
     position: "after"
   });
   assert.deepEqual(payload, {
-    type: TREE_ACTIONS.MOVE_TO_ROOT,
-    tabId: 1,
-    index: 2,
-    browserIndex: 2
+    type: TREE_ACTIONS.BATCH_MOVE_TO_ROOT,
+    tabIds: [1],
+    targetTabId: 3,
+    placement: "after"
   });
 });

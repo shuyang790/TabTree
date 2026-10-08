@@ -227,6 +227,7 @@ const state = {
     groupId: null,
     windowId: null,
     renameOpen: false,
+    renameDraft: null,
     groupSearchActive: false,
     groupSearchQuery: "",
     returnTabId: null
@@ -357,6 +358,7 @@ function resetContextMenuState() {
     groupId: null,
     windowId: null,
     renameOpen: false,
+    renameDraft: null,
     groupSearchActive: false,
     groupSearchQuery: "",
     returnTabId: null
@@ -877,6 +879,7 @@ function openTabContextMenu(event, tabId) {
     groupId: null,
     windowId: currentWindowTree()?.windowId || null,
     renameOpen: false,
+    renameDraft: null,
     groupSearchActive: false,
     groupSearchQuery: "",
     returnTabId: tabId
@@ -898,6 +901,7 @@ function openGroupContextMenu(event, groupId, windowId) {
     groupId,
     windowId,
     renameOpen: false,
+    renameDraft: null,
     groupSearchActive: false,
     groupSearchQuery: "",
     returnTabId: null
@@ -966,6 +970,7 @@ async function executeContextMenuAction(action) {
 
   if (intent.kind === "open-rename-group") {
     state.contextMenu.renameOpen = true;
+    state.contextMenu.renameDraft = tree.groups?.[state.contextMenu.groupId]?.title || "";
     renderContextMenu();
     return;
   }
@@ -1354,9 +1359,12 @@ function buildGroupContextMenu(tree) {
     const input = document.createElement("input");
     input.className = "context-rename-input";
     input.name = "group-title";
-    input.value = group?.title || "";
+    input.value = state.contextMenu.renameDraft ?? group?.title ?? "";
     input.placeholder = t("groupNamePlaceholder", [], "Group name");
     input.autocomplete = "off";
+    input.addEventListener("input", () => {
+      state.contextMenu.renameDraft = input.value;
+    });
     input.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -1427,6 +1435,14 @@ function renderContextMenu() {
   }
 
   const activeElement = document.activeElement;
+  const previousRenameInput = dom.contextMenu.querySelector(".context-rename-input");
+  const renameHadFocus = previousRenameInput === activeElement;
+  const renameSelection = renameHadFocus ? {
+    start: previousRenameInput.selectionStart,
+    end: previousRenameInput.selectionEnd,
+    direction: previousRenameInput.selectionDirection
+  } : null;
+  const renameApplyHadFocus = activeElement?.classList?.contains("context-rename-apply");
   const restoreGroupSearchFocus = activeElement?.classList?.contains("context-group-search-input");
   const groupSearchSelectionStart = restoreGroupSearchFocus ? activeElement.selectionStart : null;
   const groupSearchSelectionEnd = restoreGroupSearchFocus ? activeElement.selectionEnd : null;
@@ -1477,9 +1493,15 @@ function renderContextMenu() {
 
   if (state.contextMenu.renameOpen) {
     const input = dom.contextMenu.querySelector(".context-rename-input");
-    if (input) {
-      input.focus();
-      input.select();
+    if (input && (!previousRenameInput || renameHadFocus)) {
+      input.focus({ preventScroll: true });
+      if (renameSelection) {
+        input.setSelectionRange(renameSelection.start, renameSelection.end, renameSelection.direction);
+      } else {
+        input.select();
+      }
+    } else if (renameApplyHadFocus) {
+      dom.contextMenu.querySelector(".context-rename-apply")?.focus({ preventScroll: true });
     }
   } else if (restoreGroupSearchFocus) {
     const input = dom.contextMenu.querySelector(".context-group-search-input");
@@ -3005,7 +3027,13 @@ function clearVirtualHeightCache() {
 }
 
 function renderVirtualTree(tree, query, visibilityByNodeId, summary = null) {
-  dom.treeRoot.innerHTML = "";
+  const viewportTop = dom.treeRoot.scrollTop;
+  const viewportHeight = Math.max(dom.treeRoot.clientHeight, approxRowHeightPx() * 6);
+  const previousFocus = dom.treeRoot.contains(document.activeElement) ? document.activeElement : null;
+  const previousFocusedRow = previousFocus?.closest(".tree-row[data-tab-id]");
+  const previousFocusedTabId = previousFocusedRow ? Number(previousFocusedRow.dataset.tabId) : null;
+  const previousFocusedAction = previousFocus?.closest("[data-action]")?.dataset.action;
+  const previousFocusedGroupId = previousFocus?.closest(".group-header[data-group-id]")?.dataset.groupId;
   dom.treeRoot.classList.toggle("hide-favicons", !state.settings?.showFavicons);
   dom.treeRoot.classList.add("virtualized");
 
@@ -3017,7 +3045,7 @@ function renderVirtualTree(tree, query, visibilityByNodeId, summary = null) {
     const empty = document.createElement("div");
     empty.className = "empty";
     empty.textContent = t("noTabsInWindow", [], "No tabs in this window.");
-    dom.treeRoot.appendChild(empty);
+    dom.treeRoot.replaceChildren(empty);
     state.virtualModeActive = false;
     state.virtualLayout = null;
     updateLastRenderedState(tree);
@@ -3026,8 +3054,6 @@ function renderVirtualTree(tree, query, visibilityByNodeId, summary = null) {
     return;
   }
 
-  const viewportTop = dom.treeRoot.scrollTop;
-  const viewportHeight = Math.max(dom.treeRoot.clientHeight, approxRowHeightPx() * 6);
   const viewportStart = Math.max(0, viewportTop - VIRTUALIZE_OVERSCAN_PX);
   const viewportEnd = viewportTop + viewportHeight + VIRTUALIZE_OVERSCAN_PX;
 
@@ -3072,20 +3098,26 @@ function renderVirtualTree(tree, query, visibilityByNodeId, summary = null) {
     offset += estimatedHeight;
   }
 
+  const rendered = document.createDocumentFragment();
   if (firstVisibleOffset && firstVisibleOffset > 0) {
-    dom.treeRoot.appendChild(createVirtualSpacer(firstVisibleOffset));
+    rendered.appendChild(createVirtualSpacer(firstVisibleOffset));
   }
-  dom.treeRoot.appendChild(fragment);
+  rendered.appendChild(fragment);
   if (lastVisibleEnd !== null && offset > lastVisibleEnd) {
-    dom.treeRoot.appendChild(createVirtualSpacer(offset - lastVisibleEnd));
+    rendered.appendChild(createVirtualSpacer(offset - lastVisibleEnd));
   }
 
   if (measuredEntries.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty";
     empty.textContent = t("noTabsInWindow", [], "No tabs in this window.");
-    dom.treeRoot.appendChild(empty);
+    rendered.appendChild(empty);
   }
+
+  // Replace the viewport in one operation, keeping its scroll position while
+  // rows are measured. An empty intermediate tree clamps scrollTop to zero.
+  dom.treeRoot.replaceChildren(rendered);
+  dom.treeRoot.scrollTop = viewportTop;
 
   for (const { key, element } of measuredEntries) {
     const measuredHeight = element.offsetHeight;
@@ -3102,7 +3134,19 @@ function renderVirtualTree(tree, query, visibilityByNodeId, summary = null) {
   state.virtualModeActive = shouldUseVirtualTreeRender(tree, query, totalVisibleRows);
   updateLastRenderedState(tree);
   refreshVisibleTabIds();
-  setTreeRowTabStop(state.focusedTabId);
+  const tabStop = setTreeRowTabStop(previousFocusedTabId ?? state.focusedTabId);
+  if (previousFocus) {
+    const row = Number.isFinite(previousFocusedTabId)
+      ? dom.treeRoot.querySelector(`.tree-row[data-tab-id="${previousFocusedTabId}"]`)
+      : null;
+    const action = row && previousFocusedAction
+      ? row.querySelector(`[data-action="${previousFocusedAction}"]`)
+      : null;
+    const groupHeader = previousFocusedGroupId
+      ? dom.treeRoot.querySelector(`.group-header[data-group-id="${previousFocusedGroupId}"]`)
+      : null;
+    (action || row || groupHeader || tabStop)?.focus({ preventScroll: true });
+  }
 }
 
 function shouldFullRebuild(tree) {
@@ -3731,6 +3775,11 @@ function bindEvents() {
       }
       event.preventDefault();
       await toggleGroupCollapsedFromHeader(header);
+      return;
+    }
+
+    // Native controls inside a row keep their own Enter/Space activation.
+    if (event.target.closest("button, input, select, textarea, a[href]")) {
       return;
     }
 
